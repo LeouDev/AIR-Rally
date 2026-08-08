@@ -5,26 +5,27 @@ import Link from "next/link";
 import { ArrowLeft, MailCheck } from "lucide-react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-const forgotPasswordSchema = z.object({
-  email: z.email("Enter a valid email address"),
-});
-
-type ForgotPasswordValues = z.infer<typeof forgotPasswordSchema>;
+import { requestPasswordReset } from "@/lib/actions/auth";
+import { forgotPasswordSchema, type ForgotPasswordValues } from "@/lib/validations/auth";
 
 export default function ForgotPasswordPage() {
   const [submitted, setSubmitted] = useState(false);
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<ForgotPasswordValues>({ resolver: zodResolver(forgotPasswordSchema) });
 
-  function onSubmit() {
+  async function onSubmit(values: ForgotPasswordValues) {
+    const result = await requestPasswordReset(values);
+    if (!result.success) {
+      setError("root", { message: result.error });
+      return;
+    }
     setSubmitted(true);
   }
 
@@ -36,8 +37,7 @@ export default function ForgotPasswordPage() {
         </div>
         <h1 className="mt-4 text-xl font-semibold text-foreground">Check your email</h1>
         <p className="mt-1.5 text-sm text-muted-foreground">
-          Password resets aren&apos;t connected yet — this screen is a Phase 1 preview of what
-          you&apos;ll see once account recovery ships.
+          If an account exists for that email, we&apos;ve sent a link to reset your password.
         </p>
         <Button asChild variant="outline" className="mt-6 gap-1.5">
           <Link href="/login">
@@ -70,8 +70,10 @@ export default function ForgotPasswordPage() {
           {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
         </div>
 
+        {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+
         <Button type="submit" className="mt-2 h-11" disabled={isSubmitting}>
-          Send Reset Link
+          {isSubmitting ? "Sending…" : "Send Reset Link"}
         </Button>
       </form>
 

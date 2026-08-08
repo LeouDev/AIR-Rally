@@ -40,16 +40,52 @@ These were explicitly out of scope per the project brief, to avoid a foundation 
 - Equipment marketplace
 - A live map (Google Maps / Mapbox) — `MapPlaceholder` stands in
 
-## Suggested Phase 2
+## Phase 2 — Authentication & Supabase Foundation (this repo)
 
-In rough priority order, based on what unblocks the most value next:
+Turns the Phase 1 shell into a real application foundation: authentication, user profiles, a full database schema, Row Level Security, and the start of venue owner onboarding. No booking engine or payments yet — see "Intentionally not implemented" below.
 
-1. **Supabase integration** — real courts/reviews/amenities data behind the existing `types/court.ts` contract; real auth sessions behind `lib/services/auth.ts`.
-2. **Real search** — connect the Explore filters and hero `SearchBar` to actual querying (currently client-side filtering over mock data).
-3. **Live map** — implement `MapProvider` (Google Maps or Mapbox) and swap it into `MapPlaceholder`'s call sites.
-4. **Real booking flow** — a booking record, conflict handling for double-booked slots, and a functioning `/bookings` list.
-5. **Payments** — implement `PaymentProvider` with Stripe behind `BookingPanel`'s existing call to `createCheckout`.
-6. **Venue owner onboarding** — the actual "List Your Court" flow (venue creation, court/schedule management), replacing today's marketing-only page.
-7. **Reviews** — letting players actually submit a review after a completed booking.
+**Built:**
 
-Phase 2 should not need to restructure routing, the design system, or the mock-data-shaped types — those were built to absorb a real backend without a rewrite.
+- Supabase client architecture: separate browser/server clients, `proxy.ts` session refresh (Next 16 renamed `middleware.ts` → `proxy.ts`), safe read-only auth helpers — [ARCHITECTURE.md](./ARCHITECTURE.md#supabase-client-architecture-srclibsupabase)
+- Full database schema as numbered SQL migrations: `profiles`, `venues`, `courts`, `amenities`, `venue_amenities`, `court_images`, `favorites`, `reviews` — [ARCHITECTURE.md](./ARCHITECTURE.md#how-to-run-migrations)
+- Row Level Security on every table, no "allow everything" policies — [ARCHITECTURE.md](./ARCHITECTURE.md#rls-strategy)
+- Role system (`player` / `venue_owner` / `admin`) with self-escalation blocked at the database layer, not just the client — [ARCHITECTURE.md](./ARCHITECTURE.md#role-system-and-authorization)
+- Real Supabase Auth: sign up (with email confirmation handling), sign in, sign out, forgot/reset password, session persistence — wired into the existing Phase 1 auth screens without redesigning them
+- Protected routes (`/profile`, `/bookings`, `/favorites`) with redirect-back-after-login (`?redirect=`)
+- Auth-aware navigation: signed-out (Sign In / Get Started) vs. signed-in (avatar menu with Profile/Bookings/Favorites/Logout)
+- Real profile page: view + edit (first/last/display name, phone, avatar URL), backed by Postgres
+- Venue owner onboarding: `/list-your-court` now includes a real draft-venue form (saves as `status = 'draft'`) plus a list of the signed-in owner's existing venues
+- Services/repository layer (`lib/services/{profiles,favorites,venues,courts,reviews}.ts`) as the seam for eventually swapping Explore/Court Details off mock data — [ARCHITECTURE.md](./ARCHITECTURE.md#mock-data-srclibmock-data-and-the-services-layer-srclibservices)
+- Friendly error messages everywhere (`lib/errors.ts`) — raw Postgres/Supabase errors never reach the UI
+- Zod validation shared between client forms and server actions (never trusting client validation alone)
+- The whole app still runs and builds with **zero environment variables** — every Supabase-touching code path degrades to a signed-out/not-configured state instead of crashing
+- 57 Jest tests (up from 7): validation schemas, the favorites/profiles services against a mocked Supabase client, the friendly-error mapper, and the proxy's real redirect behavior via an actual `NextRequest`
+- TypeScript strict mode, ESLint, production build all passing
+
+## Intentionally not implemented (Phase 2)
+
+Explicitly out of scope per the project brief:
+
+- Real bookings, availability engine, or booking conflicts
+- Payments / Stripe / payouts
+- Cancellation policies or dynamic pricing
+- Notifications, Open Play, coach marketplace, tournaments, leagues, AI matchmaking
+- Owner analytics or a full owner dashboard (only draft venue creation exists)
+- Review *submission* through the UI (the `reviews` table and RLS policies exist and are correct, but nothing calls insert yet — reviews are meant to attach to a completed booking, which doesn't exist until the booking engine does)
+- Avatar file upload (a URL field exists; Supabase Storage integration doesn't yet)
+- Explore/Court Details reading from Supabase instead of mock data (the services layer is ready; the UI swap is deferred)
+
+## Suggested Phase 3
+
+In rough priority order:
+
+1. **Booking engine** — a `bookings` table, availability/conflict handling, and a real `/bookings` list. This is also what unblocks review submission (reviews should attach to a completed booking).
+2. **Mock data → Supabase swap** — point Explore, the landing page, and Court Details at `lib/services/venues.ts` / `courts.ts` instead of `lib/mock-data`. The services and RLS policies already exist (Phase 2); this is UI rewiring, not new backend work.
+3. **Real search** — connect the Explore filters and hero `SearchBar` to actual querying once #2 is done.
+4. **Payments** — implement `PaymentProvider` with Stripe behind `BookingPanel`'s existing call to `createCheckout`.
+5. **Live map** — implement `MapProvider` (Google Maps or Mapbox) and swap it into `MapPlaceholder`'s call sites.
+6. **Supabase Storage** — real avatar and venue/court image upload, replacing the URL-paste field and populating `court_images`.
+7. **Owner dashboard** — court/schedule management for `venue_owner` accounts, building on the draft venues created in Phase 2.
+8. **Admin tooling** — a real UI for the venue approval flow (`draft`/`pending_review` → `active`) that today requires a direct SQL update.
+
+Phase 3 shouldn't need to restructure the database schema, RLS policies, or auth flow — those were built in Phase 2 to absorb a real booking engine without a rewrite.

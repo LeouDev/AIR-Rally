@@ -3,6 +3,15 @@ import type { Metadata } from "next";
 import { CalendarClock, LineChart, Users2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared/SectionHeader";
+import { VenueOnboardingForm } from "@/components/owner/VenueOnboardingForm";
+import { OwnerVenueList } from "@/components/owner/OwnerVenueList";
+import { getCurrentUser } from "@/lib/supabase/auth";
+import { createClient } from "@/lib/supabase/server";
+import { listVenuesByOwner } from "@/lib/services/venues";
+
+// Reads the current user's own venues via a cookie-scoped Supabase session
+// — must never be cached/shared across visitors like a static page would be.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "List Your Court",
@@ -27,7 +36,10 @@ const BENEFITS = [
   },
 ];
 
-export default function ListYourCourtPage() {
+export default async function ListYourCourtPage() {
+  const user = await getCurrentUser();
+  const venues = user ? await listVenuesByOwner(await createClient(), user.id) : [];
+
   return (
     <div>
       <section className="bg-secondary text-secondary-foreground">
@@ -39,12 +51,29 @@ export default function ListYourCourtPage() {
             Join the marketplace built specifically for pickleball venues — reach more players and
             simplify how you manage bookings.
           </p>
-          <Button asChild size="lg" className="h-12 gap-2 rounded-full px-7 text-base">
-            <Link href="/signup">
-              Get Started
-              <ArrowRight className="size-4" />
-            </Link>
-          </Button>
+          {user ? (
+            <Button asChild size="lg" className="h-12 gap-2 rounded-full px-7 text-base">
+              <a href="#venue-form">
+                Get Started
+                <ArrowRight className="size-4" />
+              </a>
+            </Button>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <Button asChild size="lg" className="h-12 gap-2 rounded-full px-7 text-base">
+                <Link href="/signup">
+                  Get Started
+                  <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+              <p className="text-sm text-secondary-foreground/70">
+                Already have an account?{" "}
+                <Link href="/login?redirect=/list-your-court" className="font-medium underline underline-offset-2">
+                  Sign in
+                </Link>
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -69,12 +98,19 @@ export default function ListYourCourtPage() {
           ))}
         </div>
 
-        <div className="mt-12 rounded-2xl border border-dashed border-border bg-muted/40 p-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            Full venue management — listings, schedules, staff, and revenue reporting — arrives in a
-            later phase. Creating an account today reserves your spot for early access.
-          </p>
-        </div>
+        {user ? (
+          <div className="mx-auto mt-12 flex max-w-2xl flex-col gap-8">
+            <OwnerVenueList venues={venues} />
+            <VenueOnboardingForm />
+          </div>
+        ) : (
+          <div className="mt-12 rounded-2xl border border-dashed border-border bg-muted/40 p-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              Create an account to save your venue as a draft. Full venue management — schedules,
+              staff, and revenue reporting — arrives in a later phase.
+            </p>
+          </div>
+        )}
       </section>
     </div>
   );

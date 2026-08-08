@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
-import { Button } from "@/components/ui/button";
+import { AuthNavSection } from "@/components/layout/AuthNavSection";
 
 const NAV_LINKS = [
   { href: "/explore", label: "Explore" },
@@ -26,14 +26,7 @@ export function Navbar() {
           ))}
         </nav>
 
-        <div className="hidden items-center gap-2 sm:flex">
-          <Button asChild variant="ghost">
-            <Link href="/login">Sign In</Link>
-          </Button>
-          <Button asChild>
-            <Link href="/signup">Get Started</Link>
-          </Button>
-        </div>
+        <AuthNavSection />
       </div>
     </header>
   );
