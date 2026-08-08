@@ -96,21 +96,6 @@ export async function signIn(values: LoginValues): Promise<ActionResult> {
   return { success: true, data: undefined };
 }
 
-export async function signOut(): Promise<ActionResult> {
-  const clientResult = await getServerClient();
-  if (!clientResult.ok) return { success: false, error: clientResult.error };
-  const supabase = clientResult.client;
-
-  const { error } = await supabase.auth.signOut();
-
-  if (error) {
-    logServerError("auth.signOut", error);
-    return { success: false, error: getFriendlyErrorMessage(error) };
-  }
-
-  return { success: true, data: undefined };
-}
-
 export async function requestPasswordReset(values: ForgotPasswordValues): Promise<ActionResult> {
   const parsed = forgotPasswordSchema.safeParse(values);
   if (!parsed.success) {

@@ -4,7 +4,7 @@
 
 Air/Rally is a marketplace for pickleball court discovery and booking — discover a court, see real availability, book it instantly. Think Airbnb's ease, Uber's simplicity, and the polish of a premium modern sports app, built specifically for pickleball.
 
-This repository is through **Phase 2: Authentication & Supabase Foundation** — real Supabase Auth, user profiles, a full database schema with Row Level Security, protected routes, and the beginning of venue owner onboarding, layered on top of the Phase 1 product shell. See [ROADMAP.md](./ROADMAP.md) for what's built versus what's still ahead.
+This repository is through **Phase 2.5: Real Supabase Connection & End-to-End Verification** — Phase 2's authentication, profiles, roles, and RLS have been connected to and verified against a real Supabase project (not just mocked), with live cross-account security testing. See [ROADMAP.md](./ROADMAP.md) for what's built versus what's still ahead.
 
 ## Tech stack
 
@@ -46,12 +46,14 @@ npm run test:watch  # Jest in watch mode
    ```bash
    cp .env.example .env.local
    ```
-4. Fill in `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from **Project Settings → API** in the Supabase dashboard. Both are safe to expose to the browser — the anon key only works within the Row Level Security policies defined in the migrations.
+4. Fill in `NEXT_PUBLIC_SUPABASE_URL` and a client key from **Project Settings → API** in the Supabase dashboard — either `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (current-generation, `sb_publishable_...`) or `NEXT_PUBLIC_SUPABASE_ANON_KEY` (legacy JWT format), whichever your project shows. Both are safe to expose to the browser — the client only works within the Row Level Security policies defined in the migrations.
 5. Restart `npm run dev`.
 
-That's it — sign-up, sign-in, password reset, the profile page, and venue draft creation now work against your project. See [ARCHITECTURE.md](./ARCHITECTURE.md) for how authentication, roles, and RLS fit together, and [How to create the first admin](./ARCHITECTURE.md#how-to-create-the-first-admin) for promoting an account.
+That's it — sign-up, sign-in, password reset, the profile page, and venue draft creation now work against your project. This exact flow has been verified end-to-end against a real Supabase project — see [ARCHITECTURE.md](./ARCHITECTURE.md#phase-25-real-supabase-connection--end-to-end-verification) for the verification results, how authentication/roles/RLS fit together, and [How to create the first admin](./ARCHITECTURE.md#how-to-create-the-first-admin) for promoting an account.
 
-No `SUPABASE_SERVICE_ROLE_KEY` is needed for anything in this repo today — see `.env.example`.
+No `SUPABASE_SECRET_KEY` (formerly "service role key") is needed for anything in this repo today — see `.env.example`.
+
+> **Free-tier email rate limits:** Supabase's built-in SMTP allows only a handful of auth emails per hour. If you hit "Too many attempts" while testing signup/password-reset repeatedly, wait for the limit to reset or add a custom SMTP provider in your project's Auth settings.
 
 ## Project structure
 
@@ -103,7 +105,7 @@ Source logo files live in [`brand-source/`](./brand-source) at the repo root (no
 
 ## What's real vs. mocked
 
-- **Real:** navigation, routing, responsive layout, Supabase email/password auth (sign up, sign in, sign out, password reset), user profiles (view + edit, backed by Postgres with RLS), protected routes, venue owner draft submission, search/filter UI on Explore (filters the mock dataset client-side), form validation on every form (client + server).
+- **Real, and verified against a live Supabase project:** navigation, routing, responsive layout, Supabase email/password auth (sign up, sign in, sign out, password reset), user profiles (view + edit, backed by Postgres with RLS), protected routes, venue owner draft submission, search/filter UI on Explore (filters the mock dataset client-side), form validation on every form (client + server). See [ARCHITECTURE.md](./ARCHITECTURE.md#phase-25-real-supabase-connection--end-to-end-verification) for what was specifically tested and how.
 - **Mocked:** all court/venue/review/amenity data shown on Explore, the landing page, and Court Details (`src/lib/mock-data`) — a real `venues`/`courts`/`reviews` schema exists in Supabase, but nothing reads from it in the UI yet; maps (static placeholder); payments (stub that reports "not connected yet"); avatar upload (URL field only, no Supabase Storage yet).
 
 Full breakdown in [ROADMAP.md](./ROADMAP.md).

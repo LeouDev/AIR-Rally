@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { signOut } from "@/lib/actions/auth";
+import { createClient } from "@/lib/supabase/client";
 
 type UserMenuProps = {
   displayName: string;
@@ -36,9 +36,22 @@ export function UserMenu({ displayName, email, avatarUrl }: UserMenuProps) {
 
   function handleLogout() {
     startTransition(async () => {
-      const result = await signOut();
-      if (!result.success) {
-        toast.error(result.error);
+      // Signing out through the *browser* client (rather than the
+      // signOut server action) matters here: it's what fires this
+      // client's own onAuthStateChange listeners — including the one in
+      // AuthNavSection — so the nav updates immediately instead of
+      // waiting on a server round-trip. It clears the same cookies the
+      // server reads (createBrowserClient falls back to document.cookie
+      // when no custom cookie adapter is given), so proxy.ts and Server
+      // Components see the signed-out state too.
+      let error: { message: string } | null = null;
+      try {
+        ({ error } = await createClient().auth.signOut());
+      } catch {
+        error = { message: "Sign-in isn't set up yet." };
+      }
+      if (error) {
+        toast.error(error.message || "We couldn't sign you out. Please try again.");
         return;
       }
       router.push("/");

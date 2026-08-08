@@ -75,6 +75,21 @@ Explicitly out of scope per the project brief:
 - Avatar file upload (a URL field exists; Supabase Storage integration doesn't yet)
 - Explore/Court Details reading from Supabase instead of mock data (the services layer is ready; the UI swap is deferred)
 
+## Phase 2.5 — Real Supabase Connection & End-to-End Verification (this repo)
+
+Connected the Phase 2 foundation to a real Supabase project (`hrpbjudsrqcgyrkkodop`) and verified it live instead of against mocks. See [ARCHITECTURE.md](./ARCHITECTURE.md#phase-25-real-supabase-connection--end-to-end-verification) for full detail.
+
+**Verified live:** signup (real `auth.users` + trigger-created `profiles` row, `role: player` by default), login, logout, session persistence, protected-route redirects, profile edit + persistence, self role-escalation blocked (live, via a direct `PATCH` attempt), venue status self-escalation blocked (live), IDOR/identity-spoofing attempts on `favorites` and `venues` rejected with `403`, anonymous-vs-owner venue/court visibility, full favorites CRUD + duplicate-prevention, cascading deletes.
+
+**Fixed:** a real logout bug live testing caught — the nav didn't update after logout because the sign-out server action and the browser's `onAuthStateChange` listener were talking to two different Supabase client instances. Also removed a dead Phase 1 file (`lib/services/auth.ts`) that code review caught during this pass.
+
+**Added:** support for Supabase's current-generation `sb_publishable_...` key format (checked first, falling back to the legacy JWT anon key) — `getSupabaseEnv()` now accepts either.
+
+**Known limitations:**
+- No live two-distinct-owner cross-account test — blocked by Supabase's free-tier email rate limit after earlier signup/reset testing. The identical `owner_id = auth.uid()` policy expression was already proven live via IDOR/spoofing tests on `INSERT`; this just wasn't independently re-confirmed with a second real session.
+- Password reset was verified through the request step (`resetPasswordForEmail` succeeds against the real API); full click-through completion wasn't independently confirmed due to Gmail's link-prescanning consuming the single-use link before manual click — a known Supabase + Gmail interaction, not an app-side issue.
+- Supabase CLI-based migrations weren't possible (`supabase login` needs an interactive browser callback this environment's shell can't provide) — migrations were applied via the SQL Editor instead, then independently verified against the live schema via the REST API.
+
 ## Suggested Phase 3
 
 In rough priority order:

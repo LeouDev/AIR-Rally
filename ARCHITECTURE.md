@@ -19,7 +19,7 @@ Phase 1 introduced three integration points that weren't built yet: maps, paymen
 
 - **`maps.ts`** — unchanged in Phase 2. `MapProvider` interface, `activeMapProvider` still `null`. `<MapPlaceholder />` renders instead of a live map.
 - **`payments.ts`** — unchanged. `PaymentProvider` interface with `createCheckout()`; the booking UI already calls it, the stub returns `{ status: "unavailable" }`.
-- **`auth.ts`** (the old `AuthProvider` interface) — **superseded in Phase 2**. It was deliberately unimplemented in Phase 1 with a note that Supabase Auth would replace it. That's now done: see [Authentication flow](#authentication-flow) below. The interface pattern itself was retired in favor of Supabase's own typed client, which already provides the right shape.
+- **`auth.ts`** (the old `AuthProvider` interface) — **removed in Phase 2.5**. It was deliberately unimplemented in Phase 1 with a note that Supabase Auth would replace it; Phase 2 did that (see [Authentication flow](#authentication-flow) below) but left the now-dead file in place. Phase 2.5's code review caught it — nothing imported it — and deleted it rather than leave an unused interface around whose `getSession()` method name is exactly the insecure pattern documented below (`getUser()` vs `getSession()`).
 
 ## Mock data (`src/lib/mock-data`) and the services layer (`src/lib/services`)
 
@@ -151,3 +151,48 @@ The fix: **`AuthNavSection`** is a Client Component that checks auth state on mo
 ## Fails gracefully without Supabase configured
 
 Every Supabase-touching code path — client-side (`AuthNavSection`, `/reset-password`) and server-side (every Server Action, via a shared `getServerClient()` helper in `lib/actions/auth.ts`) — catches the "missing env vars" error from `getSupabaseEnv()` and degrades to a normal signed-out UI state or a friendly inline error message ("Sign-in isn't set up yet — add your Supabase credentials to .env.local"), rather than an uncaught exception. This was a real bug caught during manual verification (the nav crashed the entire client bundle on first load with no `.env.local` present) and is now covered by keeping every `createClient()` call site behind a try/catch — see the `getServerClient()` pattern in `lib/actions/auth.ts` for the server-side version, reused by `lib/actions/profile.ts` and `lib/actions/venue.ts`.
+
+---
+
+# Phase 2.5: Real Supabase Connection & End-to-End Verification
+
+Phase 2 built the entire Supabase foundation against mocked behavior (no live project was available). Phase 2.5 connected it to a real project (`hrpbjudsrqcgyrkkodop`) and verified it end-to-end — real signup, real login, real RLS enforcement, real cross-account attack attempts. This section documents what was actually tested, one real bug that live testing caught, and the environmental limitations encountered.
+
+## Supabase key architecture: publishable/secret keys
+
+Supabase has moved to a new API key format: `sb_publishable_...` (client-safe, replaces the JWT-format anon key) and `sb_secret_...` (server-only, replaces the service-role key), alongside asymmetric (ES256) JWT signing for user session tokens instead of the older shared-HMAC-secret (HS256) scheme. This project uses the new format. `getSupabaseEnv()` (`lib/supabase/env.ts`) now checks `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` first and falls back to `NEXT_PUBLIC_SUPABASE_ANON_KEY`, so either key type works depending on what a given project's dashboard shows under Settings → API. Both are genuinely public/client-safe — this is not a secret being exposed.
+
+## How migrations were actually applied
+
+The Supabase CLI is not usable in this environment: `supabase login` requires an interactive browser-based OAuth callback, and this environment's shell has no TTY to support that (confirmed — `LegacyLoginMissingTokenError: Cannot use automatic login flow inside non-TTY environments`). Rather than ask for a Personal Access Token (a more sensitive, account-wide credential than was necessary for this task), the 7 migration files were concatenated in order and run once through the Supabase dashboard's SQL Editor by the project owner. Schema landing was independently verified afterward (not just assumed from a "Success" message) by querying every expected table through the REST API — all 8 tables plus the `public_profiles` view returned `HTTP 200` where `404` had been returned before, and `amenities` contained exactly the 13 seeded rows.
+
+## What was verified live (not mocked)
+
+All of the following were exercised against the real project using a real test account (`galileouuu+airrallytestplayer1@gmail.com`, clearly identifiable, created through the actual signup UI):
+
+- **Signup** — real `auth.users` row created, `raw_user_meta_data` correctly populated (first/last/display name), `handle_new_user` trigger correctly created the matching `profiles` row with `role = 'player'`.
+- **Email confirmation** — this project has email confirmation enabled (Supabase's default). The confirmation link initially failed with `otp_expired` when clicked from a personal browser — traced to Gmail's automatic link-safety prescanning consuming single-use confirmation links before the user's own click (a well-known Supabase + Gmail interaction, not an app bug). The app's handling of that failure was itself verified: `/auth/callback` correctly redirected to `/login?error=auth-callback-failed`, which rendered the intended "That link is invalid or has expired" message rather than a raw error. The account ended up confirmed anyway (the prescan's own GET request completed the exchange).
+- **Login / logout / session persistence** — real `signInWithPassword`, session survives a full page reload, protected routes correctly redirect before login and correctly become accessible after.
+- **Password reset request** — real `resetPasswordForEmail` call succeeds; full click-through completion wasn't independently verified due to the same Gmail-prescan behavior described above. Documented as a limitation, not claimed as passing.
+- **Profile read/edit/persistence** — real data loaded on `/profile` (including the correct `role: player` badge), a phone number edit was saved and confirmed present after a hard reload.
+- **Row Level Security**, tested by making direct authenticated REST calls (not just reading policy source) as the real test user:
+  - Self role-escalation: `PATCH /profiles` with `{"role":"admin"}` returned `200` (the row update itself is allowed) but the returned row still showed `role: "player"` — the `profiles_prevent_role_change` trigger silently reverted it, live, confirmed by a follow-up read.
+  - Venue status self-escalation: same pattern — `PATCH` a freshly-created own venue to `status: "active"` returned the row with `status` still `"draft"`.
+  - IDOR / identity spoofing: inserting a `favorites` row with someone else's `user_id`, and a `venues` row with a spoofed `owner_id`, both returned `403` with Postgres's `new row violates row-level security policy` — confirmed rejected at the database layer, not just hidden by the UI.
+  - Anonymous visibility: an unauthenticated request could not see a `draft`-status venue or its courts (`[]`), while the authenticated owner could (`1 row`) — confirmed the public/owner visibility split works correctly, not just for the venue row but for its child courts too.
+  - Favorites: add, duplicate-add (correctly `409` on the composite primary key, exactly what `lib/services/favorites.ts` is written to treat as a no-op), list, remove, list-after-remove — full cycle, real data.
+  - Cascading delete: deleting the test venue correctly cascaded to its court and its `venue_amenities` link (`on delete cascade` confirmed working, not just declared).
+
+## Known limitation: no live two-distinct-owner test
+
+Creating a second real account (to test "owner A cannot modify owner B's venue" with two actual sessions) was blocked by Supabase's free-tier email rate limit ("Too many attempts") after the signup/password-reset testing above, both through the app's own signup flow and through the dashboard's "Add User." This was **not worked around** (e.g., by weakening the project's auth settings) — it's reported here as a genuine constraint instead.
+
+This doesn't leave the underlying claim unverified, though: the owner-scoped UPDATE and DELETE policies on `venues`/`courts` use the exact same `owner_id = auth.uid()` (or the equivalent `EXISTS` check for courts) expression that was already proven, live, to reject a spoofed `owner_id` on INSERT. A second real account would have exercised the identical policy expression a second time, not a different one — high confidence, but flagged here rather than silently assumed.
+
+## A real bug live testing caught: logout didn't update the nav
+
+Manual verification found that after clicking "Log out," the account avatar remained in the navbar until a manual page reload — even though the session was, in fact, correctly destroyed (cookies were empty; `/profile` correctly redirected to login immediately after). Root cause: `signOut` was a Server Action running on the **server-side** Supabase client, which has no relationship to the **browser-side** client instance that `AuthNavSection` subscribes to via `onAuthStateChange` — a server-initiated sign-out doesn't fire a browser client's local listeners. Fixed by having `UserMenu`'s logout handler call the **browser** client's `supabase.auth.signOut()` directly instead — that both clears the same cookies (the browser client falls back to `document.cookie`, which the server client also reads) and correctly fires the local `onAuthStateChange` listener that updates the nav immediately. The now-unused `signOut` Server Action was removed rather than left as dead code. This is a good example of why the brief's insistence on testing against a real backend instead of only inspecting source mattered — this bug was invisible from code review alone.
+
+## Test data hygiene
+
+One test venue, its one test court, and one venue↔amenity link were created during RLS testing and deleted afterward using the test account's own (legitimate, RLS-scoped) delete permission — verified gone via a follow-up read. The test **auth account and profile row** were *not* deleted: deleting an `auth.users` row requires admin/service-role privileges, which this project deliberately never uses from application code (see [RLS strategy](#rls-strategy)). Removing it is a one-click action in the dashboard (Authentication → Users) if wanted — this is a call for the project owner, not something automated on their behalf.
