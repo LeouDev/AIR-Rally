@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* Typography */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+
+  /* Core semantic tokens */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Brand-named aliases, for when a component wants the brand color explicitly
+     rather than its semantic role (e.g. the "/" in the wordmark) */
+  --color-navy: var(--navy);
+  --color-navy-foreground: var(--navy-foreground);
+  --color-rally: var(--rally);
+  --color-rally-foreground: var(--rally-foreground);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+}
+
+:root {
+  /* Warm off-white background, near-black foreground */
+  --background: #faf8f5;
+  --foreground: #12151a;
+
+  --card: #ffffff;
+  --card-foreground: #12151a;
+  --popover: #ffffff;
+  --popover-foreground: #12151a;
+
+  /* Primary action color: Rally Orange — the energetic, "go" color */
+  --primary: #f3700f;
+  --primary-foreground: #fffaf5;
+
+  /* Secondary: Deep Navy — trust, structure, nav/header surfaces */
+  --secondary: #0f2747;
+  --secondary-foreground: #fbfaf7;
+
+  /* Muted: soft warm gray, for subdued surfaces and helper text */
+  --muted: #f2efe9;
+  --muted-foreground: #6b6a63;
+
+  /* Accent: soft orange tint used for hovers / highlighted surfaces */
+  --accent: #fdece0;
+  --accent-foreground: #0f2747;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #fffaf5;
+  --success: #1a9c5b;
+  --success-foreground: #fffaf5;
+  --warning: #d97a06;
+  --warning-foreground: #fffaf5;
+
+  --border: #e7e3da;
+  --input: #e7e3da;
+  --ring: #f3700f;
+
+  --navy: #0f2747;
+  --navy-foreground: #fbfaf7;
+  --rally: #f3700f;
+  --rally-foreground: #fffaf5;
+
+  --chart-1: #f3700f;
+  --chart-2: #0f2747;
+  --chart-3: #1a9c5b;
+  --chart-4: #d97a06;
+  --chart-5: #6b6a63;
+
+  --radius: 0.75rem;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #12151a;
+  --sidebar-primary: #f3700f;
+  --sidebar-primary-foreground: #fffaf5;
+  --sidebar-accent: #f2efe9;
+  --sidebar-accent-foreground: #0f2747;
+  --sidebar-border: #e7e3da;
+  --sidebar-ring: #f3700f;
+}
+
+.dark {
+  --background: #0a121f;
+  --foreground: #f4f1ea;
+
+  --card: #0f1c30;
+  --card-foreground: #f4f1ea;
+  --popover: #0f1c30;
+  --popover-foreground: #f4f1ea;
+
+  --primary: #fb802a;
+  --primary-foreground: #0a121f;
+
+  --secondary: #16233c;
+  --secondary-foreground: #f4f1ea;
+
+  --muted: #131f34;
+  --muted-foreground: #9aa3b2;
+
+  --accent: #24314a;
+  --accent-foreground: #ffb578;
+
+  --destructive: #f04949;
+  --destructive-foreground: #0a121f;
+  --success: #34c17e;
+  --success-foreground: #0a121f;
+  --warning: #f0a63c;
+  --warning-foreground: #0a121f;
+
+  --border: rgba(244, 241, 234, 0.12);
+  --input: rgba(244, 241, 234, 0.14);
+  --ring: #fb802a;
+
+  --navy: #16233c;
+  --navy-foreground: #f4f1ea;
+  --rally: #fb802a;
+  --rally-foreground: #0a121f;
+
+  --chart-1: #fb802a;
+  --chart-2: #8ea2c9;
+  --chart-3: #34c17e;
+  --chart-4: #f0a63c;
+  --chart-5: #9aa3b2;
+
+  --sidebar: #0f1c30;
+  --sidebar-foreground: #f4f1ea;
+  --sidebar-primary: #fb802a;
+  --sidebar-primary-foreground: #0a121f;
+  --sidebar-accent: #16233c;
+  --sidebar-accent-foreground: #ffb578;
+  --sidebar-border: rgba(244, 241, 234, 0.12);
+  --sidebar-ring: #fb802a;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans scroll-smooth;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
