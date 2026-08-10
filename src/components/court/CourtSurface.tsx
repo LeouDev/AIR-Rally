@@ -16,6 +16,22 @@ type CourtSurfaceProps = {
   className?: string;
 };
 
+const SURFACE_COLOR_KEYS = Object.keys(SURFACE_COLORS) as CourtSurfaceColor[];
+
+/**
+ * Deterministic color choice from any stable id (a real venue's UUID) —
+ * the same venue always renders the same illustration palette instead of
+ * a different random one on every page load, while still not requiring a
+ * `surfaceColor` column to exist on `venues`.
+ */
+export function deterministicSurfaceColor(id: string): CourtSurfaceColor {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  }
+  return SURFACE_COLOR_KEYS[Math.abs(hash) % SURFACE_COLOR_KEYS.length];
+}
+
 /**
  * Illustrated aerial court view used in place of real venue photography.
  * Phase 1 has no photo pipeline for onboarded venues, so cards render a

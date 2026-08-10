@@ -8,6 +8,7 @@ const base = {
   country: "Philippines",
   phone: "+63 917 123 4567",
   email: "hello@example.com",
+  website: "",
   indoorOutdoor: "indoor" as const,
   numberOfCourts: 6,
 };
@@ -39,5 +40,14 @@ describe("createVenueDraftSchema", () => {
     // `base` above never sets stateProvince — this documents that as
     // intentional (optional) rather than an oversight.
     expect(createVenueDraftSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("accepts an empty website (the form's default) without requiring a URL", () => {
+    expect(createVenueDraftSchema.safeParse({ ...base, website: "" }).success).toBe(true);
+  });
+
+  it("accepts a valid website URL and rejects a malformed one", () => {
+    expect(createVenueDraftSchema.safeParse({ ...base, website: "https://example.com" }).success).toBe(true);
+    expect(createVenueDraftSchema.safeParse({ ...base, website: "not a url" }).success).toBe(false);
   });
 });

@@ -14,7 +14,7 @@ import {
   CircleCheck,
   type LucideIcon,
 } from "lucide-react";
-import type { Amenity } from "@/types/court";
+import type { Amenity } from "@/lib/supabase/types";
 
 const ICONS: Record<string, LucideIcon> = {
   Lightbulb,
@@ -43,14 +43,14 @@ export function AmenityList({ amenities }: AmenityListProps) {
   return (
     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       {amenities.map((amenity) => {
-        const Icon = ICONS[amenity.icon] ?? CircleCheck;
+        const Icon = (amenity.icon && ICONS[amenity.icon]) || CircleCheck;
         return (
           <li
             key={amenity.id}
             className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-sm text-foreground"
           >
             <Icon className="size-4 shrink-0 text-primary" aria-hidden="true" />
-            {amenity.label}
+            {amenity.name}
           </li>
         );
       })}

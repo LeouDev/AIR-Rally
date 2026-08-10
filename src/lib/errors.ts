@@ -44,6 +44,17 @@ const PATTERNS: Array<{ test: (e: ErrorLike) => boolean; message: string }> = [
     test: (e) => ["23503", "23502", "23514"].includes(e.code ?? ""),
     message: "We couldn't save that — please check the form and try again.",
   },
+  {
+    // Postgres exclusion_violation — the bookings_no_overlap constraint
+    // (see supabase/migrations/20260810000004_bookings.sql) rejecting a
+    // double-booking attempt. lib/services/bookings.ts already catches
+    // this specific code and throws a typed BookingError with the same
+    // message before it would normally reach here; this entry is a
+    // second-layer safety net for any other code path that might hit the
+    // same constraint without going through createBooking().
+    test: (e) => e.code === "23P01",
+    message: "That time slot is no longer available.",
+  },
 ];
 
 export function getFriendlyErrorMessage(

@@ -4,16 +4,29 @@ import { MapPin, Home, Sun, Layers, Building2 } from "lucide-react";
 import { ImageGallery } from "@/components/court/ImageGallery";
 import { AmenityList } from "@/components/court/AmenityList";
 import { ReviewPreview } from "@/components/court/ReviewPreview";
+import { ReviewForm } from "@/components/court/ReviewForm";
 import { Rating } from "@/components/court/Rating";
-import { BookingPanel } from "@/components/court/BookingPanel";
+import { BookingWidget } from "@/components/court/BookingWidget";
 import { MapPlaceholder } from "@/components/search/MapPlaceholder";
-import { getCourtById, getAmenitiesByIds, getReviewsByCourtId, mockCourts } from "@/lib/mock-data";
+import { FavoriteButton } from "@/components/court/FavoriteButton";
+import { deterministicSurfaceColor } from "@/components/court/CourtSurface";
+import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/supabase/auth";
+import { getVenueDetail } from "@/lib/services/venues";
+import { listReviewsByVenue, getReviewEligibility } from "@/lib/services/reviews";
+import { isFavorite } from "@/lib/services/favorites";
+import { getPublicImageUrl } from "@/lib/services/images";
+import type { IndoorOutdoor } from "@/lib/supabase/types";
+
+// Real per-viewer data (favorite state) and real per-request marketplace
+// data (rating, reviews) — never statically cached.
+export const dynamic = "force-dynamic";
 
 type CourtDetailPageProps = {
   params: Promise<{ id: string }>;
 };
 
-const COURT_TYPE_LABEL: Record<string, string> = {
+const COURT_TYPE_LABEL: Record<IndoorOutdoor, string> = {
   indoor: "Indoor",
   outdoor: "Outdoor",
   both: "Indoor & Outdoor",
@@ -23,63 +36,87 @@ const COURT_TYPE_ICON = { indoor: Home, outdoor: Sun, both: Layers } as const;
 
 export async function generateMetadata({ params }: CourtDetailPageProps): Promise<Metadata> {
   const { id } = await params;
-  const court = getCourtById(id);
-  if (!court) return {};
-  return {
-    title: court.name,
-    description: court.tagline,
-  };
-}
+  const supabase = await createClient();
+  const venue = await getVenueDetail(supabase, id);
+  if (!venue) return {};
 
-export function generateStaticParams() {
-  return mockCourts.map((court) => ({ id: court.id }));
+  const description = venue.description
+    ? venue.description.slice(0, 155)
+    : `Book ${venue.name} in ${venue.city ?? "the Philippines"} on Air/Rally.`;
+
+  return { title: venue.name, description };
 }
 
 export default async function CourtDetailPage({ params }: CourtDetailPageProps) {
   const { id } = await params;
-  const court = getCourtById(id);
-  if (!court) notFound();
+  const supabase = await createClient();
 
-  const amenities = getAmenitiesByIds(court.amenityIds);
-  const reviews = getReviewsByCourtId(court.id).slice(0, 3);
-  const TypeIcon = COURT_TYPE_ICON[court.courtType];
+  // getVenueDetail() returns null for "doesn't exist" AND "exists but
+  // isn't active" alike (see its doc comment) — a draft venue should look
+  // exactly like not-found to a player, never confirm it exists under a
+  // different status. A genuine query error throws instead of returning
+  // null, and is left to propagate to error.tsx rather than being
+  // swallowed into a misleading "not found".
+  const venue = await getVenueDetail(supabase, id);
+  if (!venue) notFound();
+
+  const [reviews, user] = await Promise.all([listReviewsByVenue(supabase, id, 3), getCurrentUser()]);
+  const favorited = user ? await isFavorite(supabase, user.id, id) : false;
+  const reviewEligibility = user ? await getReviewEligibility(supabase, user.id, id) : { eligible: false, bookingId: null };
+
+  const TypeIcon = COURT_TYPE_ICON[venue.indoor_outdoor];
+  const galleryImages = venue.images.map((image) => ({
+    url: getPublicImageUrl(supabase, image.storage_path),
+    alt: image.alt_text ?? venue.name,
+  }));
+  const address = [venue.address, venue.city, venue.state_province, venue.country].filter(Boolean).join(", ");
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <ImageGallery images={court.images} courtName={court.name} />
+      <div className="relative">
+        <ImageGallery
+          images={galleryImages}
+          venueName={venue.name}
+          fallbackSurfaceColor={deterministicSurfaceColor(venue.id)}
+          indoor={venue.indoor_outdoor === "indoor"}
+        />
+        <div className="absolute top-3 right-3">
+          <FavoriteButton venueId={venue.id} venueName={venue.name} initialFavorited={favorited} />
+        </div>
+      </div>
 
       <div className="mt-8 grid grid-cols-1 gap-10 lg:grid-cols-3">
         <div className="flex flex-col gap-8 lg:col-span-2">
           <div>
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">{court.name}</h1>
-                <p className="mt-1 text-muted-foreground">{court.tagline}</p>
-              </div>
-              <Rating value={court.rating} reviewCount={court.reviewCount} size="md" />
+              <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">{venue.name}</h1>
+              <Rating value={venue.average_rating} reviewCount={venue.review_count} size="md" />
             </div>
-            <p className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
-              <MapPin className="size-4 shrink-0" aria-hidden="true" />
-              {court.address}
-            </p>
+            {address && (
+              <p className="mt-3 flex items-center gap-1.5 text-sm text-muted-foreground">
+                <MapPin className="size-4 shrink-0" aria-hidden="true" />
+                {address}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <InfoTile icon={TypeIcon} label="Court type" value={COURT_TYPE_LABEL[court.courtType]} />
-            <InfoTile icon={Building2} label="Courts" value={String(court.numberOfCourts)} />
-            <InfoTile icon={Layers} label="Surface" value={court.surfaceType} />
-            <InfoTile icon={MapPin} label="Area" value={court.area} />
+            <InfoTile icon={TypeIcon} label="Court type" value={COURT_TYPE_LABEL[venue.indoor_outdoor]} />
+            <InfoTile icon={Building2} label="Courts" value={String(venue.active_court_count)} />
+            {venue.city && <InfoTile icon={MapPin} label="City" value={venue.city} />}
           </div>
 
-          <section>
-            <h2 className="text-lg font-semibold text-foreground">About this venue</h2>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{court.description}</p>
-          </section>
+          {venue.description && (
+            <section>
+              <h2 className="text-lg font-semibold text-foreground">About this venue</h2>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{venue.description}</p>
+            </section>
+          )}
 
           <section>
             <h2 className="text-lg font-semibold text-foreground">Amenities</h2>
             <div className="mt-3">
-              <AmenityList amenities={amenities} />
+              <AmenityList amenities={venue.amenities} />
             </div>
           </section>
 
@@ -93,7 +130,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           <section>
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-foreground">Reviews</h2>
-              <Rating value={court.rating} reviewCount={court.reviewCount} />
+              <Rating value={venue.average_rating} reviewCount={venue.review_count} />
             </div>
             <div className="mt-3 flex flex-col gap-3">
               {reviews.length > 0 ? (
@@ -102,12 +139,24 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
                 <p className="text-sm text-muted-foreground">No reviews yet — be the first to play here.</p>
               )}
             </div>
+            {reviewEligibility.eligible && reviewEligibility.bookingId && (
+              <div className="mt-4">
+                <ReviewForm venueId={venue.id} bookingId={reviewEligibility.bookingId} />
+              </div>
+            )}
           </section>
         </div>
 
         <div className="lg:col-span-1">
           <div className="lg:sticky lg:top-24">
-            <BookingPanel court={court} />
+            <BookingWidget
+              venueName={venue.name}
+              venueTimezone={venue.timezone}
+              courts={venue.courts}
+              phone={venue.phone}
+              email={venue.email}
+              isAuthenticated={user !== null}
+            />
           </div>
         </div>
       </div>

@@ -1,5 +1,12 @@
 import type { Location } from "@/types/court";
 
+/**
+ * Static UI data for the location dropdown (`SearchBar`'s city picker),
+ * not marketplace content — unlike the courts/reviews/amenities mocks
+ * removed in Phase 3, there's no real-data source to migrate this to; it's
+ * a fixed list of cities the picker offers, independent of which venues
+ * actually exist in Supabase for a given city.
+ */
 export const mockLocations: Location[] = [
   { id: "cebu-city", city: "Cebu City", region: "Cebu", courtCount: 12 },
   { id: "mandaue", city: "Mandaue City", region: "Cebu", courtCount: 5 },

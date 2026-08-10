@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { CalendarClock, LineChart, Users2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared/SectionHeader";
-import { VenueOnboardingForm } from "@/components/owner/VenueOnboardingForm";
+import { VenueForm } from "@/components/owner/VenueForm";
 import { OwnerVenueList } from "@/components/owner/OwnerVenueList";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -101,7 +101,7 @@ export default async function ListYourCourtPage() {
         {user ? (
           <div className="mx-auto mt-12 flex max-w-2xl flex-col gap-8">
             <OwnerVenueList venues={venues} />
-            <VenueOnboardingForm />
+            <VenueForm mode="create" />
           </div>
         ) : (
           <div className="mt-12 rounded-2xl border border-dashed border-border bg-muted/40 p-6 text-center">

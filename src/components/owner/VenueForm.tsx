@@ -15,10 +15,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createVenueDraftAction } from "@/lib/actions/venue";
+import { updateVenueAction } from "@/lib/actions/venue";
 import { createVenueDraftSchema, type CreateVenueDraftValues } from "@/lib/validations/venue";
 
-export function VenueOnboardingForm() {
+const DEFAULT_VALUES: CreateVenueDraftValues = {
+  name: "",
+  description: "",
+  address: "",
+  city: "",
+  stateProvince: "",
+  country: "Philippines",
+  phone: "",
+  email: "",
+  website: "",
+  indoorOutdoor: "outdoor",
+  numberOfCourts: 1,
+};
+
+type VenueFormProps =
+  | { mode: "create" }
+  | { mode: "edit"; venueId: string; initialValues: CreateVenueDraftValues };
+
+export function VenueForm(props: VenueFormProps) {
   const router = useRouter();
+  const isEdit = props.mode === "edit";
 
   const {
     register,
@@ -27,21 +47,31 @@ export function VenueOnboardingForm() {
     reset,
     watch,
     setValue,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<CreateVenueDraftValues>({
     resolver: zodResolver(createVenueDraftSchema),
-    defaultValues: { indoorOutdoor: "outdoor", numberOfCourts: 1, country: "Philippines" },
+    defaultValues: isEdit ? props.initialValues : DEFAULT_VALUES,
   });
 
   async function onSubmit(values: CreateVenueDraftValues) {
-    const result = await createVenueDraftAction(values);
+    const result = isEdit
+      ? await updateVenueAction(props.venueId, values)
+      : await createVenueDraftAction(values);
+
     if (!result.success) {
       setError("root", { message: result.error });
       return;
     }
-    toast.success(`${result.data.name} saved as a draft`);
-    reset({ indoorOutdoor: "outdoor", numberOfCourts: 1, country: "Philippines" });
-    router.refresh();
+
+    if (isEdit) {
+      toast.success("Venue updated");
+      reset(values);
+      router.refresh();
+    } else {
+      toast.success(`${result.data.name} saved as a draft`);
+      reset(DEFAULT_VALUES);
+      router.refresh();
+    }
   }
 
   return (
@@ -51,12 +81,14 @@ export function VenueOnboardingForm() {
       onSubmit={handleSubmit(onSubmit)}
       noValidate
     >
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">Tell us about your venue</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          This saves as a draft — nothing goes live until you submit it for review.
-        </p>
-      </div>
+      {!isEdit && (
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Tell us about your venue</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This saves as a draft — nothing goes live until you submit it for review.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="name">Venue name</Label>
@@ -113,12 +145,18 @@ export function VenueOnboardingForm() {
         </div>
       </div>
 
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="website">Website (optional)</Label>
+        <Input id="website" type="url" placeholder="https://…" aria-invalid={!!errors.website} {...register("website")} />
+        {errors.website && <p className="text-xs text-destructive">{errors.website.message}</p>}
+      </div>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="indoorOutdoor">Indoor / Outdoor</Label>
           <Select
             value={watch("indoorOutdoor")}
-            onValueChange={(value) => setValue("indoorOutdoor", value as CreateVenueDraftValues["indoorOutdoor"])}
+            onValueChange={(value) => setValue("indoorOutdoor", value as CreateVenueDraftValues["indoorOutdoor"], { shouldDirty: true })}
           >
             <SelectTrigger id="indoorOutdoor" className="w-full">
               <SelectValue />
@@ -148,8 +186,13 @@ export function VenueOnboardingForm() {
 
       {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
 
-      <Button type="submit" size="lg" className="mt-2 self-start" disabled={isSubmitting}>
-        {isSubmitting ? "Saving…" : "Save as Draft"}
+      <Button
+        type="submit"
+        size="lg"
+        className="mt-2 self-start"
+        disabled={isSubmitting || (isEdit && !isDirty)}
+      >
+        {isSubmitting ? "Saving…" : isEdit ? "Save Changes" : "Save as Draft"}
       </Button>
     </form>
   );
