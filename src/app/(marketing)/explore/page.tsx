@@ -10,7 +10,6 @@ import { SearchBar } from "@/components/search/SearchBar";
 import { MarketplaceSearchInput } from "@/components/search/MarketplaceSearchInput";
 import { ExploreLayout } from "@/components/search/ExploreLayout";
 import { ExplorePagination } from "@/components/search/ExplorePagination";
-import { MapPlaceholder } from "@/components/search/MapPlaceholder";
 import { CourtCard } from "@/components/court/CourtCard";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { SearchX } from "lucide-react";
@@ -70,7 +69,6 @@ export default async function ExplorePage({ searchParams }: ExplorePageProps) {
           amenities={amenities}
           resultCount={searchResult.total}
           results={results}
-          map={<MapPlaceholder className="h-64 lg:h-full" resultCount={searchResult.total} />}
           pagination={
             <ExplorePagination
               page={searchResult.page}
