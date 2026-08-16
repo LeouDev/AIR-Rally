@@ -41,3 +41,5 @@ export const setVenueAmenitiesSchema = z.object({
 export type SetVenueAmenitiesValues = z.infer<typeof setVenueAmenitiesSchema>;
 
 export const deleteVenueSchema = z.uuid();
+
+export const setVenueStatusSchema = z.enum(["archived", "pending_review"]);

@@ -5,6 +5,7 @@ import {
   getVenueForOwner,
   createDraftVenue,
   deleteVenue,
+  setVenueStatus,
   listVenuesByOwnerWithSummary,
   linkVenuePaymongoAccount,
   syncVenuePaymongoActivation,
@@ -434,6 +435,34 @@ describe("listVenuesByOwnerWithSummary", () => {
       expect.objectContaining({ id: "venue-a", courtCount: 2, coverImageUrl: "https://cdn.test/venue-a/cover.jpg" }),
       expect.objectContaining({ id: "venue-b", courtCount: 0, coverImageUrl: null }),
     ]);
+  });
+});
+
+describe("setVenueStatus", () => {
+  it("updates status by id", async () => {
+    const eqMock = jest.fn(() => ({
+      select: jest.fn(() => ({
+        single: jest.fn().mockResolvedValue({ data: ownerVenueRow({ status: "archived" }), error: null }),
+      })),
+    }));
+    const updateMock = jest.fn(() => ({ eq: eqMock }));
+    const supabase = { from: jest.fn(() => ({ update: updateMock })) } as never;
+
+    const result = await setVenueStatus(supabase, "venue-1", "archived");
+
+    expect(updateMock).toHaveBeenCalledWith({ status: "archived" });
+    expect(eqMock).toHaveBeenCalledWith("id", "venue-1");
+    expect(result.status).toBe("archived");
+  });
+
+  // venues_prevent_status_escalation (see
+  // supabase/migrations/20260810000020_venue_archive_status.sql) is what
+  // actually enforces a non-admin can only ever land on 'archived' or
+  // 'pending_review' here — this just proves the request reaches the DB
+  // with the given status, not a stronger claim about enforcement.
+  it("propagates a database error", async () => {
+    const supabase = createMockSupabase({ data: null, error: postgrestError("PGRST116") });
+    await expect(setVenueStatus(supabase, "venue-1", "archived")).rejects.toMatchObject({ code: "PGRST116" });
   });
 });
 

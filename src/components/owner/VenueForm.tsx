@@ -33,7 +33,7 @@ const DEFAULT_VALUES: CreateVenueDraftValues = {
 };
 
 type VenueFormProps =
-  | { mode: "create" }
+  | { mode: "create"; onSuccess?: () => void }
   | { mode: "edit"; venueId: string; initialValues: CreateVenueDraftValues };
 
 export function VenueForm(props: VenueFormProps) {
@@ -71,23 +71,20 @@ export function VenueForm(props: VenueFormProps) {
       toast.success(`${result.data.name} saved as a draft`);
       reset(DEFAULT_VALUES);
       router.refresh();
+      props.onSuccess?.();
     }
   }
 
   return (
     <form
-      id="venue-form"
-      className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 sm:p-8"
+      className={isEdit ? "flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 sm:p-8" : "flex flex-col gap-4"}
       onSubmit={handleSubmit(onSubmit)}
       noValidate
     >
       {!isEdit && (
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">Tell us about your venue</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            This saves as a draft — nothing goes live until you submit it for review.
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          This saves as a draft — nothing goes live until you submit it for review.
+        </p>
       )}
 
       <div className="flex flex-col gap-1.5">

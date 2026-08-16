@@ -7,7 +7,7 @@
  */
 
 export type UserRole = "player" | "venue_owner" | "admin";
-export type VenueStatus = "draft" | "pending_review" | "active" | "suspended";
+export type VenueStatus = "draft" | "pending_review" | "active" | "suspended" | "archived";
 export type CourtStatus = "active" | "inactive" | "maintenance";
 export type IndoorOutdoor = "indoor" | "outdoor" | "both";
 export type CourtIndoorOutdoor = "indoor" | "outdoor";

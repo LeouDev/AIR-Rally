@@ -3,8 +3,8 @@ import type { Metadata } from "next";
 import { CalendarClock, LineChart, Users2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared/SectionHeader";
-import { VenueForm } from "@/components/owner/VenueForm";
 import { OwnerVenueGrid } from "@/components/owner/OwnerVenueGrid";
+import { CreateVenueDialog } from "@/components/owner/CreateVenueDialog";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { listVenuesByOwnerWithSummary } from "@/lib/services/venues";
@@ -53,7 +53,7 @@ export default async function ListYourCourtPage() {
           </p>
           {user ? (
             <Button asChild size="lg" className="h-12 gap-2 rounded-full px-7 text-base">
-              <a href="#venue-form">
+              <a href="#your-venues">
                 Get Started
                 <ArrowRight className="size-4" />
               </a>
@@ -99,11 +99,12 @@ export default async function ListYourCourtPage() {
         </div>
 
         {user ? (
-          <div className="mx-auto mt-12 flex max-w-4xl flex-col gap-8">
-            <OwnerVenueGrid venues={venues} />
-            <div className="mx-auto w-full max-w-2xl">
-              <VenueForm mode="create" />
+          <div id="your-venues" className="mx-auto mt-12 flex max-w-4xl scroll-mt-20 flex-col gap-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-foreground">Your venues</h2>
+              <CreateVenueDialog />
             </div>
+            <OwnerVenueGrid venues={venues} />
           </div>
         ) : (
           <div className="mt-12 rounded-2xl border border-dashed border-border bg-muted/40 p-6 text-center">

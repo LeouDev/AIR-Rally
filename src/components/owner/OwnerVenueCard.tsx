@@ -5,12 +5,12 @@ import Image from "next/image";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronRight, MapPin, Building2, Trash2 } from "lucide-react";
+import { ChevronRight, MapPin, Building2, Trash2, Archive, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { deleteVenueAction } from "@/lib/actions/venue";
+import { deleteVenueAction, setVenueStatusAction } from "@/lib/actions/venue";
 import type { OwnerVenueSummary } from "@/lib/services/venues";
 import type { VenueStatus } from "@/lib/supabase/types";
 
@@ -19,6 +19,7 @@ const STATUS_STYLES: Record<VenueStatus, string> = {
   pending_review: "bg-warning/15 text-warning",
   active: "bg-success/15 text-success",
   suspended: "bg-destructive/15 text-destructive",
+  archived: "bg-muted text-muted-foreground",
 };
 
 const STATUS_LABELS: Record<VenueStatus, string> = {
@@ -26,6 +27,7 @@ const STATUS_LABELS: Record<VenueStatus, string> = {
   pending_review: "Pending Review",
   active: "Active",
   suspended: "Suspended",
+  archived: "Archived",
 };
 
 export function OwnerVenueCard({ venue }: { venue: OwnerVenueSummary }) {
@@ -42,6 +44,31 @@ export function OwnerVenueCard({ venue }: { venue: OwnerVenueSummary }) {
       }
       toast.success("Venue deleted");
       setConfirmOpen(false);
+      router.refresh();
+    });
+  }
+
+  function handleArchive() {
+    startTransition(async () => {
+      const result = await setVenueStatusAction(venue.id, "archived");
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Venue archived — it's no longer visible to players");
+      setConfirmOpen(false);
+      router.refresh();
+    });
+  }
+
+  function handleResubmit() {
+    startTransition(async () => {
+      const result = await setVenueStatusAction(venue.id, "pending_review");
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Submitted for review");
       router.refresh();
     });
   }
@@ -84,11 +111,12 @@ export function OwnerVenueCard({ venue }: { venue: OwnerVenueSummary }) {
         </div>
       </Link>
 
-      {/* Draft-only: mirrors the venues DELETE RLS policy exactly (owner's
-          own draft venues, or admin — see
-          supabase/migrations/20260809000002_venues.sql). Hiding the
-          control for other statuses is a UX nicety, not the security
-          boundary — RLS is. */}
+      {/* Draft-only delete: mirrors the venues DELETE RLS policy exactly
+          (owner's own draft venues, or admin — see
+          supabase/migrations/20260809000002_venues.sql). Hard delete
+          only ever succeeds for a venue with zero booking history, which
+          a still-draft venue always has. Hiding the control for other
+          statuses is a UX nicety, not the security boundary — RLS is. */}
       {venue.status === "draft" && (
         <div className="border-t border-border px-4 py-2">
           <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -121,6 +149,57 @@ export function OwnerVenueCard({ venue }: { venue: OwnerVenueSummary }) {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+        </div>
+      )}
+
+      {/* Archive: for anything that's live or was submitted, but isn't
+          operating anymore — reversible (unlike delete), and doesn't
+          need booking-history safety checks since it's just a status
+          change, not a row deletion. Stops appearing in venue_marketplace
+          immediately (it already filters to status='active' only). */}
+      {(venue.status === "active" || venue.status === "suspended" || venue.status === "pending_review") && (
+        <div className="border-t border-border px-4 py-2">
+          <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <DialogTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs text-muted-foreground">
+                <Archive className="size-3.5" aria-hidden="true" />
+                Archive
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Archive this venue?</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                &ldquo;{venue.name}&rdquo; will stop appearing to players. You can submit it for review again any
+                time from here.
+              </p>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)} disabled={isPending}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="secondary" onClick={handleArchive} disabled={isPending}>
+                  {isPending ? "Archiving…" : "Archive"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      )}
+
+      {venue.status === "archived" && (
+        <div className="border-t border-border px-4 py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+            disabled={isPending}
+            onClick={handleResubmit}
+          >
+            <RotateCcw className="size-3.5" aria-hidden="true" />
+            {isPending ? "Submitting…" : "Submit for review"}
+          </Button>
         </div>
       )}
     </div>

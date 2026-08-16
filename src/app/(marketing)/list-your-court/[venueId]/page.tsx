@@ -1,5 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { VenueForm } from "@/components/owner/VenueForm";
 import { VenueAmenitiesEditor } from "@/components/owner/VenueAmenitiesEditor";
 import { VenueOperatingHoursEditor } from "@/components/owner/VenueOperatingHoursEditor";
@@ -77,6 +79,13 @@ export default async function ManageVenuePage({
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
       <div>
+        <Link
+          href="/list-your-court"
+          className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" aria-hidden="true" />
+          Back to your venues
+        </Link>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">{venue.name}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Manage your venue details, amenities, and courts.

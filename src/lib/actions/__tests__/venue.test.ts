@@ -1,9 +1,9 @@
 /**
  * @jest-environment node
  */
-import { createVenueDraftAction, updateVenueAction, deleteVenueAction, setVenueAmenitiesAction, setOperatingHoursAction } from "../venue";
+import { createVenueDraftAction, updateVenueAction, deleteVenueAction, setVenueStatusAction, setVenueAmenitiesAction, setOperatingHoursAction } from "../venue";
 import { getServerClient } from "../auth";
-import { createDraftVenue, updateVenue, deleteVenue, setOperatingHours } from "../../services/venues";
+import { createDraftVenue, updateVenue, deleteVenue, setVenueStatus, setOperatingHours } from "../../services/venues";
 import { setVenueAmenities } from "../../services/amenities";
 import type { CreateVenueDraftValues } from "../../validations/venue";
 
@@ -13,6 +13,7 @@ jest.mock("../../services/venues", () => ({
   createDraftVenue: jest.fn(),
   updateVenue: jest.fn(),
   deleteVenue: jest.fn(),
+  setVenueStatus: jest.fn(),
   setOperatingHours: jest.fn(),
 }));
 jest.mock("../../services/amenities", () => ({ setVenueAmenities: jest.fn() }));
@@ -22,6 +23,7 @@ const mockGetServerClient = getServerClient as jest.MockedFunction<typeof getSer
 const mockCreateDraftVenue = createDraftVenue as jest.MockedFunction<typeof createDraftVenue>;
 const mockUpdateVenue = updateVenue as jest.MockedFunction<typeof updateVenue>;
 const mockDeleteVenue = deleteVenue as jest.MockedFunction<typeof deleteVenue>;
+const mockSetVenueStatus = setVenueStatus as jest.MockedFunction<typeof setVenueStatus>;
 const mockSetVenueAmenities = setVenueAmenities as jest.MockedFunction<typeof setVenueAmenities>;
 const mockSetOperatingHours = setOperatingHours as jest.MockedFunction<typeof setOperatingHours>;
 
@@ -195,6 +197,46 @@ describe("deleteVenueAction", () => {
       success: false,
       error: "Only draft venues can be deleted — active venues can't be removed this way.",
     });
+  });
+});
+
+describe("setVenueStatusAction", () => {
+  beforeEach(() => {
+    mockGetServerClient.mockReset();
+    mockSetVenueStatus.mockReset();
+  });
+
+  it("rejects an invalid status value before ever contacting Supabase", async () => {
+    const result = await setVenueStatusAction("223e4567-e89b-12d3-a456-426614174000", "active" as never);
+    expect(result.success).toBe(false);
+    expect(mockGetServerClient).not.toHaveBeenCalled();
+  });
+
+  it("requires an authenticated session", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient(null) });
+    const result = await setVenueStatusAction("venue-1", "archived");
+    expect(result).toEqual({ success: false, error: "Your session has expired. Please sign in again." });
+    expect(mockSetVenueStatus).not.toHaveBeenCalled();
+  });
+
+  it("archives a venue", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+    mockSetVenueStatus.mockResolvedValue({ id: "venue-1", status: "archived" } as never);
+
+    const result = await setVenueStatusAction("venue-1", "archived");
+
+    expect(result.success).toBe(true);
+    expect(mockSetVenueStatus).toHaveBeenCalledWith(expect.anything(), "venue-1", "archived");
+  });
+
+  it("resubmits an archived venue for review", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+    mockSetVenueStatus.mockResolvedValue({ id: "venue-1", status: "pending_review" } as never);
+
+    const result = await setVenueStatusAction("venue-1", "pending_review");
+
+    expect(result.success).toBe(true);
+    expect(mockSetVenueStatus).toHaveBeenCalledWith(expect.anything(), "venue-1", "pending_review");
   });
 });
 

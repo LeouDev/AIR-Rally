@@ -138,6 +138,29 @@ export async function deleteVenue(supabase: Client, venueId: string): Promise<vo
   if (error) throw error;
 }
 
+/**
+ * The only two owner-initiated status transitions that exist: pausing a
+ * venue ('archived', for anything that's no longer operating) and
+ * resubmitting one for platform review ('pending_review' — the same
+ * unconditional self-service transition every venue already goes
+ * through once, now also reachable from 'archived'). Both are enforced
+ * by the existing venues_prevent_status_escalation trigger (see
+ * supabase/migrations/20260810000020_venue_archive_status.sql) — a
+ * non-admin caller can only ever land here for these two target values;
+ * anything else (including 'active' itself) is silently reverted by the
+ * trigger regardless of what this function sends, so there's no
+ * separate app-level check needed.
+ */
+export async function setVenueStatus(
+  supabase: Client,
+  venueId: string,
+  status: Extract<Venue["status"], "archived" | "pending_review">
+): Promise<Venue> {
+  const { data, error } = await supabase.from("venues").update({ status }).eq("id", venueId).select("*").single();
+  if (error) throw error;
+  return data;
+}
+
 export async function updateVenue(supabase: Client, venueId: string, values: UpdateVenueValues): Promise<Venue> {
   const { data, error } = await supabase
     .from("venues")

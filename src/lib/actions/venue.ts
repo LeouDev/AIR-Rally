@@ -1,13 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createDraftVenue, updateVenue, deleteVenue, setOperatingHours } from "@/lib/services/venues";
+import { createDraftVenue, updateVenue, deleteVenue, setVenueStatus, setOperatingHours } from "@/lib/services/venues";
 import { setVenueAmenities } from "@/lib/services/amenities";
 import {
   createVenueDraftSchema,
   updateVenueSchema,
   setVenueAmenitiesSchema,
   deleteVenueSchema,
+  setVenueStatusSchema,
   type CreateVenueDraftValues,
   type UpdateVenueValues,
   type SetVenueAmenitiesValues,
@@ -128,6 +129,46 @@ export async function deleteVenueAction(venueId: string): Promise<ActionResult> 
       success: false,
       error: getFriendlyErrorMessage(error, "Only draft venues can be deleted — active venues can't be removed this way."),
     };
+  }
+}
+
+/**
+ * "archived" pauses a venue that's no longer operating (any status but
+ * draft/archived); "pending_review" resubmits an archived venue for
+ * platform approval, same as any other venue's first submission. Going
+ * live ("active") is never reachable through this action — the
+ * venues_prevent_status_escalation trigger reverts anything else for a
+ * non-admin caller, so this is the entire enforcement (see
+ * setVenueStatus's doc comment).
+ */
+export async function setVenueStatusAction(
+  venueId: string,
+  status: "archived" | "pending_review"
+): Promise<ActionResult<Venue>> {
+  const parsed = setVenueStatusSchema.safeParse(status);
+  if (!parsed.success) {
+    return { success: false, error: "Please try again." };
+  }
+
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { success: false, error: "Your session has expired. Please sign in again." };
+  }
+
+  try {
+    const venue = await setVenueStatus(supabase, venueId, parsed.data);
+    revalidatePath(`/list-your-court/${venueId}`);
+    revalidatePath("/list-your-court");
+    return { success: true, data: venue };
+  } catch (error) {
+    logServerError("venue.setStatus", error);
+    return { success: false, error: getFriendlyErrorMessage(error, "We couldn't update that venue.") };
   }
 }
 
