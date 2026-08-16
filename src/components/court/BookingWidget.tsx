@@ -183,7 +183,7 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
       <div className="flex flex-col gap-1.5">
         <p className="text-xs font-medium text-muted-foreground uppercase">Date</p>
         <div className="flex items-stretch gap-1.5">
-          <div className="-mx-1 flex flex-1 gap-1.5 overflow-x-auto px-1 pb-1">
+          <div className="-mx-1 flex min-w-0 flex-1 gap-1.5 overflow-x-auto px-1 pb-1 [mask-image:linear-gradient(to_right,black_calc(100%-20px),transparent)]">
             {Array.from({ length: VISIBLE_DAYS }, (_, i) => addDays(today, i)).map((date) => {
               const label = formatDayLabel(date);
               const active = format(date, "yyyy-MM-dd") === localDate;
