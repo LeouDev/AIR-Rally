@@ -844,6 +844,33 @@ export type Database = {
         };
         Returns: number;
       };
+      /**
+       * Debits the wallet and records the amount on the booking as one
+       * atomic step. service_role-only. Throws if the booking isn't the
+       * user's own pending booking, if credit was already applied to it,
+       * if the amount exceeds the price, or if the balance is short.
+       * Returns the resulting balance.
+       */
+      apply_credit_to_booking: {
+        Args: {
+          p_booking_id: string;
+          p_user_id: string;
+          p_amount: number;
+        };
+        Returns: number;
+      };
+      /**
+       * Confirms a booking whose credit covers its full price, with no
+       * PayMongo session involved. service_role-only, idempotent. Returns
+       * false when the booking isn't fully covered or is already confirmed.
+       */
+      confirm_credit_only_booking: {
+        Args: {
+          p_booking_id: string;
+          p_user_id: string;
+        };
+        Returns: boolean;
+      };
       /** Atomically confirms the replacement booking (if not already) + cancels the original + marks the reschedule completed. See lib/services/reschedules.ts. */
       complete_reschedule: {
         Args: {

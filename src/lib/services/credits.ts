@@ -111,6 +111,53 @@ export async function deductCredit(input: {
   return data ?? 0;
 }
 
+/**
+ * Applies wallet credit to a pending booking. SERVER ONLY.
+ *
+ * The wallet debit and the booking's credit_amount_applied are written in
+ * one database transaction inside the RPC, so the two can never disagree —
+ * there is no window in which the wallet has been charged but the booking
+ * doesn't know it, or vice versa. Every authorisation check (the booking is
+ * this user's, still pending, not already credited, and the amount fits
+ * within the price) also lives in the RPC, where a caller cannot skip it.
+ *
+ * Throws if any of those fail, including an insufficient balance. Returns
+ * the resulting balance.
+ */
+export async function applyCreditToBooking(input: { userId: string; bookingId: string; amount: number }): Promise<number> {
+  if (!Number.isInteger(input.amount) || input.amount <= 0) {
+    throw new Error("Applied credit must be a positive whole number of centavos.");
+  }
+
+  const { data, error } = await getCreditsServiceRoleClient().rpc("apply_credit_to_booking", {
+    p_booking_id: input.bookingId,
+    p_user_id: input.userId,
+    p_amount: input.amount,
+  });
+  if (error) throw error;
+  return data ?? 0;
+}
+
+/**
+ * Confirms a booking paid entirely from the wallet. SERVER ONLY.
+ *
+ * These bookings have no PayMongo session, so the webhook — normally the
+ * only thing allowed to mark a booking paid — can never confirm them. This
+ * is the sole alternative path, and it is deliberately narrow: the RPC
+ * confirms only when the applied credit equals the full price, so it can
+ * never be used to shortcut a booking that still owes money.
+ *
+ * Idempotent: returns false if the booking was already confirmed.
+ */
+export async function confirmCreditOnlyBooking(input: { userId: string; bookingId: string }): Promise<boolean> {
+  const { data, error } = await getCreditsServiceRoleClient().rpc("confirm_credit_only_booking", {
+    p_booking_id: input.bookingId,
+    p_user_id: input.userId,
+  });
+  if (error) throw error;
+  return data ?? false;
+}
+
 // --- Cancellation policy ---------------------------------------------------
 
 /** Who or what ended the booking — the input the policy actually turns on. */

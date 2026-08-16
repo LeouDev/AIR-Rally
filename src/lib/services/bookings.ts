@@ -32,7 +32,9 @@ export type BookingErrorReason =
   | "booking_not_found"
   | "unauthorized_cancellation"
   | "already_cancelled"
-  | "cancellation_window_passed";
+  | "cancellation_window_passed"
+  /** A fully credit-covered booking could not be confirmed — see lib/actions/checkout.ts. */
+  | "credit_confirmation_failed";
 
 /**
  * Typed domain error for every booking-creation/cancellation failure mode

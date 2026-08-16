@@ -2,6 +2,7 @@
 
 import { createBooking, cancelBooking, attachPaymongoCheckoutSession, BookingError } from "@/lib/services/bookings";
 import { createPayMongoCheckoutSession, PayMongoError } from "@/lib/services/paymongo";
+import { getUserCreditBalance, splitBookingPayment, applyCreditToBooking, confirmCreditOnlyBooking } from "@/lib/services/credits";
 import { calculateMarketplaceSplit } from "@/lib/services/commission";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
 import { isPaymongoMarketplaceSplitEnabled } from "@/lib/paymongoLaunchGates";
@@ -31,8 +32,16 @@ import { getServerClient, type ActionResult } from "@/lib/actions/auth";
  * Never create a session for a booking that wasn't successfully created
  * first — see ARCHITECTURE.md's Phase 4B section for why the reverse
  * ordering would risk charging for a slot the database refuses.
+ *
+ * AIR/Rally Credits sit between those two steps: the booking's price is
+ * settled from the wallet first, and only the remainder — if any — is sent
+ * to PayMongo. The whole split is recomputed server-side from the booking's
+ * own price_amount and the wallet's own balance, so nothing about it can be
+ * influenced by the client.
  */
-export async function createCheckoutSessionAction(values: CreateBookingValues): Promise<ActionResult<{ url: string }>> {
+export async function createCheckoutSessionAction(
+  values: CreateBookingValues
+): Promise<ActionResult<{ url: string; creditApplied: number; amountDue: number }>> {
   const parsed = createBookingSchema.safeParse(values);
   if (!parsed.success) {
     return { success: false, error: "Please fix the errors below and try again." };
@@ -62,17 +71,51 @@ export async function createCheckoutSessionAction(values: CreateBookingValues): 
 
     const display = await getCourtDisplayInfo(supabase, parsed.data.courtId);
     const siteUrl = await getSiteUrl();
+    const confirmationUrl = `${siteUrl}/bookings/${booking.id}/confirmation`;
+
+    // The wallet balance is read server-side under the user's own RLS, and
+    // the split is computed from it and the booking's own server-computed
+    // price. The client never supplies, and cannot influence, either number.
+    const { balance } = await getUserCreditBalance(supabase, user.id);
+    const { creditApplied, amountDue, fullyCoveredByCredit } = splitBookingPayment({
+      priceAmount: booking.price_amount,
+      availableCredit: balance,
+    });
+
+    if (creditApplied > 0) {
+      // Debits the wallet and stamps credit_amount_applied on the booking in
+      // one transaction. Its own lock is what makes two simultaneous
+      // checkouts safe: the second either sees the reduced balance or fails,
+      // never both spending the same credit. If anything below this line
+      // throws, the catch cancels the booking and the restore trigger
+      // returns these credits automatically.
+      await applyCreditToBooking({ userId: user.id, bookingId: booking.id, amount: creditApplied });
+    }
+
+    if (fullyCoveredByCredit) {
+      // Nothing is owed, so no PayMongo session is created at all. This is
+      // the one confirmation path that doesn't run through the webhook,
+      // and it is only reachable when the credit covers the full price —
+      // the RPC re-checks that itself rather than trusting this branch.
+      const confirmed = await confirmCreditOnlyBooking({ userId: user.id, bookingId: booking.id });
+      if (!confirmed) {
+        throw new BookingError("credit_confirmation_failed", "We couldn't complete this booking with your credits. Please try again.");
+      }
+      return { success: true, data: { url: confirmationUrl, creditApplied, amountDue: 0 } };
+    }
 
     // Marketplace split only applies when (a) the platform-wide kill
     // switch is explicitly enabled — see lib/paymongoLaunchGates.ts — AND
     // (b) the venue has a fully activated PayMongo Platforms account.
     // Every other combination falls back to plain, non-split checkout,
-    // which collects to the platform account. Computed fresh here from
-    // the booking's own server-computed price_amount — never from a
-    // client-supplied amount, never from a stale/cached value.
+    // which collects to the platform account.
+    //
+    // Computed from amountDue, not price_amount: a split can only divide
+    // money PayMongo actually collects, and credit is settled internally.
+    // Splitting the full price would promise out more than was received.
     const marketplaceSplit =
       isPaymongoMarketplaceSplitEnabled() && display?.venuePaymongoActivationStatus === "activated" && display.venuePaymongoAccountId
-        ? { ...calculateMarketplaceSplit(booking.price_amount), venuePaymongoAccountId: display.venuePaymongoAccountId }
+        ? { ...calculateMarketplaceSplit(amountDue), venuePaymongoAccountId: display.venuePaymongoAccountId }
         : undefined;
 
     // PayMongo Checkout Sessions have no confirmed equivalent of Stripe's
@@ -83,8 +126,14 @@ export async function createCheckoutSessionAction(values: CreateBookingValues): 
       booking,
       venueName: display?.venueName ?? "Air/Rally venue",
       courtName: display?.courtName ?? "Court",
-      successUrl: `${siteUrl}/bookings/${booking.id}/confirmation`,
-      cancelUrl: `${siteUrl}/bookings/${booking.id}/confirmation?cancelled=true`,
+      successUrl: confirmationUrl,
+      cancelUrl: `${confirmationUrl}?cancelled=true`,
+      // Charge only what the wallet didn't cover. When no credit applied,
+      // amountDue === price_amount and this is the pre-credits behaviour
+      // exactly. confirm_paymongo_booking_payment() expects this same
+      // figure (price_amount - credit_amount_applied), so the two agree by
+      // construction rather than by coincidence.
+      chargeAmountOverride: amountDue,
       marketplaceSplit: marketplaceSplit && {
         platformFeeAmount: marketplaceSplit.platformFeeAmount,
         venuePaymongoAccountId: marketplaceSplit.venuePaymongoAccountId,
@@ -102,10 +151,13 @@ export async function createCheckoutSessionAction(values: CreateBookingValues): 
       }
     );
 
-    return { success: true, data: { url: session.url } };
+    return { success: true, data: { url: session.url, creditApplied, amountDue } };
   } catch (error) {
     // The booking was created but something after it failed — release the
-    // slot rather than leaving an unpayable pending booking behind.
+    // slot rather than leaving an unpayable pending booking behind. This
+    // also returns any credit already applied: cancelling a pending booking
+    // fires the restore trigger, so a failure here never strands a wallet
+    // debit against a booking that won't happen.
     if (bookingId) {
       try {
         await cancelBooking(supabase, user.id, bookingId);

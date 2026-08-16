@@ -97,6 +97,47 @@ describe("splitBookingPayment", () => {
   });
 });
 
+// A booking settled entirely from the wallet is still a booking the
+// customer "paid" for — the amount paid is simply the credit applied. The
+// policy must treat it identically to a card payment, or credit-paid
+// bookings would silently become non-refundable.
+describe("cancellation of a credit-paid booking", () => {
+  it("credits back the applied amount when cancelled well ahead", () => {
+    const d = resolveCancellationCredit({ cause: "customer", amountPaid: 50000, startTime: START, now: WELL_AHEAD });
+    expect(d).toMatchObject({ amount: 50000, eligible: true });
+  });
+
+  it("forfeits it inside the cutoff, exactly as a card payment would", () => {
+    const d = resolveCancellationCredit({ cause: "customer", amountPaid: 50000, startTime: START, now: LAST_MINUTE });
+    expect(d).toMatchObject({ amount: 0, eligible: false });
+  });
+
+  it("still compensates in full when the venue is at fault", () => {
+    const d = resolveCancellationCredit({ cause: "venue", amountPaid: 50000, startTime: START, now: LAST_MINUTE });
+    expect(d).toMatchObject({ amount: 50000, eligible: true });
+  });
+});
+
+// Rescheduling prices a change as replacement.price_amount -
+// original.price_amount. Credit is recorded in its own column and never
+// reduces price_amount, so that arithmetic is unaffected by any credit the
+// customer applied at checkout. splitBookingPayment is the function that
+// would break the invariant if it ever mutated the price.
+describe("reschedule compatibility", () => {
+  it("leaves the booking price untouched when credit is applied", () => {
+    const priceAmount = 50000;
+    const split = splitBookingPayment({ priceAmount, availableCredit: 30000 });
+    expect(split.creditApplied + split.amountDue).toBe(priceAmount);
+  });
+
+  it("keeps credit and the charged amount summing to the price in every case", () => {
+    for (const availableCredit of [0, 1, 25000, 49999, 50000, 999999]) {
+      const split = splitBookingPayment({ priceAmount: 50000, availableCredit });
+      expect(split.creditApplied + split.amountDue).toBe(50000);
+    }
+  });
+});
+
 describe("getUserCreditBalance", () => {
   it("reports zero for a user who has never had a wallet row", async () => {
     const supabase = createMockSupabase({ data: null, error: null });
