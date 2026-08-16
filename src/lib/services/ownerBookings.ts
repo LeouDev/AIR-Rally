@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, BookingStatus } from "@/lib/supabase/types";
+import type { Booking, Database, BookingStatus } from "@/lib/supabase/types";
 import { listVenuesByOwner } from "@/lib/services/venues";
 import { getOwnerCourtSchedule, todayInTimezone } from "@/lib/services/ownerAvailability";
 
@@ -38,7 +38,7 @@ export type OwnerBookingWithDetails = {
   status: BookingStatus;
   priceAmount: number;
   currency: string;
-  paymentProvider: "stripe" | "paymongo";
+  paymentProvider: Booking["payment_provider"];
   paidAt: string | null;
   cancelledAt: string | null;
   confirmationCode: string;

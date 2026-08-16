@@ -6,12 +6,13 @@ import { getSupabaseEnv } from "@/lib/supabase/env";
  * The one place `SUPABASE_SECRET_KEY` is ever read — narrowly scoped to
  * exactly the operations that genuinely cannot be safely gated any other
  * way: completing/failing a booking_reschedules row (see
- * lib/services/reschedules.ts). Every other write in this app (booking
+ * lib/services/reschedules.ts) and moving AIR/Rally Credits (see
+ * lib/services/credits.ts). Every other write in this app (booking
  * creation/cancellation, payment confirmation, refunds, venue/court
  * management) goes through the ordinary per-request, RLS-scoped client
  * from lib/supabase/server.ts — this file is deliberately NOT a general
- * "admin client," and must never be imported anywhere outside
- * reschedules.ts's own trusted RPC calls.
+ * "admin client," and must never be imported outside those two modules'
+ * own trusted RPC calls.
  *
  * Why this is necessary here specifically, and wasn't needed anywhere
  * else in this codebase: `confirm_booking_payment()` and similar
@@ -31,10 +32,17 @@ import { getSupabaseEnv } from "@/lib/supabase/env";
  * what actually closes that gap — see the production-readiness audit's
  * finding B1.
  *
- * Never imported by anything outside lib/services/reschedules.ts — grep
- * for `createServiceRoleClient` before adding a new call site, and never
- * import this module from a "use client" component or any code path
- * reachable with only a customer's own session.
+ * issue_credit()/spend_credit() (20260810000036_air_rally_credits.sql)
+ * are restricted for the same reason: a wallet movement is authorised by
+ * WHICH CODE is calling — a server action that already checked the caller
+ * — not by any value in the request, so leaving them callable by
+ * `authenticated` would let any session mint itself credit.
+ *
+ * Never imported by anything outside lib/services/reschedules.ts and
+ * lib/services/credits.ts — grep for `createServiceRoleClient` before
+ * adding a new call site, and never import this module from a
+ * "use client" component or any code path reachable with only a
+ * customer's own session.
  */
 export function createServiceRoleClient() {
   const { url } = getSupabaseEnv();

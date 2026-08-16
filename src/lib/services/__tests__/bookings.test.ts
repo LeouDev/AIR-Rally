@@ -42,6 +42,7 @@ const BOOKING_ROW: Booking = {
   stripe_payment_intent_id: null,
   paid_at: null,
   payment_provider: "stripe",
+  credit_amount_applied: 0,
   paymongo_checkout_session_id: null,
   paymongo_payment_intent_id: null,
   platform_fee_amount: null,

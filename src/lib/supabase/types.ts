@@ -271,6 +271,38 @@ export type Follow = {
   created_at: string;
 };
 
+export type CreditTransactionType =
+  | "cancellation_compensation"
+  | "admin_adjustment"
+  | "promotion_bonus"
+  | "booking_payment";
+
+/**
+ * AIR/Rally Credits ledger row — immutable. Positive amounts add credit,
+ * negative amounts spend it. No client role has INSERT/UPDATE/DELETE;
+ * every row comes from issue_credit()/spend_credit() (service_role only).
+ */
+export type CreditTransaction = {
+  id: string;
+  user_id: string;
+  /** Integer minor units (centavos), never zero. */
+  amount: number;
+  transaction_type: CreditTransactionType;
+  /** Booking id where relevant, otherwise null. */
+  reference_id: string | null;
+  description: string | null;
+  created_at: string;
+};
+
+export type UserCreditWallet = {
+  id: string;
+  user_id: string;
+  /** Derived from the ledger by trigger — never client-writable. */
+  balance: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ClubSkillLevel = "beginner" | "intermediate" | "advanced" | "mixed";
 export type ClubType = "social" | "competitive" | "training" | "casual";
 export type ClubVisibility = "public" | "approval_required" | "private";
@@ -415,7 +447,9 @@ export type Booking = {
    * for a PayMongo booking, or vice versa; the two providers' columns are
    * deliberately separate, never shared.
    */
-  payment_provider: "stripe" | "paymongo";
+  payment_provider: "stripe" | "paymongo" | "air_rally_credit";
+  /** AIR/Rally Credits applied to this booking, in integer minor units. */
+  credit_amount_applied: number;
   /** Set by the booking's own owner while attaching a freshly-created PayMongo Checkout Session — same posture as stripe_checkout_session_id. */
   paymongo_checkout_session_id: string | null;
   /** Set only by confirm_paymongo_booking_payment() (SECURITY DEFINER) once PayMongo payment is verified — never client-writable. */
@@ -685,6 +719,8 @@ export type Database = {
         EventAttendee,
         Pick<EventAttendee, "event_id" | "user_id"> & Partial<Pick<EventAttendee, "status">>
       >;
+      user_credit_wallets: TableDef<UserCreditWallet, never, never>;
+      credit_transactions: TableDef<CreditTransaction, never, never>;
       clubs: TableDef<
         Club,
         Pick<Club, "owner_id" | "name"> &
@@ -786,6 +822,27 @@ export type Database = {
           block_id: string | null;
           block_reason: string | null;
         }[];
+      };
+      /** Adds AIR/Rally Credits. service_role-only — see lib/services/credits.ts. Returns the resulting balance. */
+      issue_credit: {
+        Args: {
+          p_user_id: string;
+          p_amount: number;
+          p_transaction_type: string;
+          p_reference_id?: string | null;
+          p_description?: string | null;
+        };
+        Returns: number;
+      };
+      /** Spends AIR/Rally Credits under a wallet row lock. service_role-only. Returns the resulting balance. */
+      spend_credit: {
+        Args: {
+          p_user_id: string;
+          p_amount: number;
+          p_reference_id: string;
+          p_description?: string | null;
+        };
+        Returns: number;
       };
       /** Atomically confirms the replacement booking (if not already) + cancels the original + marks the reschedule completed. See lib/services/reschedules.ts. */
       complete_reschedule: {

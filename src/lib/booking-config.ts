@@ -43,3 +43,15 @@ export const PLATFORM_FEE_PERCENT = 0.05;
  * lib/services/reschedules.ts.
  */
 export const RESCHEDULE_CUTOFF_HOURS = 24;
+
+/**
+ * AIR/Rally cancellation-credit policy (see lib/services/credits.ts).
+ *
+ * A customer who cancels at least this far ahead is eligible for
+ * compensation in AIR/Rally Credits; inside the window they are not.
+ * Anything the customer did not cause — a venue cancelling, a venue
+ * becoming unavailable, or a system/payment error — is compensated in
+ * full regardless of how close to the start time it happens, because the
+ * customer bears no responsibility for it.
+ */
+export const CANCELLATION_CREDIT_CUTOFF_HOURS = 48;
