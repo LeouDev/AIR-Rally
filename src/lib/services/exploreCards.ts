@@ -89,6 +89,8 @@ export async function toVenueCardData(supabase: Client, rows: VenueMarketplaceRo
         };
       }),
       openStatus: computeOpenStatus(hoursByVenue.get(venue.id) ?? [], venue.timezone),
+      latitude: venue.latitude,
+      longitude: venue.longitude,
     };
   });
 }

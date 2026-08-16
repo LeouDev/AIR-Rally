@@ -10,7 +10,7 @@ import { ReviewForm } from "@/components/court/ReviewForm";
 import { Rating } from "@/components/court/Rating";
 import { BookingWidget } from "@/components/court/BookingWidget";
 import { MobileBookingBar } from "@/components/court/MobileBookingBar";
-import { MapPlaceholder } from "@/components/search/MapPlaceholder";
+import { VenueMapLoader } from "@/components/search/VenueMapLoader";
 import { FavoriteButton } from "@/components/court/FavoriteButton";
 import { BackButton } from "@/components/shared/BackButton";
 import { deterministicSurfaceColor } from "@/components/court/CourtSurface";
@@ -175,7 +175,14 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           <section>
             <h2 className="text-lg font-semibold text-foreground">Location</h2>
             <div className="mt-3 h-64">
-              <MapPlaceholder />
+              <VenueMapLoader
+                markers={
+                  venue.latitude !== null && venue.longitude !== null
+                    ? [{ id: venue.id, name: venue.name, lat: venue.latitude, lng: venue.longitude, href: `/courts/${venue.id}`, price: venue.starting_price }]
+                    : []
+                }
+                className="h-64"
+              />
             </div>
           </section>
 

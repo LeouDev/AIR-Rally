@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createDraftVenue, updateVenue, deleteVenue, setVenueStatus, setOperatingHours } from "@/lib/services/venues";
 import { setVenueAmenities } from "@/lib/services/amenities";
+import { geocodeAddress } from "@/lib/services/geocoding";
 import {
   createVenueDraftSchema,
   updateVenueSchema,
@@ -46,7 +47,13 @@ export async function createVenueDraftAction(values: CreateVenueDraftValues): Pr
     const { error: roleError } = await supabase.rpc("request_venue_owner_role");
     if (roleError) throw roleError;
 
-    const venue = await createDraftVenue(supabase, user.id, parsed.data);
+    const coords = await geocodeAddress({
+      address: parsed.data.address,
+      city: parsed.data.city,
+      stateProvince: parsed.data.stateProvince,
+      country: parsed.data.country,
+    });
+    const venue = await createDraftVenue(supabase, user.id, parsed.data, coords);
     revalidatePath("/list-your-court");
     return { success: true, data: venue };
   } catch (error) {
@@ -82,7 +89,13 @@ export async function updateVenueAction(venueId: string, values: UpdateVenueValu
   }
 
   try {
-    const venue = await updateVenue(supabase, venueId, parsed.data);
+    const coords = await geocodeAddress({
+      address: parsed.data.address,
+      city: parsed.data.city,
+      stateProvince: parsed.data.stateProvince,
+      country: parsed.data.country,
+    });
+    const venue = await updateVenue(supabase, venueId, parsed.data, coords);
     revalidatePath(`/list-your-court/${venueId}`);
     revalidatePath("/list-your-court");
     return { success: true, data: venue };

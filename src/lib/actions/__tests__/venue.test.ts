@@ -17,6 +17,11 @@ jest.mock("../../services/venues", () => ({
   setOperatingHours: jest.fn(),
 }));
 jest.mock("../../services/amenities", () => ({ setVenueAmenities: jest.fn() }));
+// Geocoding is a live network call in real code — mocked here so these
+// tests never hit the actual OSM Nominatim API. Resolves null (its own
+// documented "couldn't geocode" outcome) rather than a fake LatLng, since
+// nothing in this file asserts on the coordinates it's called with.
+jest.mock("../../services/geocoding", () => ({ geocodeAddress: jest.fn().mockResolvedValue(null) }));
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
 const mockGetServerClient = getServerClient as jest.MockedFunction<typeof getServerClient>;
@@ -79,9 +84,12 @@ describe("createVenueDraftAction", () => {
     const result = await createVenueDraftAction(validDraft);
 
     expect(result.success).toBe(true);
-    expect(mockCreateDraftVenue).toHaveBeenCalledWith(expect.anything(), "user-1", expect.objectContaining({
-      name: validDraft.name,
-    }));
+    expect(mockCreateDraftVenue).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      expect.objectContaining({ name: validDraft.name }),
+      null
+    );
   });
 
   // P0 role-gating: venues' own INSERT RLS policy now requires
@@ -135,9 +143,12 @@ describe("updateVenueAction", () => {
 
     await updateVenueAction("venue-1", validDraft);
 
-    expect(mockUpdateVenue).toHaveBeenCalledWith(expect.anything(), "venue-1", expect.objectContaining({
-      name: validDraft.name,
-    }));
+    expect(mockUpdateVenue).toHaveBeenCalledWith(
+      expect.anything(),
+      "venue-1",
+      expect.objectContaining({ name: validDraft.name }),
+      null
+    );
   });
 
   it("maps a Postgres error to a friendly message", async () => {

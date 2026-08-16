@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Venue, VenueMarketplaceRow, VenueDetail, Amenity, VenueOperatingHours } from "@/lib/supabase/types";
 import type { CreateVenueDraftValues, UpdateVenueValues } from "@/lib/validations/venue";
 import type { SetOperatingHoursValues } from "@/lib/validations/venueOperatingHours";
+import type { LatLng } from "@/lib/services/maps";
 import { getPublicImageUrl } from "@/lib/services/images";
 
 type Client = SupabaseClient<Database>;
@@ -12,7 +13,8 @@ const POSTGRES_INVALID_TEXT_REPRESENTATION = "22P02";
 export async function createDraftVenue(
   supabase: Client,
   ownerId: string,
-  values: CreateVenueDraftValues
+  values: CreateVenueDraftValues,
+  coords?: LatLng | null
 ): Promise<Venue> {
   const { data, error } = await supabase
     .from("venues")
@@ -30,6 +32,8 @@ export async function createDraftVenue(
       indoor_outdoor: values.indoorOutdoor,
       number_of_courts: values.numberOfCourts,
       status: "draft",
+      latitude: coords?.lat ?? null,
+      longitude: coords?.lng ?? null,
     })
     .select("*")
     .single();
@@ -161,7 +165,19 @@ export async function setVenueStatus(
   return data;
 }
 
-export async function updateVenue(supabase: Client, venueId: string, values: UpdateVenueValues): Promise<Venue> {
+/**
+ * `coords` is only passed when the caller successfully re-geocoded the
+ * new address (see updateVenueAction) — omitting it here (rather than
+ * writing null) means an address edit that fails to geocode keeps the
+ * venue's last-known coordinates instead of silently blanking its map
+ * marker.
+ */
+export async function updateVenue(
+  supabase: Client,
+  venueId: string,
+  values: UpdateVenueValues,
+  coords?: LatLng | null
+): Promise<Venue> {
   const { data, error } = await supabase
     .from("venues")
     .update({
@@ -176,6 +192,7 @@ export async function updateVenue(supabase: Client, venueId: string, values: Upd
       website: values.website || null,
       indoor_outdoor: values.indoorOutdoor,
       number_of_courts: values.numberOfCourts,
+      ...(coords ? { latitude: coords.lat, longitude: coords.lng } : {}),
     })
     .eq("id", venueId)
     .select("*")

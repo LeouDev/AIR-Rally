@@ -32,6 +32,9 @@ export type VenueCardData = {
   courtThumbnails?: { id: string; imageUrl: string | null; surfaceType: string | null }[];
   /** Computed purely from operating hours, no booking lookups — see computeOpenStatus(). */
   openStatus?: { isOpenNow: boolean; label: string };
+  /** Null until the venue's address has been successfully geocoded — see lib/services/geocoding.ts. */
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 type CourtCardProps = {
