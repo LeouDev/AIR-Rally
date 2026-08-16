@@ -9,6 +9,7 @@ import { ReviewPreview } from "@/components/court/ReviewPreview";
 import { ReviewForm } from "@/components/court/ReviewForm";
 import { Rating } from "@/components/court/Rating";
 import { BookingWidget } from "@/components/court/BookingWidget";
+import { MobileBookingBar } from "@/components/court/MobileBookingBar";
 import { MapPlaceholder } from "@/components/search/MapPlaceholder";
 import { FavoriteButton } from "@/components/court/FavoriteButton";
 import { BackButton } from "@/components/shared/BackButton";
@@ -108,7 +109,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
   const todayDayOfWeek = new Date(`${todayInTimezone(venue.timezone)}T00:00:00Z`).getUTCDay();
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-6xl px-4 pt-8 pb-32 sm:px-6 lg:px-8 lg:pb-8">
       <BackButton />
       <div className="relative">
         <ImageGallery
@@ -198,7 +199,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           </section>
         </div>
 
-        <div className="lg:col-span-1">
+        <div id="book-a-court" className="scroll-mt-24 lg:col-span-1">
           <div className="lg:sticky lg:top-24">
             <BookingWidget
               venueName={venue.name}
@@ -211,6 +212,8 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           </div>
         </div>
       </div>
+
+      {venue.courts.length > 0 && <MobileBookingBar startingPrice={venue.starting_price} targetId="book-a-court" />}
     </div>
   );
 }
