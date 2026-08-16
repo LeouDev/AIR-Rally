@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import { MapPin, Home, Sun, Layers, Building2 } from "lucide-react";
 import { ImageGallery } from "@/components/court/ImageGallery";
 import { AmenityList } from "@/components/court/AmenityList";
+import { CourtsSection, type CourtWithThumbnail } from "@/components/court/CourtsSection";
+import { OperatingHoursDisplay } from "@/components/court/OperatingHoursDisplay";
 import { ReviewPreview } from "@/components/court/ReviewPreview";
 import { ReviewForm } from "@/components/court/ReviewForm";
 import { Rating } from "@/components/court/Rating";
@@ -13,10 +15,12 @@ import { BackButton } from "@/components/shared/BackButton";
 import { deterministicSurfaceColor } from "@/components/court/CourtSurface";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
-import { getVenueDetail } from "@/lib/services/venues";
+import { getVenueDetail, listOperatingHours } from "@/lib/services/venues";
 import { listReviewsByVenue, getReviewEligibility } from "@/lib/services/reviews";
 import { isFavorite } from "@/lib/services/favorites";
 import { getPublicImageUrl } from "@/lib/services/images";
+import { getCourtAvailabilityToday, type CustomerAvailabilitySlot } from "@/lib/services/customerAvailability";
+import { todayInTimezone } from "@/lib/services/ownerAvailability";
 import type { IndoorOutdoor } from "@/lib/supabase/types";
 
 // Real per-viewer data (favorite state) and real per-request marketplace
@@ -61,7 +65,11 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
   const venue = await getVenueDetail(supabase, id);
   if (!venue) notFound();
 
-  const [reviews, user] = await Promise.all([listReviewsByVenue(supabase, id, 3), getCurrentUser()]);
+  const [reviews, user, operatingHours] = await Promise.all([
+    listReviewsByVenue(supabase, id, 3),
+    getCurrentUser(),
+    listOperatingHours(supabase, id),
+  ]);
   const favorited = user ? await isFavorite(supabase, user.id, id) : false;
   const reviewEligibility = user ? await getReviewEligibility(supabase, user.id, id) : { eligible: false, bookingId: null };
 
@@ -71,6 +79,33 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
     alt: image.alt_text ?? venue.name,
   }));
   const address = [venue.address, venue.city, venue.state_province, venue.country].filter(Boolean).join(", ");
+
+  // First uploaded photo per court, reusing the images this page already
+  // fetched via getVenueDetail() rather than a second image query.
+  const courtImageByCourtId = new Map<string, string>();
+  for (const image of venue.images) {
+    if (image.court_id && !courtImageByCourtId.has(image.court_id)) {
+      courtImageByCourtId.set(image.court_id, getPublicImageUrl(supabase, image.storage_path));
+    }
+  }
+
+  const activeCourts = venue.courts.filter((court) => court.status === "active");
+  const courtsWithThumbnail: CourtWithThumbnail[] = activeCourts.map((court) => ({
+    ...court,
+    imageUrl: courtImageByCourtId.get(court.id) ?? null,
+  }));
+
+  // One RPC call per active court, today only — the same customer-safe
+  // getAvailableSlots() the booking widget already uses, never the
+  // owner-only schedule RPC. See customerAvailability.ts for why.
+  const availabilitySlotsByCourt = await Promise.all(
+    activeCourts.map((court) => getCourtAvailabilityToday(supabase, court.id, venue.id, venue.timezone))
+  );
+  const availabilityByCourt: Record<string, CustomerAvailabilitySlot[]> = Object.fromEntries(
+    activeCourts.map((court, i) => [court.id, availabilitySlotsByCourt[i]])
+  );
+
+  const todayDayOfWeek = new Date(`${todayInTimezone(venue.timezone)}T00:00:00Z`).getUTCDay();
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -116,9 +151,23 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           )}
 
           <section>
+            <h2 className="text-lg font-semibold text-foreground">Courts</h2>
+            <div className="mt-3">
+              <CourtsSection courts={courtsWithThumbnail} availabilityByCourt={availabilityByCourt} />
+            </div>
+          </section>
+
+          <section>
             <h2 className="text-lg font-semibold text-foreground">Amenities</h2>
             <div className="mt-3">
               <AmenityList amenities={venue.amenities} />
+            </div>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold text-foreground">Hours</h2>
+            <div className="mt-3 max-w-sm">
+              <OperatingHoursDisplay operatingHours={operatingHours} todayDayOfWeek={todayDayOfWeek} />
             </div>
           </section>
 

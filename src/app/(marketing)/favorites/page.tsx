@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { listFavoritedVenues } from "@/lib/services/venues";
-import { getPublicImageUrl } from "@/lib/services/images";
+import { toVenueCardData } from "@/lib/services/exploreCards";
 
 export const metadata = { title: "Favorites" };
 // Real, per-user data — proxy.ts already redirects unauthenticated
@@ -18,6 +18,7 @@ export default async function FavoritesPage() {
   const user = await getCurrentUser();
   const supabase = await createClient();
   const venues = user ? await listFavoritedVenues(supabase, user.id) : [];
+  const cards = await toVenueCardData(supabase, venues);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
@@ -25,23 +26,10 @@ export default async function FavoritesPage() {
       <p className="mt-1 text-muted-foreground">Courts you&apos;ve saved for later.</p>
 
       <div className="mt-8">
-        {venues.length > 0 ? (
+        {cards.length > 0 ? (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {venues.map((venue) => (
-              <CourtCard
-                key={venue.id}
-                venue={{
-                  id: venue.id,
-                  name: venue.name,
-                  city: venue.city,
-                  indoorOutdoor: venue.indoor_outdoor,
-                  averageRating: venue.average_rating,
-                  reviewCount: venue.review_count,
-                  startingPrice: venue.starting_price,
-                  coverImageUrl: venue.cover_image_path ? getPublicImageUrl(supabase, venue.cover_image_path) : null,
-                }}
-                isFavorited
-              />
+            {cards.map((venue) => (
+              <CourtCard key={venue.id} venue={venue} isFavorited />
             ))}
           </div>
         ) : (

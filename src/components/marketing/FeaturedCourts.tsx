@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { listFeaturedVenues } from "@/lib/services/venues";
 import { listFavoriteVenueIds } from "@/lib/services/favorites";
-import { getPublicImageUrl } from "@/lib/services/images";
+import { toVenueCardData } from "@/lib/services/exploreCards";
 
 export async function FeaturedCourts() {
   const supabase = await createClient();
@@ -18,6 +18,7 @@ export async function FeaturedCourts() {
   }
 
   const favoritedIds = user ? new Set(await listFavoriteVenueIds(supabase, user.id)) : new Set<string>();
+  const cards = await toVenueCardData(supabase, venues);
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
@@ -36,21 +37,8 @@ export async function FeaturedCourts() {
       />
 
       <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {venues.map((venue) => (
-          <CourtCard
-            key={venue.id}
-            venue={{
-              id: venue.id,
-              name: venue.name,
-              city: venue.city,
-              indoorOutdoor: venue.indoor_outdoor,
-              averageRating: venue.average_rating,
-              reviewCount: venue.review_count,
-              startingPrice: venue.starting_price,
-              coverImageUrl: venue.cover_image_path ? getPublicImageUrl(supabase, venue.cover_image_path) : null,
-            }}
-            isFavorited={favoritedIds.has(venue.id)}
-          />
+        {cards.map((venue) => (
+          <CourtCard key={venue.id} venue={venue} isFavorited={favoritedIds.has(venue.id)} />
         ))}
       </div>
     </section>

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Rating } from "@/components/court/Rating";
 import { FavoriteButton } from "@/components/court/FavoriteButton";
 import { CourtSurface, deterministicSurfaceColor } from "@/components/court/CourtSurface";
+import { cn } from "@/lib/utils";
 import type { IndoorOutdoor } from "@/lib/supabase/types";
 
 /**
@@ -12,7 +13,9 @@ import type { IndoorOutdoor } from "@/lib/supabase/types";
  * shape the card actually renders, so any page that has *a* venue-like
  * object (the marketplace view, a single-venue detail fetch, a future
  * search-result shape) can hand it over without over-fetching or
- * reshaping to match a wider type than the card needs.
+ * reshaping to match a wider type than the card needs. Explore/
+ * Featured/Favorites all build this via exploreCards.ts#toVenueCardData
+ * rather than mapping it inline three separate times.
  */
 export type VenueCardData = {
   id: string;
@@ -22,8 +25,13 @@ export type VenueCardData = {
   averageRating: number;
   reviewCount: number;
   startingPrice: number | null;
+  activeCourtCount: number;
   /** Already-resolved public URL, or null/undefined to fall back to the illustration. */
   coverImageUrl?: string | null;
+  /** Up to a few active courts' own photos (or null per-court to fall back to an illustration swatch) — a peek at the actual courts, distinct from the one venue-level cover photo. */
+  courtThumbnails?: { id: string; imageUrl: string | null; surfaceType: string | null }[];
+  /** Computed purely from operating hours, no booking lookups — see computeOpenStatus(). */
+  openStatus?: { isOpenNow: boolean; label: string };
 };
 
 type CourtCardProps = {
@@ -78,6 +86,31 @@ export function CourtCard({ venue, isFavorited = false }: CourtCardProps) {
             {venue.city}
           </p>
         )}
+        {venue.openStatus && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span
+              className={cn("size-1.5 shrink-0 rounded-full", venue.openStatus.isOpenNow ? "bg-success" : "bg-muted-foreground/40")}
+              aria-hidden="true"
+            />
+            {venue.openStatus.label}
+          </p>
+        )}
+        {venue.courtThumbnails && venue.courtThumbnails.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            {venue.courtThumbnails.map((court) => (
+              <div key={court.id} className="relative size-7 shrink-0 overflow-hidden rounded-md ring-1 ring-border">
+                {court.imageUrl ? (
+                  <Image src={court.imageUrl} alt="" fill sizes="28px" className="object-cover" />
+                ) : (
+                  <CourtSurface surfaceColor={deterministicSurfaceColor(court.id)} indoor={isIndoor} />
+                )}
+              </div>
+            ))}
+            {venue.activeCourtCount > venue.courtThumbnails.length && (
+              <span className="text-xs text-muted-foreground">+{venue.activeCourtCount - venue.courtThumbnails.length}</span>
+            )}
+          </div>
+        )}
         <div className="mt-auto flex items-center justify-between pt-2">
           <p className="text-sm text-muted-foreground">
             {venue.startingPrice !== null ? (
@@ -86,6 +119,11 @@ export function CourtCard({ venue, isFavorited = false }: CourtCardProps) {
               </>
             ) : (
               "Pricing unavailable"
+            )}
+            {venue.activeCourtCount > 0 && (
+              <span className="ml-1.5 text-xs text-muted-foreground">
+                · {venue.activeCourtCount} court{venue.activeCourtCount === 1 ? "" : "s"}
+              </span>
             )}
           </p>
           <span className="text-sm font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">

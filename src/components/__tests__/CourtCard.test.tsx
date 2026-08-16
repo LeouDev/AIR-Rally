@@ -27,6 +27,7 @@ const venue: VenueCardData = {
   averageRating: 4.8,
   reviewCount: 42,
   startingPrice: 500,
+  activeCourtCount: 2,
 };
 
 describe("CourtCard", () => {

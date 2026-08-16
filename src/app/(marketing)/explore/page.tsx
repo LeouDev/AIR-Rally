@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/supabase/auth";
 import { searchMarketplaceVenues } from "@/lib/services/venues";
 import { listAmenities } from "@/lib/services/amenities";
 import { listFavoriteVenueIds } from "@/lib/services/favorites";
-import { getPublicImageUrl } from "@/lib/services/images";
+import { toVenueCardData } from "@/lib/services/exploreCards";
 import { parseExploreFilters, filtersToSearchParams, type ExploreSearchParams } from "@/lib/explore-params";
 import { SearchBar } from "@/components/search/SearchBar";
 import { MarketplaceSearchInput } from "@/components/search/MarketplaceSearchInput";
@@ -41,25 +41,13 @@ export default async function ExplorePage({ searchParams }: ExplorePageProps) {
 
   const favoritedIds = user ? new Set(await listFavoriteVenueIds(supabase, user.id)) : new Set<string>();
   const totalPages = Math.max(1, Math.ceil(searchResult.total / searchResult.pageSize));
+  const cards = await toVenueCardData(supabase, searchResult.venues);
 
   const results =
-    searchResult.venues.length > 0 ? (
+    cards.length > 0 ? (
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
-        {searchResult.venues.map((venue) => (
-          <CourtCard
-            key={venue.id}
-            venue={{
-              id: venue.id,
-              name: venue.name,
-              city: venue.city,
-              indoorOutdoor: venue.indoor_outdoor,
-              averageRating: venue.average_rating,
-              reviewCount: venue.review_count,
-              startingPrice: venue.starting_price,
-              coverImageUrl: venue.cover_image_path ? getPublicImageUrl(supabase, venue.cover_image_path) : null,
-            }}
-            isFavorited={favoritedIds.has(venue.id)}
-          />
+        {cards.map((venue) => (
+          <CourtCard key={venue.id} venue={venue} isFavorited={favoritedIds.has(venue.id)} />
         ))}
       </div>
     ) : (
