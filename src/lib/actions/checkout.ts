@@ -3,7 +3,9 @@
 import { createBooking, cancelBooking, attachCheckoutSession, attachPaymongoCheckoutSession, BookingError } from "@/lib/services/bookings";
 import { createCheckoutSession, PaymentError } from "@/lib/services/payments";
 import { createPayMongoCheckoutSession, PayMongoError } from "@/lib/services/paymongo";
+import { calculateMarketplaceSplit } from "@/lib/services/commission";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
+import { isPaymongoMarketplaceSplitEnabled } from "@/lib/paymongoLaunchGates";
 import { createBookingSchema, type CreateBookingValues } from "@/lib/validations/booking";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import { getSiteUrl } from "@/lib/site";
@@ -72,6 +74,20 @@ export async function createCheckoutSessionAction(values: CreateBookingValues): 
     let checkoutUrl: string;
 
     if (provider === "paymongo") {
+      // Marketplace split only applies when (a) the platform-wide kill
+      // switch is explicitly enabled — see lib/paymongoLaunchGates.ts,
+      // never just ACTIVE_PAYMENT_PROVIDER=paymongo — AND (b) the venue
+      // has a fully activated PayMongo Platforms account. Every other
+      // combination falls back to the existing plain, non-split
+      // checkout, exactly as before this extension shipped. Computed
+      // fresh here from the booking's own server-computed price_amount —
+      // never from a client-supplied amount, never from a stale/cached
+      // value.
+      const marketplaceSplit =
+        isPaymongoMarketplaceSplitEnabled() && display?.venuePaymongoActivationStatus === "activated" && display.venuePaymongoAccountId
+          ? { ...calculateMarketplaceSplit(booking.price_amount), venuePaymongoAccountId: display.venuePaymongoAccountId }
+          : undefined;
+
       // PayMongo Checkout Sessions have no confirmed equivalent of
       // Stripe's {CHECKOUT_SESSION_ID} redirect-time placeholder (not
       // guessing one) — the confirmation page instead reads the session
@@ -83,8 +99,21 @@ export async function createCheckoutSessionAction(values: CreateBookingValues): 
         courtName: display?.courtName ?? "Court",
         successUrl: `${siteUrl}/bookings/${booking.id}/confirmation`,
         cancelUrl: `${siteUrl}/bookings/${booking.id}/confirmation?cancelled=true`,
+        marketplaceSplit: marketplaceSplit && {
+          platformFeeAmount: marketplaceSplit.platformFeeAmount,
+          venuePaymongoAccountId: marketplaceSplit.venuePaymongoAccountId,
+        },
       });
-      await attachPaymongoCheckoutSession(supabase, booking.id, session.id);
+      await attachPaymongoCheckoutSession(
+        supabase,
+        booking.id,
+        session.id,
+        marketplaceSplit && {
+          platformFeeAmount: marketplaceSplit.platformFeeAmount,
+          venueAmount: marketplaceSplit.venueAmount,
+          paymongoVenueAccountId: marketplaceSplit.venuePaymongoAccountId,
+        }
+      );
       checkoutUrl = session.url;
     } else {
       const session = await createCheckoutSession({

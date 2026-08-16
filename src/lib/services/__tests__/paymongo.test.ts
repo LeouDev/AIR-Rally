@@ -6,6 +6,7 @@ import type { Booking } from "@/lib/supabase/types";
 
 const originalSecretKey = process.env.PAYMONGO_SECRET_KEY;
 const originalWebhookSecret = process.env.PAYMONGO_WEBHOOK_SECRET;
+const originalPlatformAccountId = process.env.PAYMONGO_PLATFORM_ACCOUNT_ID;
 const originalFetch = global.fetch;
 
 const mockFetch = jest.fn();
@@ -13,6 +14,7 @@ const mockFetch = jest.fn();
 beforeEach(() => {
   delete process.env.PAYMONGO_SECRET_KEY;
   delete process.env.PAYMONGO_WEBHOOK_SECRET;
+  delete process.env.PAYMONGO_PLATFORM_ACCOUNT_ID;
   mockFetch.mockReset();
   global.fetch = mockFetch as unknown as typeof fetch;
 });
@@ -20,6 +22,7 @@ beforeEach(() => {
 afterAll(() => {
   if (originalSecretKey !== undefined) process.env.PAYMONGO_SECRET_KEY = originalSecretKey;
   if (originalWebhookSecret !== undefined) process.env.PAYMONGO_WEBHOOK_SECRET = originalWebhookSecret;
+  if (originalPlatformAccountId !== undefined) process.env.PAYMONGO_PLATFORM_ACCOUNT_ID = originalPlatformAccountId;
   global.fetch = originalFetch;
 });
 
@@ -45,6 +48,11 @@ const BOOKING: Booking = {
   payment_provider: "paymongo",
   paymongo_checkout_session_id: null,
   paymongo_payment_intent_id: null,
+  platform_fee_amount: null,
+  venue_amount: null,
+  paymongo_venue_account_id: null,
+  paymongo_available_at: null,
+  paymongo_credited_at: null,
   created_at: "2026-08-10T00:00:00Z",
   updated_at: "2026-08-10T00:00:00Z",
 };
@@ -60,7 +68,7 @@ const CHECKOUT_INPUT = {
 describe("createPayMongoCheckoutSession", () => {
   it("throws a typed PayMongoError when PAYMONGO_SECRET_KEY isn't configured, without ever calling the API", async () => {
     const { createPayMongoCheckoutSession } = await import("../paymongo");
-    await expect(createPayMongoCheckoutSession(CHECKOUT_INPUT)).rejects.toMatchObject({ reason: "checkout_session_creation_failed" });
+    await expect(createPayMongoCheckoutSession(CHECKOUT_INPUT)).rejects.toMatchObject({ reason: "paymongo_not_configured" });
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -75,7 +83,7 @@ describe("createPayMongoCheckoutSession", () => {
 
     expect(result).toEqual({ id: "cs_1", url: "https://checkout.paymongo.com/cs_1" });
     const [url, options] = mockFetch.mock.calls[0];
-    expect(url).toBe("https://api.paymongo.com/v1/checkout_sessions");
+    expect(url).toBe("https://api.paymongo.com/v2/checkout_sessions");
     const body = JSON.parse(options.body);
     expect(body.data.attributes.line_items[0]).toMatchObject({ amount: 50000, currency: "PHP" });
     expect(body.data.attributes.metadata).toEqual({ booking_id: "booking-1", user_id: "user-1" });
@@ -96,6 +104,54 @@ describe("createPayMongoCheckoutSession", () => {
     expect(caught).toMatchObject({ reason: "checkout_session_creation_failed" });
     expect((caught as Error).message).not.toBe("nope");
   });
+
+  it("attaches split_payment with a 'fixed' split when marketplaceSplit is given, using PAYMONGO_PLATFORM_ACCOUNT_ID as the recipient", async () => {
+    process.env.PAYMONGO_SECRET_KEY = "sk_test_x";
+    process.env.PAYMONGO_PLATFORM_ACCOUNT_ID = "org_air_rally_platform";
+    mockFetch.mockResolvedValue(
+      jsonResponse({ data: { id: "cs_2", attributes: { checkout_url: "https://checkout.paymongo.com/cs_2" } } })
+    );
+
+    const { createPayMongoCheckoutSession } = await import("../paymongo");
+    await createPayMongoCheckoutSession({
+      ...CHECKOUT_INPUT,
+      marketplaceSplit: { platformFeeAmount: 2500, venuePaymongoAccountId: "org_venue_1" },
+    });
+
+    const [, options] = mockFetch.mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.data.attributes.split_payment).toEqual({
+      recipients: [{ merchant_id: "org_air_rally_platform", split_type: "fixed", value: 2500 }],
+      transfer_to: "org_venue_1",
+    });
+    // pass_on_fees is deliberately not sent yet — see ARCHITECTURE.md.
+    expect(body.data.attributes.pass_on_fees).toBeUndefined();
+  });
+
+  it("never attaches split_payment when marketplaceSplit is omitted — the plain, pre-existing checkout path", async () => {
+    process.env.PAYMONGO_SECRET_KEY = "sk_test_x";
+    mockFetch.mockResolvedValue(jsonResponse({ data: { id: "cs_3", attributes: { checkout_url: "https://checkout.paymongo.com/cs_3" } } }));
+
+    const { createPayMongoCheckoutSession } = await import("../paymongo");
+    await createPayMongoCheckoutSession(CHECKOUT_INPUT);
+
+    const [, options] = mockFetch.mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.data.attributes.split_payment).toBeUndefined();
+  });
+
+  it("throws a typed PayMongoError, without ever calling the API, when marketplaceSplit is given but PAYMONGO_PLATFORM_ACCOUNT_ID isn't set", async () => {
+    process.env.PAYMONGO_SECRET_KEY = "sk_test_x";
+
+    const { createPayMongoCheckoutSession } = await import("../paymongo");
+    await expect(
+      createPayMongoCheckoutSession({
+        ...CHECKOUT_INPUT,
+        marketplaceSplit: { platformFeeAmount: 2500, venuePaymongoAccountId: "org_venue_1" },
+      })
+    ).rejects.toMatchObject({ reason: "paymongo_not_configured" });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });
 
 describe("retrievePayMongoCheckoutSession", () => {
@@ -108,6 +164,19 @@ describe("retrievePayMongoCheckoutSession", () => {
 
     expect(result).toEqual({ id: "cs_1", attributes: { payment_intent: null } });
     expect(mockFetch).toHaveBeenCalledWith("https://api.paymongo.com/v1/checkout_sessions/cs_1", expect.objectContaining({ method: "GET" }));
+  });
+});
+
+describe("retrievePayMongoPayment", () => {
+  it("fetches the payment by id directly from PayMongo's API — read-only, no write of any kind", async () => {
+    process.env.PAYMONGO_SECRET_KEY = "sk_test_x";
+    mockFetch.mockResolvedValue(jsonResponse({ data: { id: "pay_1", attributes: { status: "paid", source: { type: "qrph" } } } }));
+
+    const { retrievePayMongoPayment } = await import("../paymongo");
+    const result = await retrievePayMongoPayment("pay_1");
+
+    expect(result).toEqual({ id: "pay_1", attributes: { status: "paid", source: { type: "qrph" } } });
+    expect(mockFetch).toHaveBeenCalledWith("https://api.paymongo.com/v1/payments/pay_1", expect.objectContaining({ method: "GET" }));
   });
 });
 
@@ -164,5 +233,28 @@ describe("constructPayMongoWebhookEvent", () => {
     expect(() => constructPayMongoWebhookEvent(rawBody, `t=${timestamp},te=${wrongSignature},li=`)).toThrow(
       /signature verification failed/i
     );
+  });
+});
+
+describe("describePayMongoErrorDetail", () => {
+  it("passes through a plain string detail unchanged", async () => {
+    const { describePayMongoErrorDetail } = await import("../paymongo");
+    expect(describePayMongoErrorDetail("Something went wrong.")).toBe("Something went wrong.");
+  });
+
+  it("extracts .message from an object detail — the real shape PayMongo returns for available_balance_insufficient", async () => {
+    const { describePayMongoErrorDetail } = await import("../paymongo");
+    const realShape = {
+      message: "This refund cannot proceed due to insufficient payout balances.",
+      merchants: [{ id: "org_e4fd8c5c83a7a3c155126682", trade_name: "Test Venue" }],
+    };
+    expect(describePayMongoErrorDetail(realShape)).toBe("This refund cannot proceed due to insufficient payout balances.");
+  });
+
+  it("returns undefined for a detail shape with no usable message, rather than throwing or stringifying '[object Object]'", async () => {
+    const { describePayMongoErrorDetail } = await import("../paymongo");
+    expect(describePayMongoErrorDetail({ merchants: [] })).toBeUndefined();
+    expect(describePayMongoErrorDetail(undefined)).toBeUndefined();
+    expect(describePayMongoErrorDetail(null)).toBeUndefined();
   });
 });

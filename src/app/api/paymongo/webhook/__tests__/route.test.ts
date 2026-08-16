@@ -4,6 +4,8 @@
 import { POST } from "../route";
 import { constructPayMongoWebhookEvent, PayMongoError } from "../../../../../lib/services/paymongo";
 import { confirmPaymongoBookingPayment } from "../../../../../lib/services/bookings";
+import { syncVenuePaymongoActivation } from "../../../../../lib/services/venues";
+import { maybeCompleteReschedule } from "../../../../../lib/services/reschedules";
 import { createClient } from "../../../../../lib/supabase/server";
 
 // Relative paths for jest.mock — see MEMORY.md (air-rally-jest-mock-colon-path-bug).
@@ -22,11 +24,15 @@ jest.mock("../../../../../lib/services/paymongo", () => {
   };
 });
 jest.mock("../../../../../lib/services/bookings", () => ({ confirmPaymongoBookingPayment: jest.fn() }));
+jest.mock("../../../../../lib/services/venues", () => ({ syncVenuePaymongoActivation: jest.fn() }));
+jest.mock("../../../../../lib/services/reschedules", () => ({ maybeCompleteReschedule: jest.fn() }));
 jest.mock("../../../../../lib/supabase/server", () => ({ createClient: jest.fn() }));
 
 const mockConstructEvent = constructPayMongoWebhookEvent as jest.MockedFunction<typeof constructPayMongoWebhookEvent>;
 const mockConfirmPayment = confirmPaymongoBookingPayment as jest.MockedFunction<typeof confirmPaymongoBookingPayment>;
 const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
+const mockSyncActivation = syncVenuePaymongoActivation as jest.MockedFunction<typeof syncVenuePaymongoActivation>;
+const mockMaybeCompleteReschedule = maybeCompleteReschedule as jest.MockedFunction<typeof maybeCompleteReschedule>;
 
 function fakeRequest(body: string, signature: string | null = "t=1,te=abc,li=") {
   const headers = new Headers();
@@ -64,6 +70,9 @@ beforeEach(() => {
   mockConfirmPayment.mockReset();
   mockCreateClient.mockReset();
   mockCreateClient.mockResolvedValue({} as never);
+  mockSyncActivation.mockReset();
+  mockMaybeCompleteReschedule.mockReset();
+  mockMaybeCompleteReschedule.mockResolvedValue(false);
 });
 
 describe("POST /api/paymongo/webhook", () => {
@@ -120,7 +129,12 @@ describe("POST /api/paymongo/webhook", () => {
       expectedCurrency: "PHP",
     });
     const json = await response.json();
-    expect(json).toEqual({ received: true, confirmed: true });
+    expect(json).toEqual({ received: true, confirmed: true, rescheduleCompleted: false });
+    // Additive, after the existing confirm call — a reschedule
+    // difference-checkout session's amount never matches the
+    // replacement's own price_amount by design, so this always fires
+    // regardless of `confirmed`.
+    expect(mockMaybeCompleteReschedule).toHaveBeenCalledWith(expect.anything(), "booking-1", 50000, "PHP", "cs_test_123");
   });
 
   it("is idempotent: a duplicate delivery of the same event still returns 200 even though confirmPaymongoBookingPayment no-ops", async () => {
@@ -131,7 +145,18 @@ describe("POST /api/paymongo/webhook", () => {
 
     expect(response.status).toBe(200);
     const json = await response.json();
-    expect(json).toEqual({ received: true, confirmed: false });
+    expect(json).toEqual({ received: true, confirmed: false, rescheduleCompleted: false });
+  });
+
+  it("completes a reschedule when maybeCompleteReschedule reports the difference-checkout session actually matched one", async () => {
+    mockConstructEvent.mockReturnValue(PAID_EVENT);
+    mockConfirmPayment.mockResolvedValue(false); // the difference amount never matches price_amount, by design
+    mockMaybeCompleteReschedule.mockResolvedValue(true);
+
+    const response = await POST(fakeRequest("{}"));
+
+    const json = await response.json();
+    expect(json).toEqual({ received: true, confirmed: false, rescheduleCompleted: true });
   });
 
   it("acknowledges with 200 rather than retrying forever when the session is missing booking_id/payment_intent/a paid payment", async () => {
@@ -165,6 +190,76 @@ describe("POST /api/paymongo/webhook", () => {
   it("returns 500 for an unexpected database error rather than crashing", async () => {
     mockConstructEvent.mockReturnValue(PAID_EVENT);
     mockConfirmPayment.mockRejectedValue(new Error("connection reset"));
+
+    const response = await POST(fakeRequest("{}"));
+
+    expect(response.status).toBe(500);
+  });
+});
+
+describe("POST /api/paymongo/webhook — merchant activation events", () => {
+  function activationEvent(type: "merchant.activated" | "merchant.declined", data: Record<string, unknown>) {
+    return {
+      data: { id: "evt_activation", type: "event", attributes: { type, livemode: false, data } },
+    } as never;
+  }
+
+  it("syncs the venue as activated and never calls confirmPaymongoBookingPayment", async () => {
+    mockConstructEvent.mockReturnValue(
+      activationEvent("merchant.activated", { merchant_id: "org_venue_1", activation_status: "activated" })
+    );
+    mockSyncActivation.mockResolvedValue(true);
+
+    const response = await POST(fakeRequest("{}"));
+
+    expect(response.status).toBe(200);
+    expect(mockSyncActivation).toHaveBeenCalledWith(expect.anything(), {
+      paymongoAccountId: "org_venue_1",
+      activationStatus: "activated",
+      declinedReason: null,
+    });
+    expect(mockConfirmPayment).not.toHaveBeenCalled();
+    const json = await response.json();
+    expect(json).toEqual({ received: true, synced: true });
+  });
+
+  it("syncs a decline with its reason", async () => {
+    mockConstructEvent.mockReturnValue(
+      activationEvent("merchant.declined", {
+        merchant_id: "org_venue_2",
+        activation_status: "declined",
+        declined_message: "KYC failed",
+      })
+    );
+    mockSyncActivation.mockResolvedValue(true);
+
+    await POST(fakeRequest("{}"));
+
+    expect(mockSyncActivation).toHaveBeenCalledWith(expect.anything(), {
+      paymongoAccountId: "org_venue_2",
+      activationStatus: "declined",
+      declinedReason: "KYC failed",
+    });
+  });
+
+  it("is a safe no-op (still 200) when the event matches no linked venue", async () => {
+    mockConstructEvent.mockReturnValue(
+      activationEvent("merchant.activated", { merchant_id: "org_unknown", activation_status: "activated" })
+    );
+    mockSyncActivation.mockResolvedValue(false);
+
+    const response = await POST(fakeRequest("{}"));
+
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    expect(json).toEqual({ received: true, synced: false });
+  });
+
+  it("returns 500 without crashing when syncVenuePaymongoActivation throws", async () => {
+    mockConstructEvent.mockReturnValue(
+      activationEvent("merchant.activated", { merchant_id: "org_venue_3", activation_status: "activated" })
+    );
+    mockSyncActivation.mockRejectedValue(new Error("connection reset"));
 
     const response = await POST(fakeRequest("{}"));
 

@@ -20,10 +20,20 @@ export const signUpSchema = z
     email: emailSchema,
     password: passwordSchema,
     confirmPassword: z.string().min(1, "Confirm your password"),
+    // Shape validation only (a client can always send `true`) — the
+    // server action is what actually matters here, since it re-validates
+    // this same schema and then records acceptance server-side via
+    // record_agreement_acceptance() rather than trusting this boolean as
+    // proof of anything by itself. See lib/actions/auth.ts.
+    agreedToTerms: z.boolean(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords don't match",
     path: ["confirmPassword"],
+  })
+  .refine((data) => data.agreedToTerms === true, {
+    message: "You must accept the User Agreement to create an account",
+    path: ["agreedToTerms"],
   });
 export type SignUpValues = z.infer<typeof signUpSchema>;
 

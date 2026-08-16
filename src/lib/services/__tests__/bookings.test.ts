@@ -50,6 +50,11 @@ const BOOKING_ROW: Booking = {
   payment_provider: "stripe",
   paymongo_checkout_session_id: null,
   paymongo_payment_intent_id: null,
+  platform_fee_amount: null,
+  venue_amount: null,
+  paymongo_venue_account_id: null,
+  paymongo_available_at: null,
+  paymongo_credited_at: null,
   created_at: "2026-08-10T00:00:00Z",
   updated_at: "2026-08-10T00:00:00Z",
 };
@@ -578,6 +583,53 @@ describe("reconcilePaymongoPendingBooking — the 'confirmation page loads befor
       p_paymongo_payment_intent_id: "pi_pm_test_456",
       p_expected_amount: 50000,
       p_expected_currency: "PHP",
+    });
+    expect(result).toEqual(CONFIRMED_PAYMONGO_BOOKING);
+    // No available_at/credited_at were on the mocked payment, so no
+    // extra write to bookings should happen beyond the initial read and
+    // the final refetch (2 total .from("bookings") calls).
+    expect((supabase as unknown as { from: jest.Mock }).from.mock.calls.filter((c: unknown[]) => c[0] === "bookings")).toHaveLength(2);
+  });
+
+  it("persists paymongo_available_at/credited_at when PayMongo's response includes them, converted from unix seconds to ISO — but never lets a failure here affect the already-confirmed booking", async () => {
+    const CONFIRMED_PAYMONGO_BOOKING: Booking = { ...PENDING_PAYMONGO_BOOKING, status: "confirmed", paymongo_payment_intent_id: "pi_pm_test_456" };
+    const supabase = createTableMockSupabase(
+      {
+        bookings: [
+          { data: PENDING_PAYMONGO_BOOKING, error: null },
+          { data: null, error: null }, // the settlement-timestamp update — only its .error is ever read
+          { data: CONFIRMED_PAYMONGO_BOOKING, error: null },
+        ],
+      },
+      { confirm_paymongo_booking_payment: { data: true, error: null } }
+    );
+    mockRetrievePayMongoCheckoutSession.mockResolvedValue({
+      id: "cs_pm_test_123",
+      attributes: {
+        payment_intent: {
+          id: "pi_pm_test_456",
+          attributes: {
+            amount: 50000,
+            currency: "PHP",
+            status: "succeeded",
+            payments: [
+              {
+                id: "pay_1",
+                attributes: { amount: 50000, currency: "php", status: "paid", available_at: 1787043600, credited_at: 1787187600 },
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    const result = await reconcilePaymongoPendingBooking(supabase, "booking-1");
+
+    const fromMock = (supabase as unknown as { from: jest.Mock }).from;
+    const settlementUpdateBuilder = fromMock.mock.results[1].value as { update: jest.Mock };
+    expect(settlementUpdateBuilder.update).toHaveBeenCalledWith({
+      paymongo_available_at: new Date(1787043600 * 1000).toISOString(),
+      paymongo_credited_at: new Date(1787187600 * 1000).toISOString(),
     });
     expect(result).toEqual(CONFIRMED_PAYMONGO_BOOKING);
   });

@@ -4,6 +4,10 @@ import {
   listFavoritedVenues,
   getVenueForOwner,
   createDraftVenue,
+  linkVenuePaymongoAccount,
+  syncVenuePaymongoActivation,
+  listOperatingHours,
+  setOperatingHours,
 } from "@/lib/services/venues";
 import { createMockSupabase, createTableMockSupabase, postgrestError } from "@/lib/test-helpers/mockSupabase";
 import type { VenueMarketplaceRow, Venue } from "@/lib/supabase/types";
@@ -208,6 +212,11 @@ describe("owner-facing venue reads", () => {
       review_count: 0,
       status: "draft",
       timezone: "Asia/Manila",
+      paymongo_account_id: null,
+      paymongo_activation_status: "unlinked",
+      paymongo_onboarding_started_at: null,
+      paymongo_activated_at: null,
+      paymongo_declined_reason: null,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     };
@@ -241,5 +250,115 @@ describe("owner-facing venue reads", () => {
     });
 
     expect(capturedInsert).toMatchObject({ owner_id: "user-1", status: "draft" });
+  });
+});
+
+describe("linkVenuePaymongoAccount", () => {
+  it("calls sync_venue_paymongo_status with the exact params, defaulting activation_status to 'pending'", async () => {
+    const supabase = createTableMockSupabase({}, { sync_venue_paymongo_status: { data: true, error: null } });
+
+    const result = await linkVenuePaymongoAccount(supabase, "venue-1", "org_test_merchant");
+
+    expect(result).toBe(true);
+    expect((supabase as unknown as { rpc: jest.Mock }).rpc).toHaveBeenCalledWith("sync_venue_paymongo_status", {
+      p_venue_id: "venue-1",
+      p_paymongo_account_id: "org_test_merchant",
+      p_activation_status: "pending",
+    });
+  });
+
+  it("returns false (no-op) rather than throwing when the venue is already linked or not owned by this session", async () => {
+    const supabase = createTableMockSupabase({}, { sync_venue_paymongo_status: { data: false, error: null } });
+    await expect(linkVenuePaymongoAccount(supabase, "venue-1", "org_test_merchant")).resolves.toBe(false);
+  });
+});
+
+describe("syncVenuePaymongoActivation", () => {
+  it("calls sync_venue_paymongo_activation with the exact params — no venue_id needed", async () => {
+    const supabase = createTableMockSupabase({}, { sync_venue_paymongo_activation: { data: true, error: null } });
+
+    const result = await syncVenuePaymongoActivation(supabase, {
+      paymongoAccountId: "org_test_merchant",
+      activationStatus: "activated",
+    });
+
+    expect(result).toBe(true);
+    expect((supabase as unknown as { rpc: jest.Mock }).rpc).toHaveBeenCalledWith("sync_venue_paymongo_activation", {
+      p_paymongo_account_id: "org_test_merchant",
+      p_activation_status: "activated",
+      p_declined_reason: null,
+    });
+  });
+
+  it("passes through a decline reason", async () => {
+    const supabase = createTableMockSupabase({}, { sync_venue_paymongo_activation: { data: true, error: null } });
+
+    await syncVenuePaymongoActivation(supabase, {
+      paymongoAccountId: "org_test_merchant",
+      activationStatus: "declined",
+      declinedReason: "KYC failed",
+    });
+
+    expect((supabase as unknown as { rpc: jest.Mock }).rpc).toHaveBeenCalledWith(
+      "sync_venue_paymongo_activation",
+      expect.objectContaining({ p_declined_reason: "KYC failed" })
+    );
+  });
+
+  it("returns false (safe no-op) when no venue has that account id linked — a stray webhook event", async () => {
+    const supabase = createTableMockSupabase({}, { sync_venue_paymongo_activation: { data: false, error: null } });
+    await expect(
+      syncVenuePaymongoActivation(supabase, { paymongoAccountId: "org_unknown", activationStatus: "activated" })
+    ).resolves.toBe(false);
+  });
+});
+
+describe("listOperatingHours", () => {
+  it("lists a venue's operating hours ordered by day of week", async () => {
+    const rows = [{ id: "h1", venue_id: "venue-1", day_of_week: 1, start_time: "08:00:00", end_time: "20:00:00", created_at: "", updated_at: "" }];
+    const supabase = createMockSupabase({ data: rows, error: null });
+    await expect(listOperatingHours(supabase, "venue-1")).resolves.toEqual(rows);
+  });
+});
+
+describe("setOperatingHours", () => {
+  it("replaces a venue's operating hours with a delete-then-insert, converting HH:MM to a real time literal", async () => {
+    const deleteBuilder = { eq: jest.fn().mockResolvedValue({ data: null, error: null }) };
+    const insertBuilder = jest.fn().mockResolvedValue({ data: null, error: null });
+    const supabase = {
+      from: jest.fn(() => ({
+        delete: jest.fn(() => deleteBuilder),
+        insert: insertBuilder,
+      })),
+    } as never;
+
+    await setOperatingHours(supabase, "venue-1", {
+      windows: [
+        { dayOfWeek: 1, startTime: "08:00", endTime: "20:00" },
+        { dayOfWeek: 2, startTime: "09:00", endTime: "18:00" },
+      ],
+    });
+
+    expect(deleteBuilder.eq).toHaveBeenCalledWith("venue_id", "venue-1");
+    expect(insertBuilder).toHaveBeenCalledWith([
+      { venue_id: "venue-1", day_of_week: 1, start_time: "08:00:00", end_time: "20:00:00" },
+      { venue_id: "venue-1", day_of_week: 2, start_time: "09:00:00", end_time: "18:00:00" },
+    ]);
+  });
+
+  it("skips the insert entirely when every day is set to closed", async () => {
+    const deleteBuilder = { eq: jest.fn().mockResolvedValue({ data: null, error: null }) };
+    const insertBuilder = jest.fn();
+    const supabase = {
+      from: jest.fn(() => ({
+        delete: jest.fn(() => deleteBuilder),
+        insert: insertBuilder,
+      })),
+    } as never;
+
+    await setOperatingHours(supabase, "venue-1", { windows: [] });
+
+    expect(deleteBuilder.eq).toHaveBeenCalledWith("venue_id", "venue-1");
+    expect(insertBuilder).not.toHaveBeenCalled();
   });
 });

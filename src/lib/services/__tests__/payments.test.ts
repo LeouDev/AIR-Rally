@@ -46,6 +46,11 @@ const BOOKING: Booking = {
   payment_provider: "stripe",
   paymongo_checkout_session_id: null,
   paymongo_payment_intent_id: null,
+  platform_fee_amount: null,
+  venue_amount: null,
+  paymongo_venue_account_id: null,
+  paymongo_available_at: null,
+  paymongo_credited_at: null,
   created_at: "2026-08-10T00:00:00Z",
   updated_at: "2026-08-10T00:00:00Z",
 };

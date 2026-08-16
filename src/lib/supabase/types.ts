@@ -11,6 +11,13 @@ export type VenueStatus = "draft" | "pending_review" | "active" | "suspended";
 export type CourtStatus = "active" | "inactive" | "maintenance";
 export type IndoorOutdoor = "indoor" | "outdoor" | "both";
 export type CourtIndoorOutdoor = "indoor" | "outdoor";
+/**
+ * 'unlinked' is AIR/Rally's own sentinel (no PayMongo account created
+ * yet) — the other four mirror PayMongo's real Platforms account
+ * `activation_status` values, confirmed via a real `POST /v2/accounts`
+ * response. See ARCHITECTURE.md's PayMongo Platforms section.
+ */
+export type VenuePaymongoActivationStatus = "unlinked" | "pending" | "under_review" | "activated" | "declined";
 
 export type Profile = {
   id: string;
@@ -25,6 +32,15 @@ export type Profile = {
 };
 
 export type PublicProfile = Pick<Profile, "id" | "display_name" | "avatar_url">;
+
+/** Recorded once per signup via record_agreement_acceptance() — see lib/legal.ts. */
+export type AgreementAcceptance = {
+  id: string;
+  user_id: string;
+  agreement_version: string;
+  accepted_at: string;
+  created_at: string;
+};
 
 export type Venue = {
   id: string;
@@ -47,6 +63,19 @@ export type Venue = {
   status: VenueStatus;
   /** IANA identifier (e.g. "Asia/Manila") — never an offset/abbreviation. See ARCHITECTURE.md's Phase 4A timezone strategy. */
   timezone: string;
+  /**
+   * PayMongo Platforms marketplace linking (see ARCHITECTURE.md's
+   * PayMongo Platforms section). Never exposed via venue_marketplace —
+   * these are owner/admin-only fields. Written only through
+   * sync_venue_paymongo_status() (owner-initiated) and
+   * sync_venue_paymongo_activation() (webhook-driven) — never a direct
+   * table write, enforced by the venues_prevent_paymongo_tampering trigger.
+   */
+  paymongo_account_id: string | null;
+  paymongo_activation_status: VenuePaymongoActivationStatus;
+  paymongo_onboarding_started_at: string | null;
+  paymongo_activated_at: string | null;
+  paymongo_declined_reason: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -171,6 +200,104 @@ export type Booking = {
   paymongo_checkout_session_id: string | null;
   /** Set only by confirm_paymongo_booking_payment() (SECURITY DEFINER) once PayMongo payment is verified — never client-writable. */
   paymongo_payment_intent_id: string | null;
+  /**
+   * PayMongo Platforms marketplace split (see ARCHITECTURE.md's PayMongo
+   * Platforms section). Immutable snapshot computed once, server-side, at
+   * booking creation from price_amount — never from a post-processing-fee
+   * amount, never recalculated. Null for bookings that predate the
+   * marketplace split or that use the non-split payment path (Stripe, or
+   * a PayMongo venue that isn't onboarded yet). platform_fee_amount +
+   * venue_amount always sums exactly to price_amount when both are set.
+   */
+  platform_fee_amount: number | null;
+  venue_amount: number | null;
+  /** Snapshot of the venue's paymongo_account_id at checkout-session-creation time. */
+  paymongo_venue_account_id: string | null;
+  /**
+   * Purely informational settlement timestamps, persisted opportunistically
+   * from a real PayMongo payment retrieval when present (see
+   * reconcilePaymongoPendingBooking() in lib/services/bookings.ts) — never
+   * required for correctness, never used as a refund-eligibility gate.
+   * PayMongo's own live refund-attempt response remains authoritative; see
+   * the PayMongo Refund & Cancellation Accounting Design Report.
+   */
+  paymongo_available_at: string | null;
+  paymongo_credited_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RefundStatus = "pending" | "provider_unavailable" | "succeeded" | "failed";
+
+/**
+ * Which total a refund was computed against — a snapshot of the business
+ * decision made *for this one refund*, never inferred/defaulted by code.
+ * See the PayMongo Refund & Cancellation Accounting Design Report for the
+ * full A/B/C/D options analysis this exists to eventually support.
+ * `gross_only`: refund = booking gross only (customer's processing fee is
+ * not refunded) — proven to exactly mirror the original platform/venue
+ * split with zero discrepancy. `gross_plus_fee`: refund = the full amount
+ * the customer paid, including their processing fee — proven to debit
+ * platform/venue proportionally for that fee, in excess of what either
+ * party actually received. Null until a real refund has actually
+ * recorded a basis; no default is ever silently applied.
+ */
+export type RefundBasis = "gross_only" | "gross_plus_fee";
+
+/**
+ * Audit trail. platform_refund_amount/venue_refund_amount/
+ * provider_available_at are populated ONLY from a genuine PayMongo
+ * split_refund API response — never computed locally from AIR/Rally's
+ * own 5%/95% formula (see supabase/migrations/20260810000014_paymongo_
+ * refund_accounting_scaffolding.sql). lib/services/refunds.ts is the
+ * only writer.
+ */
+export type BookingRefund = {
+  id: string;
+  booking_id: string;
+  payment_provider: "stripe" | "paymongo";
+  provider_payment_id: string;
+  provider_refund_id: string | null;
+  amount: number;
+  currency: string;
+  status: RefundStatus;
+  reason: string | null;
+  failure_reason: string | null;
+  initiated_by: string;
+  /** Which total (gross vs. gross+fee) this specific refund was computed against — see RefundBasis. Null until set by a real refund decision. */
+  refund_basis: RefundBasis | null;
+  /** From the real PayMongo split_refund response's parent-organization leg only — never computed locally. */
+  platform_refund_amount: number | null;
+  /** From the real PayMongo split_refund response's child-organization leg only — never computed locally. */
+  venue_refund_amount: number | null;
+  /** From the real PayMongo refund response, when present — the refund's own settlement estimate, distinct from the original payment's. */
+  provider_available_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RescheduleStatus = "pending_payment" | "pending_refund" | "completed" | "failed" | "provider_unavailable";
+
+/**
+ * Row shape of `booking_reschedules` (see supabase/migrations/20260810000015_
+ * booking_reschedules.sql). Connects exactly two bookings — the original
+ * (cancelled on completion) and the replacement (confirmed on completion).
+ * Every field but status/failure_reason/refund_id is immutable once
+ * created; those three only ever change via complete_reschedule()/
+ * mark_reschedule_failed() — see lib/services/reschedules.ts.
+ */
+export type BookingReschedule = {
+  id: string;
+  original_booking_id: string;
+  new_booking_id: string;
+  /** Signed: new_booking.price_amount - original_booking.price_amount. */
+  price_difference: number;
+  status: RescheduleStatus;
+  /** Set only once a gross-only refund has actually been attempted for a price-decrease reschedule — never guessed. */
+  refund_id: string | null;
+  initiated_by: string;
+  reason: string | null;
+  failure_reason: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -281,6 +408,17 @@ export type Database = {
         Pick<Booking, "court_id" | "user_id" | "start_time" | "end_time" | "price_amount"> &
           Partial<Omit<Booking, "id" | "court_id" | "user_id" | "start_time" | "end_time" | "price_amount" | "confirmation_code" | "created_at" | "updated_at">>
       >;
+      agreement_acceptances: TableDef<AgreementAcceptance, never, never>;
+      booking_refunds: TableDef<
+        BookingRefund,
+        Pick<BookingRefund, "booking_id" | "payment_provider" | "provider_payment_id" | "amount" | "currency" | "initiated_by"> &
+          Partial<Omit<BookingRefund, "id" | "booking_id" | "payment_provider" | "provider_payment_id" | "amount" | "currency" | "initiated_by" | "created_at" | "updated_at">>
+      >;
+      booking_reschedules: TableDef<
+        BookingReschedule,
+        Pick<BookingReschedule, "original_booking_id" | "new_booking_id" | "price_difference" | "initiated_by"> &
+          Partial<Omit<BookingReschedule, "id" | "original_booking_id" | "new_booking_id" | "price_difference" | "initiated_by" | "created_at" | "updated_at">>
+      >;
     };
     Views: Record<string, never>;
     Functions: {
@@ -321,6 +459,57 @@ export type Database = {
           p_paymongo_payment_intent_id: string;
           p_expected_amount: number;
           p_expected_currency: string;
+        };
+        Returns: boolean;
+      };
+      /** Owner-initiated, once, right after creating the venue's PayMongo Platforms account. */
+      sync_venue_paymongo_status: {
+        Args: {
+          p_venue_id: string;
+          p_paymongo_account_id: string;
+          p_activation_status?: VenuePaymongoActivationStatus;
+        };
+        Returns: boolean;
+      };
+      /** Webhook-only — looked up purely by paymongo_account_id, no venue_id needed or accepted. */
+      sync_venue_paymongo_activation: {
+        Args: {
+          p_paymongo_account_id: string;
+          p_activation_status: VenuePaymongoActivationStatus;
+          p_declined_reason?: string | null;
+        };
+        Returns: boolean;
+      };
+      /** Called once, right after auth.signUp() returns — see lib/actions/auth.ts. */
+      record_agreement_acceptance: {
+        Args: {
+          p_user_id: string;
+          p_agreement_version: string;
+        };
+        Returns: void;
+      };
+      /** Atomically confirms the replacement booking (if not already) + cancels the original + marks the reschedule completed. See lib/services/reschedules.ts. */
+      complete_reschedule: {
+        Args: {
+          p_reschedule_id: string;
+          p_refund_id?: string | null;
+        };
+        Returns: boolean;
+      };
+      mark_reschedule_failed: {
+        Args: {
+          p_reschedule_id: string;
+          p_status: "failed" | "provider_unavailable";
+          p_failure_reason: string;
+          p_refund_id?: string | null;
+        };
+        Returns: boolean;
+      };
+      /** Durable checkpoint for a decrease reschedule's succeeded refund — see lib/services/reschedules.ts and the production-readiness audit's finding B3. service_role-only, same as complete_reschedule/mark_reschedule_failed. */
+      record_reschedule_refund_success: {
+        Args: {
+          p_reschedule_id: string;
+          p_refund_id: string;
         };
         Returns: boolean;
       };

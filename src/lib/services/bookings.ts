@@ -10,6 +10,7 @@ import {
 } from "@/lib/booking-config";
 import { retrieveCheckoutSession } from "@/lib/services/payments";
 import { retrievePayMongoCheckoutSession } from "@/lib/services/paymongo";
+import { logServerError } from "@/lib/errors";
 
 type Client = SupabaseClient<Database>;
 
@@ -405,11 +406,32 @@ export async function reconcilePendingBooking(supabase: Client, bookingId: strin
 // in exchange for a hard guarantee that nothing here can ever change the
 // behavior of the already-live, already-verified Stripe path above.
 
-/** Twin of attachCheckoutSession() — also records which provider this booking is actually going through. */
-export async function attachPaymongoCheckoutSession(supabase: Client, bookingId: string, paymongoCheckoutSessionId: string): Promise<void> {
+/**
+ * Twin of attachCheckoutSession() — also records which provider this
+ * booking is actually going through. `marketplaceSplit`, when given,
+ * stores the audit snapshot of what was actually sent to PayMongo's
+ * split_payment (see ARCHITECTURE.md's PayMongo Platforms section for why
+ * these three columns are owner-writable here rather than bypass-only:
+ * they're a record of what happened, never re-read to decide what a live
+ * checkout session's real split is).
+ */
+export async function attachPaymongoCheckoutSession(
+  supabase: Client,
+  bookingId: string,
+  paymongoCheckoutSessionId: string,
+  marketplaceSplit?: { platformFeeAmount: number; venueAmount: number; paymongoVenueAccountId: string }
+): Promise<void> {
   const { error } = await supabase
     .from("bookings")
-    .update({ payment_provider: "paymongo", paymongo_checkout_session_id: paymongoCheckoutSessionId })
+    .update({
+      payment_provider: "paymongo",
+      paymongo_checkout_session_id: paymongoCheckoutSessionId,
+      ...(marketplaceSplit && {
+        platform_fee_amount: marketplaceSplit.platformFeeAmount,
+        venue_amount: marketplaceSplit.venueAmount,
+        paymongo_venue_account_id: marketplaceSplit.paymongoVenueAccountId,
+      }),
+    })
     .eq("id", bookingId);
   if (error) throw error;
 }
@@ -467,6 +489,24 @@ export async function reconcilePaymongoPendingBooking(supabase: Client, bookingI
     expectedAmount: paidPayment.attributes.amount,
     expectedCurrency: paidPayment.attributes.currency.toUpperCase(),
   });
+
+  // Purely informational, best-effort — only written when PayMongo's
+  // response actually included these fields; never required for
+  // confirmation to succeed (already happened above), never used to
+  // decide anything. A failure here is logged, never thrown — the
+  // booking is already correctly confirmed regardless. See
+  // supabase/migrations/20260810000014_paymongo_refund_accounting_scaffolding.sql.
+  const { available_at, credited_at } = paidPayment.attributes;
+  if (available_at != null || credited_at != null) {
+    const { error: settlementUpdateError } = await supabase
+      .from("bookings")
+      .update({
+        ...(available_at != null && { paymongo_available_at: new Date(available_at * 1000).toISOString() }),
+        ...(credited_at != null && { paymongo_credited_at: new Date(credited_at * 1000).toISOString() }),
+      })
+      .eq("id", bookingId);
+    if (settlementUpdateError) logServerError("bookings.persistPaymongoSettlementTimestamps", settlementUpdateError);
+  }
 
   const refreshed = await getBookingById(supabase, bookingId);
   return refreshed ?? booking;

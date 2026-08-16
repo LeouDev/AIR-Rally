@@ -101,8 +101,14 @@ beforeEach(() => {
   mockGetCourtDisplayInfo.mockReset();
   mockGetSiteUrl.mockReset();
   mockGetSiteUrl.mockResolvedValue("https://airrally.app");
-  mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court 1", venueName: "Rizal Pickleball Club" });
+  mockGetCourtDisplayInfo.mockResolvedValue({
+    courtName: "Court 1",
+    venueName: "Rizal Pickleball Club",
+    venuePaymongoAccountId: null,
+    venuePaymongoActivationStatus: "unlinked",
+  });
   delete process.env.ACTIVE_PAYMENT_PROVIDER;
+  delete process.env.PAYMONGO_MARKETPLACE_SPLIT_ENABLED;
 });
 
 afterAll(() => {
@@ -247,10 +253,76 @@ describe("createCheckoutSessionAction", () => {
     expect(mockCreatePayMongoCheckoutSession).toHaveBeenCalledWith(
       expect.objectContaining({ booking: PENDING_BOOKING, venueName: "Rizal Pickleball Club", courtName: "Court 1" })
     );
-    expect(mockAttachPaymongoCheckoutSession).toHaveBeenCalledWith(expect.anything(), "booking-1", "cs_pm_1");
+    expect(mockAttachPaymongoCheckoutSession).toHaveBeenCalledWith(expect.anything(), "booking-1", "cs_pm_1", undefined);
     expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
     expect(mockAttachCheckoutSession).not.toHaveBeenCalled();
   });
+
+  it("attaches a marketplace split, computed fresh from the booking's own price_amount, only when the venue is 'activated' AND the platform-wide kill switch is explicitly enabled", async () => {
+    process.env.ACTIVE_PAYMENT_PROVIDER = "paymongo";
+    process.env.PAYMONGO_MARKETPLACE_SPLIT_ENABLED = "true";
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+    mockCreateBooking.mockResolvedValue(PENDING_BOOKING); // price_amount: 50000
+    mockGetCourtDisplayInfo.mockResolvedValue({
+      courtName: "Court 1",
+      venueName: "Rizal Pickleball Club",
+      venuePaymongoAccountId: "org_venue_1",
+      venuePaymongoActivationStatus: "activated",
+    });
+    mockCreatePayMongoCheckoutSession.mockResolvedValue({ id: "cs_pm_2", url: "https://checkout.paymongo.com/cs_pm_2" });
+
+    await createCheckoutSessionAction(validInput);
+
+    expect(mockCreatePayMongoCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({ marketplaceSplit: { platformFeeAmount: 2500, venuePaymongoAccountId: "org_venue_1" } })
+    );
+    expect(mockAttachPaymongoCheckoutSession).toHaveBeenCalledWith(expect.anything(), "booking-1", "cs_pm_2", {
+      platformFeeAmount: 2500,
+      venueAmount: 47500,
+      paymongoVenueAccountId: "org_venue_1",
+    });
+  });
+
+  it("never attaches a marketplace split when the platform-wide kill switch is off, even for a fully activated venue — the production-safety property lib/paymongoLaunchGates.ts exists for", async () => {
+    process.env.ACTIVE_PAYMENT_PROVIDER = "paymongo";
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+    mockCreateBooking.mockResolvedValue(PENDING_BOOKING);
+    mockGetCourtDisplayInfo.mockResolvedValue({
+      courtName: "Court 1",
+      venueName: "Rizal Pickleball Club",
+      venuePaymongoAccountId: "org_venue_1",
+      venuePaymongoActivationStatus: "activated",
+    });
+    mockCreatePayMongoCheckoutSession.mockResolvedValue({ id: "cs_pm_2b", url: "https://checkout.paymongo.com/cs_pm_2b" });
+
+    await createCheckoutSessionAction(validInput);
+
+    expect(mockCreatePayMongoCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ marketplaceSplit: undefined }));
+    expect(mockAttachPaymongoCheckoutSession).toHaveBeenCalledWith(expect.anything(), "booking-1", "cs_pm_2b", undefined);
+  });
+
+  it.each(["unlinked", "pending", "under_review", "declined"] as const)(
+    "falls back to the plain, non-split checkout when the venue's PayMongo status is '%s'",
+    async (status) => {
+      process.env.ACTIVE_PAYMENT_PROVIDER = "paymongo";
+      mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+      mockCreateBooking.mockResolvedValue(PENDING_BOOKING);
+      mockGetCourtDisplayInfo.mockResolvedValue({
+        courtName: "Court 1",
+        venueName: "Rizal Pickleball Club",
+        venuePaymongoAccountId: status === "unlinked" ? null : "org_venue_1",
+        venuePaymongoActivationStatus: status,
+      });
+      mockCreatePayMongoCheckoutSession.mockResolvedValue({ id: "cs_pm_3", url: "https://checkout.paymongo.com/cs_pm_3" });
+
+      await createCheckoutSessionAction(validInput);
+
+      expect(mockCreatePayMongoCheckoutSession).toHaveBeenCalledWith(
+        expect.objectContaining({ marketplaceSplit: undefined })
+      );
+      expect(mockAttachPaymongoCheckoutSession).toHaveBeenCalledWith(expect.anything(), "booking-1", "cs_pm_3", undefined);
+    }
+  );
 
   it("cancels the pending booking when PayMongo Checkout Session creation fails, same cleanup as the Stripe path", async () => {
     process.env.ACTIVE_PAYMENT_PROVIDER = "paymongo";
@@ -264,5 +336,26 @@ describe("createCheckoutSessionAction", () => {
 
     expect(result).toEqual({ success: false, error: "We couldn't start checkout — please try again." });
     expect(mockCancelBooking).toHaveBeenCalledWith(expect.anything(), "user-1", "booking-1");
+  });
+
+  it("cancels the pending booking when a split-payment checkout creation fails (e.g. a silently disabled venue account), and never attaches a stale split snapshot", async () => {
+    process.env.ACTIVE_PAYMENT_PROVIDER = "paymongo";
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+    mockCreateBooking.mockResolvedValue(PENDING_BOOKING);
+    mockGetCourtDisplayInfo.mockResolvedValue({
+      courtName: "Court 1",
+      venueName: "Rizal Pickleball Club",
+      venuePaymongoAccountId: "org_venue_1",
+      venuePaymongoActivationStatus: "activated",
+    });
+    mockCreatePayMongoCheckoutSession.mockRejectedValue(
+      new PayMongoError("checkout_session_creation_failed", "We couldn't start checkout — please try again.")
+    );
+
+    const result = await createCheckoutSessionAction(validInput);
+
+    expect(result).toEqual({ success: false, error: "We couldn't start checkout — please try again." });
+    expect(mockCancelBooking).toHaveBeenCalledWith(expect.anything(), "user-1", "booking-1");
+    expect(mockAttachPaymongoCheckoutSession).not.toHaveBeenCalled();
   });
 });

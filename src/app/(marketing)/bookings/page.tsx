@@ -4,10 +4,15 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CancelBookingButton } from "@/components/court/CancelBookingButton";
+import { BookingRefundStatus } from "@/components/court/BookingRefundStatus";
+import { RescheduleButton } from "@/components/court/RescheduleButton";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { listMyBookingsWithDetails, type BookingWithDetails } from "@/lib/services/bookings";
-import type { BookingStatus } from "@/lib/supabase/types";
+import { listRefundsForBookings } from "@/lib/services/refunds";
+import { listReschedulesForOriginalBookings } from "@/lib/services/reschedules";
+import { RESCHEDULE_CUTOFF_HOURS } from "@/lib/booking-config";
+import type { BookingStatus, BookingReschedule } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 // Real per-viewer bookings — never statically cached.
@@ -45,10 +50,28 @@ function isCancellable(booking: BookingWithDetails): boolean {
   return booking.status !== "cancelled" && new Date(booking.start_time).getTime() > Date.now();
 }
 
+/**
+ * A cheap client-visible pre-filter only — showing/hiding the button. The
+ * real eligibility check (no succeeded refund, not itself a replacement,
+ * no in-flight reschedule) runs server-side the moment the dialog opens
+ * (getRescheduleDialogDataAction), so this never needs to be exhaustive.
+ */
+function isReschedulable(booking: BookingWithDetails, alreadyRescheduled: boolean): boolean {
+  return (
+    booking.status === "confirmed" &&
+    !alreadyRescheduled &&
+    new Date(booking.start_time).getTime() >= Date.now() + RESCHEDULE_CUTOFF_HOURS * 60 * 60_000
+  );
+}
+
 export default async function BookingsPage() {
   const user = await getCurrentUser();
   const supabase = await createClient();
   const bookings = user ? await listMyBookingsWithDetails(supabase, user.id) : [];
+  const refundsByBooking = user ? await listRefundsForBookings(supabase, bookings.map((b) => b.id)) : new Map();
+  const reschedulesByBooking = user
+    ? await listReschedulesForOriginalBookings(supabase, bookings.map((b) => b.id))
+    : new Map<string, BookingReschedule[]>();
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
@@ -83,15 +106,34 @@ export default async function BookingsPage() {
                 <p className="text-xs text-muted-foreground">
                   {formatMoney(booking.price_amount, booking.currency)} · Confirmation {booking.confirmation_code}
                 </p>
+                {(() => {
+                  const refunds = refundsByBooking.get(booking.id);
+                  const latestRefund = refunds?.[0];
+                  return latestRefund ? (
+                    <div className="mt-1">
+                      <BookingRefundStatus status={latestRefund.status} amount={latestRefund.amount} currency={latestRefund.currency} />
+                    </div>
+                  ) : null;
+                })()}
+                {(() => {
+                  const reschedules = reschedulesByBooking.get(booking.id) ?? [];
+                  const completed = reschedules.find((r) => r.status === "completed");
+                  return completed ? <p className="mt-1 text-xs text-muted-foreground">This booking was rescheduled.</p> : null;
+                })()}
               </div>
-              {isCancellable(booking) && (
-                <CancelBookingButton
-                  bookingId={booking.id}
-                  venueName={booking.venueName}
-                  courtName={booking.courtName}
-                  whenLabel={formatWhen(booking)}
-                />
-              )}
+              <div className="flex shrink-0 flex-wrap gap-2">
+                {isReschedulable(booking, (reschedulesByBooking.get(booking.id) ?? []).some((r) => r.status === "completed")) && (
+                  <RescheduleButton bookingId={booking.id} />
+                )}
+                {isCancellable(booking) && (
+                  <CancelBookingButton
+                    bookingId={booking.id}
+                    venueName={booking.venueName}
+                    courtName={booking.courtName}
+                    whenLabel={formatWhen(booking)}
+                  />
+                )}
+              </div>
             </li>
           ))}
         </ul>

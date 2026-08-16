@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getSiteUrl } from "@/lib/site";
+import { CURRENT_AGREEMENT_VERSION } from "@/lib/legal";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import {
   loginSchema,
@@ -45,6 +46,9 @@ export async function signUp(
 ): Promise<ActionResult<{ requiresEmailConfirmation: boolean }>> {
   const parsed = signUpSchema.safeParse(values);
   if (!parsed.success) {
+    // Re-validated here, not just client-side — includes the
+    // agreedToTerms === true check, so a request that skips/tampers with
+    // the checkbox never reaches auth.signUp() at all.
     return { success: false, error: "Please fix the errors below and try again." };
   }
   const { firstName, lastName, email, password } = parsed.data;
@@ -71,6 +75,26 @@ export async function signUp(
   if (error) {
     logServerError("auth.signUp", error);
     return { success: false, error: getFriendlyErrorMessage(error) };
+  }
+
+  // Recorded server-side via a SECURITY DEFINER RPC, not a plain insert —
+  // `data.user.id` exists immediately regardless of whether email
+  // confirmation is pending (no active session yet in that case, so an
+  // RLS-gated self-insert wouldn't work here). Never trusts the client's
+  // agreedToTerms boolean as the record itself — that boolean only
+  // gated whether we got this far.
+  if (data.user) {
+    const { error: agreementError } = await supabase.rpc("record_agreement_acceptance", {
+      p_user_id: data.user.id,
+      p_agreement_version: CURRENT_AGREEMENT_VERSION,
+    });
+    if (agreementError) {
+      // The auth account already exists at this point — failing the
+      // whole signup over a logging-table write would strand the user
+      // with an account they can't recreate (duplicate email) and can't
+      // finish creating. Log it for follow-up instead of blocking them.
+      logServerError("auth.signUp.recordAgreement", agreementError);
+    }
   }
 
   return { success: true, data: { requiresEmailConfirmation: data.session === null } };

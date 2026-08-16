@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "test": "jest",
-    "test:watch": "jest --watch"
+    "dev": "node node_modules/next/dist/bin/next dev",
+    "build": "node node_modules/next/dist/bin/next build",
+    "start": "node node_modules/next/dist/bin/next start",
+    "lint": "node node_modules/eslint/bin/eslint.js",
+    "test": "node node_modules/jest/bin/jest.js",
+    "test:watch": "node node_modules/jest/bin/jest.js --watch"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",
@@ -40,12 +40,14 @@
     "@testing-library/user-event": "^14.6.3",
     "@types/jest": "^30.0.0",
     "@types/node": "^20",
+    "@types/pg": "^8.21.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
+    "pg": "^8.23.0",
     "supabase": "^2.113.0",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",

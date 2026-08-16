@@ -20,3 +20,19 @@ export const MAX_BOOKING_WINDOW_DAYS = 30;
 
 /** Matches every current venue/court in the database — all Philippines-based. */
 export const DEFAULT_CURRENCY = "PHP";
+
+/**
+ * AIR/Rally's marketplace commission — 5% of the original gross booking
+ * price, confirmed with PayMongo (see ARCHITECTURE.md's PayMongo
+ * Platforms section). Computed once, server-side, from price_amount —
+ * never from a post-processing-fee amount. Integer minor units only, see
+ * lib/services/commission.ts.
+ */
+export const PLATFORM_FEE_PERCENT = 0.05;
+
+/**
+ * V1 rescheduling business rule (locked): a confirmed booking may only be
+ * rescheduled while its start_time is at least this many hours away. See
+ * lib/services/reschedules.ts.
+ */
+export const RESCHEDULE_CUTOFF_HOURS = 24;

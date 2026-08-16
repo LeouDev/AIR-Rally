@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { constructPayMongoWebhookEvent, PayMongoError } from "@/lib/services/paymongo";
+import { constructPayMongoWebhookEvent, PayMongoError, type PayMongoMerchantActivationEventData } from "@/lib/services/paymongo";
 import { confirmPaymongoBookingPayment } from "@/lib/services/bookings";
+import { syncVenuePaymongoActivation } from "@/lib/services/venues";
+import { maybeCompleteReschedule } from "@/lib/services/reschedules";
 import { logServerError } from "@/lib/errors";
 
 /**
@@ -39,6 +41,10 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     logServerError("paymongo.webhook.invalidSignature", error);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+  }
+
+  if (event.data.attributes.type === "merchant.activated" || event.data.attributes.type === "merchant.declined") {
+    return handleMerchantActivationEvent(event.data.attributes.data as unknown as PayMongoMerchantActivationEventData);
   }
 
   if (event.data.attributes.type !== "checkout_session.payment.paid") {
@@ -81,13 +87,60 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    return NextResponse.json({ received: true, confirmed });
+    // Additive: a reschedule's price-increase difference checkout charges
+    // less than the replacement booking's own price_amount, so
+    // confirmPaymongoBookingPayment() above always no-ops for it (by
+    // design — see lib/services/reschedules.ts). This is the actual
+    // confirmation path for that case; for every normal (non-reschedule)
+    // booking it's a cheap, harmless no-op.
+    const rescheduleCompleted = await maybeCompleteReschedule(
+      supabase,
+      bookingId,
+      paidPayment.attributes.amount,
+      paidPayment.attributes.currency,
+      checkoutSession.id
+    );
+
+    return NextResponse.json({ received: true, confirmed, rescheduleCompleted });
   } catch (error) {
     if (error instanceof PayMongoError) {
       logServerError(`paymongo.webhook.${error.reason}`, error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
     logServerError("paymongo.webhook.confirmFailed", error);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  }
+}
+
+/**
+ * Handles the PayMongo Platforms onboarding "reliable signal" events (see
+ * ARCHITECTURE.md's PayMongo Platforms section for why the synchronous
+ * activate-call response is deliberately NOT trusted for this instead).
+ * Looked up purely by merchant_id via sync_venue_paymongo_activation() — a
+ * stray event matching no venue is a safe no-op, same idempotent posture
+ * as the checkout-session handler above.
+ */
+async function handleMerchantActivationEvent(data: PayMongoMerchantActivationEventData): Promise<Response> {
+  const activationStatus = data.activation_status === "activated" ? "activated" : "declined";
+
+  try {
+    const supabase = await createClient();
+    const synced = await syncVenuePaymongoActivation(supabase, {
+      paymongoAccountId: data.merchant_id,
+      activationStatus,
+      declinedReason: data.declined_message ?? null,
+    });
+
+    if (!synced) {
+      logServerError(
+        "paymongo.webhook.activationNoMatchingVenue",
+        new Error(`merchant.${activationStatus} for account ${data.merchant_id} matched no venue`)
+      );
+    }
+
+    return NextResponse.json({ received: true, synced });
+  } catch (error) {
+    logServerError("paymongo.webhook.activationSyncFailed", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

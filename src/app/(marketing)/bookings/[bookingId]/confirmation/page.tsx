@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { getBookingById, reconcilePendingBooking, reconcilePaymongoPendingBooking } from "@/lib/services/bookings";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
+import { maybeCompleteRescheduleFromProvider, listReschedulesForBooking } from "@/lib/services/reschedules";
 import { logServerError } from "@/lib/errors";
 
 // Real per-viewer booking state, possibly reconciled against Stripe on
@@ -63,9 +64,39 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
       // Reconciliation failing doesn't change what we show — the page
       // still renders the current (still-pending) state honestly below.
     }
+
+    // Additive: the reconcile calls above check this booking's own
+    // price_amount against what was actually paid — which never matches
+    // for a reschedule's price-increase difference checkout (see
+    // lib/services/reschedules.ts), so they always no-op for it. This is
+    // the real "redirect arrives before webhook" fallback for that case;
+    // for every normal booking it's a cheap no-op (no booking_reschedules
+    // row references it).
+    if (booking.status === "pending") {
+      try {
+        const completed = await maybeCompleteRescheduleFromProvider(supabase, bookingId);
+        if (completed) {
+          booking = (await getBookingById(supabase, bookingId)) ?? booking;
+        }
+      } catch (error) {
+        logServerError("bookings.confirmation.rescheduleReconcile", error);
+      }
+    }
   }
 
   const display = await getCourtDisplayInfo(supabase, booking.court_id);
+
+  // Only relevant once the booking is actually confirmed — a booking
+  // that came from a completed reschedule had its own checkout (if any)
+  // charge just the price DIFFERENCE, never this booking's full
+  // price_amount, so "Amount paid" would misrepresent what this specific
+  // transaction actually charged/refunded. Ordinary (non-reschedule)
+  // bookings are completely unaffected: `completedReschedule` stays
+  // null for them and the existing "Amount paid" wording is untouched.
+  const completedReschedule =
+    booking.status === "confirmed"
+      ? (await listReschedulesForBooking(supabase, booking.id)).find((r) => r.new_booking_id === booking.id && r.status === "completed")
+      : undefined;
 
   if (booking.status === "cancelled") {
     return (
@@ -133,9 +164,15 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-muted-foreground">Amount paid</dt>
+            <dt className="text-xs text-muted-foreground">{completedReschedule ? "Booking total" : "Amount paid"}</dt>
             <dd className="font-medium text-foreground">{formatMoney(booking.price_amount, booking.currency)}</dd>
           </div>
+          {completedReschedule && completedReschedule.price_difference !== 0 && (
+            <div>
+              <dt className="text-xs text-muted-foreground">{completedReschedule.price_difference > 0 ? "Additional payment" : "Refunded"}</dt>
+              <dd className="font-medium text-foreground">{formatMoney(Math.abs(completedReschedule.price_difference), booking.currency)}</dd>
+            </div>
+          )}
           <div className="col-span-2">
             <dt className="text-xs text-muted-foreground">Confirmation code</dt>
             <dd className="font-mono text-base font-semibold tracking-wide text-foreground">{booking.confirmation_code}</dd>

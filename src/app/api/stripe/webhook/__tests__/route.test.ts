@@ -4,6 +4,7 @@
 import { POST } from "../route";
 import { constructWebhookEvent, PaymentError } from "../../../../../lib/services/payments";
 import { confirmBookingPayment } from "../../../../../lib/services/bookings";
+import { maybeCompleteReschedule } from "../../../../../lib/services/reschedules";
 import { createClient } from "../../../../../lib/supabase/server";
 
 // Relative paths for jest.mock — see MEMORY.md (air-rally-jest-mock-colon-path-bug).
@@ -22,10 +23,12 @@ jest.mock("../../../../../lib/services/payments", () => {
   };
 });
 jest.mock("../../../../../lib/services/bookings", () => ({ confirmBookingPayment: jest.fn() }));
+jest.mock("../../../../../lib/services/reschedules", () => ({ maybeCompleteReschedule: jest.fn() }));
 jest.mock("../../../../../lib/supabase/server", () => ({ createClient: jest.fn() }));
 
 const mockConstructWebhookEvent = constructWebhookEvent as jest.MockedFunction<typeof constructWebhookEvent>;
 const mockConfirmBookingPayment = confirmBookingPayment as jest.MockedFunction<typeof confirmBookingPayment>;
+const mockMaybeCompleteReschedule = maybeCompleteReschedule as jest.MockedFunction<typeof maybeCompleteReschedule>;
 const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
 
 function fakeRequest(body: string, signature: string | null = "t=1,v1=abc") {
@@ -51,6 +54,8 @@ const COMPLETED_EVENT = {
 beforeEach(() => {
   mockConstructWebhookEvent.mockReset();
   mockConfirmBookingPayment.mockReset();
+  mockMaybeCompleteReschedule.mockReset();
+  mockMaybeCompleteReschedule.mockResolvedValue(false);
   mockCreateClient.mockReset();
   mockCreateClient.mockResolvedValue({} as never);
 });
@@ -107,7 +112,11 @@ describe("POST /api/stripe/webhook", () => {
       expectedCurrency: "PHP",
     });
     const json = await response.json();
-    expect(json).toEqual({ received: true, confirmed: true });
+    expect(json).toEqual({ received: true, confirmed: true, rescheduleCompleted: false });
+    // Additive, after the existing confirm call — never gates it, always
+    // fires so a reschedule difference-checkout session (whose amount
+    // never matches the replacement's own price_amount) still completes.
+    expect(mockMaybeCompleteReschedule).toHaveBeenCalledWith(expect.anything(), "booking-1", 50000, "php", "cs_test_123");
   });
 
   it("is idempotent: a duplicate delivery of the same event still returns 200 even though confirmBookingPayment no-ops", async () => {
@@ -118,7 +127,18 @@ describe("POST /api/stripe/webhook", () => {
 
     expect(response.status).toBe(200);
     const json = await response.json();
-    expect(json).toEqual({ received: true, confirmed: false });
+    expect(json).toEqual({ received: true, confirmed: false, rescheduleCompleted: false });
+  });
+
+  it("completes a reschedule when maybeCompleteReschedule reports the difference-checkout session actually matched one", async () => {
+    mockConstructWebhookEvent.mockReturnValue(COMPLETED_EVENT);
+    mockConfirmBookingPayment.mockResolvedValue(false); // the difference amount never matches price_amount, by design
+    mockMaybeCompleteReschedule.mockResolvedValue(true);
+
+    const response = await POST(fakeRequest("{}"));
+
+    const json = await response.json();
+    expect(json).toEqual({ received: true, confirmed: false, rescheduleCompleted: true });
   });
 
   it("acknowledges with 200 rather than retrying forever when the session is missing booking_id/payment_intent/amount_total", async () => {

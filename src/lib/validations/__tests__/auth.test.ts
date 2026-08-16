@@ -24,9 +24,10 @@ describe("signUpSchema", () => {
     email: "jamie@example.com",
     password: "supersecret1",
     confirmPassword: "supersecret1",
+    agreedToTerms: true,
   };
 
-  it("accepts matching passwords of sufficient length", () => {
+  it("accepts matching passwords of sufficient length, with the agreement accepted", () => {
     expect(signUpSchema.safeParse(base).success).toBe(true);
   });
 
@@ -45,6 +46,14 @@ describe("signUpSchema", () => {
 
   it("rejects a blank first or last name", () => {
     expect(signUpSchema.safeParse({ ...base, firstName: "  " }).success).toBe(false);
+  });
+
+  it("rejects signup when the User Agreement hasn't been accepted", () => {
+    const result = signUpSchema.safeParse({ ...base, agreedToTerms: false });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.includes("agreedToTerms"))).toBe(true);
+    }
   });
 });
 

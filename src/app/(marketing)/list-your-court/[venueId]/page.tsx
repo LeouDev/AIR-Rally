@@ -2,12 +2,18 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { VenueForm } from "@/components/owner/VenueForm";
 import { VenueAmenitiesEditor } from "@/components/owner/VenueAmenitiesEditor";
+import { VenueOperatingHoursEditor } from "@/components/owner/VenueOperatingHoursEditor";
+import { VenueReadinessChecklist } from "@/components/owner/VenueReadinessChecklist";
 import { CourtsManager } from "@/components/owner/CourtsManager";
+import { PaymongoOnboardingCard } from "@/components/owner/PaymongoOnboardingCard";
+import { VenueEarningsCard } from "@/components/owner/VenueEarningsCard";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getVenueForOwner } from "@/lib/services/venues";
+import { getVenueForOwner, listOperatingHours } from "@/lib/services/venues";
 import { listCourtsByVenue } from "@/lib/services/courts";
 import { listAmenities, listAmenityIdsForVenue } from "@/lib/services/amenities";
+import { getVenueReadiness } from "@/lib/services/venueReadiness";
+import { getVenueEarnings } from "@/lib/services/venueEarnings";
 import type { CreateVenueDraftValues } from "@/lib/validations/venue";
 
 // Reads the owner's own venue via a cookie-scoped session and RLS — never
@@ -37,10 +43,13 @@ export default async function ManageVenuePage({
   const venue = await getVenueForOwner(supabase, venueId);
   if (!venue) notFound();
 
-  const [courts, allAmenities, selectedAmenityIds] = await Promise.all([
+  const [courts, allAmenities, selectedAmenityIds, operatingHours, readiness, earnings] = await Promise.all([
     listCourtsByVenue(supabase, venueId),
     listAmenities(supabase),
     listAmenityIdsForVenue(supabase, venueId),
+    listOperatingHours(supabase, venueId),
+    getVenueReadiness(supabase, venueId),
+    getVenueEarnings(supabase, venueId),
   ]);
 
   const initialValues: CreateVenueDraftValues = {
@@ -66,8 +75,16 @@ export default async function ManageVenuePage({
         </p>
       </div>
 
+      <VenueReadinessChecklist readiness={readiness} />
+      <VenueEarningsCard earnings={earnings} />
       <VenueForm mode="edit" venueId={venueId} initialValues={initialValues} />
+      <PaymongoOnboardingCard
+        venueId={venueId}
+        activationStatus={venue.paymongo_activation_status}
+        declinedReason={venue.paymongo_declined_reason}
+      />
       <VenueAmenitiesEditor venueId={venueId} allAmenities={allAmenities} initialSelectedIds={selectedAmenityIds} />
+      <VenueOperatingHoursEditor venueId={venueId} initialHours={operatingHours} />
       <CourtsManager venueId={venueId} courts={courts} />
     </div>
   );

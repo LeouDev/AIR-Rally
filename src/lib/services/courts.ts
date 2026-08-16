@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Court } from "@/lib/supabase/types";
+import type { Database, Court, VenuePaymongoActivationStatus } from "@/lib/supabase/types";
 import type { CreateCourtValues, UpdateCourtValues } from "@/lib/validations/court";
 
 type Client = SupabaseClient<Database>;
@@ -79,21 +79,45 @@ export async function setCourtStatus(
   return data;
 }
 
+export type CourtCheckoutDisplayInfo = {
+  courtName: string;
+  venueName: string;
+  /**
+   * Marketplace-split gate, added alongside the PayMongo Platforms
+   * checkout extension (see ARCHITECTURE.md): only a venue whose
+   * paymongo_activation_status is 'activated' has a real, payable
+   * account behind paymongo_account_id — every other status means the
+   * checkout falls back to the existing plain (non-split) PayMongo flow.
+   */
+  venuePaymongoAccountId: string | null;
+  venuePaymongoActivationStatus: VenuePaymongoActivationStatus;
+};
+
 /**
- * Court + venue name only — for building a Stripe Checkout line-item
- * description (lib/actions/checkout.ts). Deliberately not the fuller
- * getVenueDetail()/listMyBookingsWithDetails() shapes; this one call site
- * only ever needs two display strings, server-derived, never anything
- * a client could supply.
+ * Court + venue display/checkout info — for building a Stripe/PayMongo
+ * Checkout line-item description (lib/actions/checkout.ts) and, since the
+ * PayMongo Platforms extension, the venue's marketplace-split readiness.
+ * Deliberately not the fuller getVenueDetail()/listMyBookingsWithDetails()
+ * shapes; this one call site only ever needs these fields, server-derived,
+ * never anything a client could supply.
  */
-export async function getCourtDisplayInfo(supabase: Client, courtId: string): Promise<{ courtName: string; venueName: string } | null> {
+export async function getCourtDisplayInfo(supabase: Client, courtId: string): Promise<CourtCheckoutDisplayInfo | null> {
   const { data: court, error: courtError } = await supabase.from("courts").select("name, venue_id").eq("id", courtId).maybeSingle();
   if (courtError) throw courtError;
   if (!court) return null;
 
-  const { data: venue, error: venueError } = await supabase.from("venues").select("name").eq("id", court.venue_id).maybeSingle();
+  const { data: venue, error: venueError } = await supabase
+    .from("venues")
+    .select("name, paymongo_account_id, paymongo_activation_status")
+    .eq("id", court.venue_id)
+    .maybeSingle();
   if (venueError) throw venueError;
   if (!venue) return null;
 
-  return { courtName: court.name, venueName: venue.name };
+  return {
+    courtName: court.name,
+    venueName: venue.name,
+    venuePaymongoAccountId: venue.paymongo_account_id,
+    venuePaymongoActivationStatus: venue.paymongo_activation_status,
+  };
 }

@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { createClient } from "@/lib/supabase/server";
 import { constructWebhookEvent, PaymentError } from "@/lib/services/payments";
 import { confirmBookingPayment } from "@/lib/services/bookings";
+import { maybeCompleteReschedule } from "@/lib/services/reschedules";
 import { logServerError } from "@/lib/errors";
 
 /**
@@ -75,7 +76,21 @@ export async function POST(request: Request): Promise<Response> {
       logServerError("stripe.webhook.confirmNoOp", new Error(`booking ${bookingId} / session ${session.id} did not transition`));
     }
 
-    return NextResponse.json({ received: true, confirmed });
+    // Additive: a reschedule's price-increase difference checkout charges
+    // less than the replacement booking's own price_amount, so
+    // confirmBookingPayment() above always no-ops for it (by design — see
+    // lib/services/reschedules.ts). This is the actual confirmation path
+    // for that case; for every normal (non-reschedule) booking it's a
+    // cheap, harmless no-op (no booking_reschedules row references it).
+    const rescheduleCompleted = await maybeCompleteReschedule(
+      supabase,
+      bookingId,
+      session.amount_total,
+      session.currency ?? "php",
+      session.id
+    );
+
+    return NextResponse.json({ received: true, confirmed, rescheduleCompleted });
   } catch (error) {
     if (error instanceof PaymentError) {
       logServerError(`stripe.webhook.${error.reason}`, error);

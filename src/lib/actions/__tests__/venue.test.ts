@@ -1,9 +1,9 @@
 /**
  * @jest-environment node
  */
-import { createVenueDraftAction, updateVenueAction, setVenueAmenitiesAction } from "../venue";
+import { createVenueDraftAction, updateVenueAction, setVenueAmenitiesAction, setOperatingHoursAction } from "../venue";
 import { getServerClient } from "../auth";
-import { createDraftVenue, updateVenue } from "../../services/venues";
+import { createDraftVenue, updateVenue, setOperatingHours } from "../../services/venues";
 import { setVenueAmenities } from "../../services/amenities";
 import type { CreateVenueDraftValues } from "../../validations/venue";
 
@@ -12,6 +12,7 @@ jest.mock("../auth", () => ({ getServerClient: jest.fn() }));
 jest.mock("../../services/venues", () => ({
   createDraftVenue: jest.fn(),
   updateVenue: jest.fn(),
+  setOperatingHours: jest.fn(),
 }));
 jest.mock("../../services/amenities", () => ({ setVenueAmenities: jest.fn() }));
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
@@ -20,6 +21,7 @@ const mockGetServerClient = getServerClient as jest.MockedFunction<typeof getSer
 const mockCreateDraftVenue = createDraftVenue as jest.MockedFunction<typeof createDraftVenue>;
 const mockUpdateVenue = updateVenue as jest.MockedFunction<typeof updateVenue>;
 const mockSetVenueAmenities = setVenueAmenities as jest.MockedFunction<typeof setVenueAmenities>;
+const mockSetOperatingHours = setOperatingHours as jest.MockedFunction<typeof setOperatingHours>;
 
 function fakeClient(user: { id: string } | null) {
   return { auth: { getUser: jest.fn().mockResolvedValue({ data: { user } }) } } as never;
@@ -139,5 +141,36 @@ describe("setVenueAmenitiesAction", () => {
 
     expect(result).toEqual({ success: true, data: undefined });
     expect(mockSetVenueAmenities).toHaveBeenCalledWith(expect.anything(), "venue-1", ["a1", "a2"]);
+  });
+});
+
+describe("setOperatingHoursAction", () => {
+  beforeEach(() => {
+    mockGetServerClient.mockReset();
+    mockSetOperatingHours.mockReset();
+  });
+
+  it("rejects an invalid time format before ever contacting Supabase", async () => {
+    const result = await setOperatingHoursAction("venue-1", { windows: [{ dayOfWeek: 1, startTime: "8am", endTime: "20:00" }] as never });
+    expect(result.success).toBe(false);
+    expect(mockGetServerClient).not.toHaveBeenCalled();
+  });
+
+  it("requires an authenticated session", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient(null) });
+    const result = await setOperatingHoursAction("venue-1", { windows: [] });
+    expect(result.success).toBe(false);
+    expect(mockSetOperatingHours).not.toHaveBeenCalled();
+  });
+
+  it("replaces a venue's operating hours for the authenticated owner", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+    mockSetOperatingHours.mockResolvedValue(undefined);
+
+    const windows = [{ dayOfWeek: 1, startTime: "08:00", endTime: "20:00" }];
+    const result = await setOperatingHoursAction("venue-1", { windows });
+
+    expect(result).toEqual({ success: true, data: undefined });
+    expect(mockSetOperatingHours).toHaveBeenCalledWith(expect.anything(), "venue-1", { windows });
   });
 });

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Venue, VenueMarketplaceRow, VenueDetail, Amenity } from "@/lib/supabase/types";
+import type { Database, Venue, VenueMarketplaceRow, VenueDetail, Amenity, VenueOperatingHours } from "@/lib/supabase/types";
 import type { CreateVenueDraftValues, UpdateVenueValues } from "@/lib/validations/venue";
+import type { SetOperatingHoursValues } from "@/lib/validations/venueOperatingHours";
 
 type Client = SupabaseClient<Database>;
 
@@ -298,4 +299,76 @@ export async function getVenueDetail(supabase: Client, venueId: string): Promise
     amenities,
     images: imagesResult.data ?? [],
   };
+}
+
+// --- Operating hours (owner-managed; RLS already supported this table,
+// only the application layer was missing — see venueReadiness.ts) ------
+
+export async function listOperatingHours(supabase: Client, venueId: string): Promise<VenueOperatingHours[]> {
+  const { data, error } = await supabase
+    .from("venue_operating_hours")
+    .select("*")
+    .eq("venue_id", venueId)
+    .order("day_of_week");
+  if (error) throw error;
+  return data;
+}
+
+/** Replace-all write, mirroring setVenueAmenities()'s exact delete-then-insert shape. */
+export async function setOperatingHours(supabase: Client, venueId: string, values: SetOperatingHoursValues): Promise<void> {
+  const { error: deleteError } = await supabase.from("venue_operating_hours").delete().eq("venue_id", venueId);
+  if (deleteError) throw deleteError;
+
+  if (values.windows.length === 0) return;
+
+  const { error: insertError } = await supabase.from("venue_operating_hours").insert(
+    values.windows.map((w) => ({
+      venue_id: venueId,
+      day_of_week: w.dayOfWeek,
+      start_time: `${w.startTime}:00`,
+      end_time: `${w.endTime}:00`,
+    }))
+  );
+  if (insertError) throw insertError;
+}
+
+// --- PayMongo Platforms marketplace onboarding (see ARCHITECTURE.md) ---
+
+/**
+ * Thin wrapper around sync_venue_paymongo_status() — the only owner-facing
+ * write path for linking a venue to a freshly-created PayMongo Platforms
+ * account. Called once, right after createPayMongoMerchantAccount()
+ * succeeds; the RPC itself enforces owner_id = auth.uid() and refuses to
+ * relink an already-linked venue, so there's no separate check needed
+ * here.
+ */
+export async function linkVenuePaymongoAccount(supabase: Client, venueId: string, paymongoAccountId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("sync_venue_paymongo_status", {
+    p_venue_id: venueId,
+    p_paymongo_account_id: paymongoAccountId,
+    p_activation_status: "pending",
+  });
+  if (error) throw error;
+  return data ?? false;
+}
+
+/**
+ * Thin wrapper around sync_venue_paymongo_activation() — webhook-only, per
+ * the RPC's own design (looked up purely by paymongo_account_id, no venue
+ * row need ever be read first). Called from the PayMongo webhook route
+ * when a merchant.activated/merchant.declined event arrives. A `false`
+ * return means no venue has that account id linked (a stray/unmatched
+ * event) — a safe no-op, not an error.
+ */
+export async function syncVenuePaymongoActivation(
+  supabase: Client,
+  params: { paymongoAccountId: string; activationStatus: "under_review" | "activated" | "declined"; declinedReason?: string | null }
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("sync_venue_paymongo_activation", {
+    p_paymongo_account_id: params.paymongoAccountId,
+    p_activation_status: params.activationStatus,
+    p_declined_reason: params.declinedReason ?? null,
+  });
+  if (error) throw error;
+  return data ?? false;
 }

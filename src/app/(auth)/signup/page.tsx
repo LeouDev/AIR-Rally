@@ -126,6 +126,25 @@ export default function SignupPage() {
           )}
         </div>
 
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-start gap-2">
+            <input
+              id="agreedToTerms"
+              type="checkbox"
+              aria-invalid={!!errors.agreedToTerms}
+              className="mt-0.5 size-4 shrink-0 rounded border-border text-primary focus-visible:ring-2 focus-visible:ring-ring"
+              {...register("agreedToTerms")}
+            />
+            <Label htmlFor="agreedToTerms" className="text-sm font-normal text-muted-foreground">
+              I agree to the{" "}
+              <Link href="/terms" target="_blank" className="font-medium text-primary hover:underline">
+                User Agreement
+              </Link>
+            </Label>
+          </div>
+          {errors.agreedToTerms && <p className="text-xs text-destructive">{errors.agreedToTerms.message}</p>}
+        </div>
+
         {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
 
         <Button type="submit" className="mt-2 h-11" disabled={isSubmitting}>
