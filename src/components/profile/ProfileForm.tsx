@@ -4,28 +4,12 @@ import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { updateProfileAction } from "@/lib/actions/profile";
 import { updateProfileSchema, type UpdateProfileValues } from "@/lib/validations/profile";
-import type { Profile, UserRole } from "@/lib/supabase/types";
-
-const ROLE_LABELS: Record<UserRole, string> = {
-  player: "Player",
-  venue_owner: "Venue Owner",
-  admin: "Admin",
-};
-
-function initialsFrom(name: string) {
-  const parts = name.trim().split(/\s+/);
-  return parts
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase())
-    .join("");
-}
+import type { Profile } from "@/lib/supabase/types";
 
 type ProfileFormProps = {
   profile: Profile;
@@ -38,7 +22,6 @@ export function ProfileForm({ profile, email }: ProfileFormProps) {
   const {
     register,
     handleSubmit,
-    watch,
     setError,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<UpdateProfileValues>({
@@ -52,9 +35,6 @@ export function ProfileForm({ profile, email }: ProfileFormProps) {
     },
   });
 
-  const currentDisplayName = watch("displayName") || profile.display_name || email;
-  const currentAvatarUrl = watch("avatarUrl");
-
   async function onSubmit(values: UpdateProfileValues) {
     const result = await updateProfileAction(values);
     if (!result.success) {
@@ -67,20 +47,9 @@ export function ProfileForm({ profile, email }: ProfileFormProps) {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex items-center gap-4">
-        <Avatar className="size-16">
-          {currentAvatarUrl && <AvatarImage src={currentAvatarUrl} alt="" />}
-          <AvatarFallback className="bg-secondary text-lg font-semibold text-secondary-foreground">
-            {initialsFrom(currentDisplayName)}
-          </AvatarFallback>
-        </Avatar>
-        <div>
-          <p className="text-lg font-semibold text-foreground">{currentDisplayName}</p>
-          <p className="text-sm text-muted-foreground">{email}</p>
-          <Badge variant="secondary" className="mt-1.5">
-            {ROLE_LABELS[profile.role]}
-          </Badge>
-        </div>
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Account details</h2>
+        <p className="text-sm text-muted-foreground">{email}</p>
       </div>
 
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)} noValidate>
@@ -113,21 +82,6 @@ export function ProfileForm({ profile, email }: ProfileFormProps) {
             {...register("phone")}
           />
           {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="avatarUrl">Avatar URL</Label>
-          <Input
-            id="avatarUrl"
-            type="url"
-            placeholder="https://…"
-            aria-invalid={!!errors.avatarUrl}
-            {...register("avatarUrl")}
-          />
-          {errors.avatarUrl && <p className="text-xs text-destructive">{errors.avatarUrl.message}</p>}
-          <p className="text-xs text-muted-foreground">
-            Paste an image URL for now — direct upload arrives with Supabase Storage in a later phase.
-          </p>
         </div>
 
         {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}

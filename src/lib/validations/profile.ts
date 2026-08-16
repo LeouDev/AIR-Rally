@@ -24,3 +24,11 @@ export const updateProfileSchema = z.object({
     .refine((value) => value === "" || z.url().safeParse(value).success, "Enter a valid image URL"),
 });
 export type UpdateProfileValues = z.infer<typeof updateProfileSchema>;
+
+// Separate from updateProfileSchema — persisted immediately after a
+// Storage upload (see AvatarUploadButton.tsx), not as part of the rest of
+// the profile form's fields.
+export const updateAvatarSchema = z.object({
+  avatarUrl: z.url().max(2048),
+});
+export type UpdateAvatarValues = z.infer<typeof updateAvatarSchema>;

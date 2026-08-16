@@ -3,7 +3,11 @@ import { TriangleAlert, UserCircle } from "lucide-react";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui/button";
 import { ProfileForm } from "@/components/profile/ProfileForm";
+import { ProfileHeader } from "@/components/profile/ProfileHeader";
 import { getCurrentUserWithProfile } from "@/lib/supabase/auth";
+import { getProfileStats } from "@/lib/services/profiles";
+import { createClient } from "@/lib/supabase/server";
+import type { Profile } from "@/lib/supabase/types";
 
 export const metadata = { title: "Profile" };
 // Renders per-user data (own profile via a cookie-scoped Supabase session)
@@ -36,7 +40,7 @@ export default async function ProfilePage() {
             }
           />
         ) : session.profile ? (
-          <ProfileForm profile={session.profile} email={session.user.email ?? ""} />
+          <ProfileWithStats profile={session.profile} email={session.user.email ?? ""} />
         ) : (
           <EmptyState
             icon={TriangleAlert}
@@ -45,6 +49,18 @@ export default async function ProfilePage() {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+async function ProfileWithStats({ profile, email }: { profile: Profile; email: string }) {
+  const supabase = await createClient();
+  const stats = await getProfileStats(supabase, profile.id, profile.created_at);
+
+  return (
+    <div className="flex flex-col gap-8">
+      <ProfileHeader profile={profile} email={email} stats={stats} />
+      <ProfileForm profile={profile} email={email} />
     </div>
   );
 }
