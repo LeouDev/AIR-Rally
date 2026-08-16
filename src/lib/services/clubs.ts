@@ -123,6 +123,57 @@ export async function resolveClubMentionsForPosts(supabase: Client, contents: st
   return resolveClubMentions(supabase, handles);
 }
 
+export type ClubWithOwner = Club & { owner: PublicProfile | null };
+
+/**
+ * Every club in a given moderation state, for the admin dashboard.
+ * Admins bypass the status/visibility half of the clubs SELECT policy via
+ * is_admin(), so this sees pending and suspended clubs too — a non-admin
+ * caller simply gets whatever RLS allows them, which is why the calling
+ * page gates on requireAdmin() first.
+ */
+export async function listClubsForAdmin(supabase: Client, status?: Club["status"]): Promise<ClubWithOwner[]> {
+  let query = supabase.from("clubs").select("*").order("created_at", { ascending: false });
+  if (status) query = query.eq("status", status);
+
+  const { data: clubs, error } = await query;
+  if (error) throw error;
+  if (!clubs || clubs.length === 0) return [];
+
+  const ownerIds = Array.from(new Set(clubs.map((c) => c.owner_id)));
+  const { data: owners, error: ownersError } = await supabase
+    .from("public_profiles")
+    .select("id, display_name, avatar_url")
+    .in("id", ownerIds);
+  if (ownersError) throw ownersError;
+
+  const ownerById = new Map((owners ?? []).map((o) => [o.id, o]));
+  return clubs.map((club) => ({ ...club, owner: ownerById.get(club.owner_id) ?? null }));
+}
+
+/** Counts per moderation state, for the dashboard's tab badges. */
+export async function getClubModerationCounts(supabase: Client): Promise<Record<Club["status"], number>> {
+  const { data, error } = await supabase.from("clubs").select("status");
+  if (error) throw error;
+
+  const counts: Record<Club["status"], number> = { pending_review: 0, active: 0, suspended: 0 };
+  for (const row of data ?? []) {
+    if (row.status in counts) counts[row.status] += 1;
+  }
+  return counts;
+}
+
+/**
+ * Moves a club between moderation states. Admin-only: the
+ * enforce_club_status_change() trigger silently reverts a status change
+ * from anyone who isn't an admin, so this cannot be used to self-approve
+ * even if the calling code forgot to check.
+ */
+export async function setClubStatus(supabase: Client, clubId: string, status: Club["status"]): Promise<void> {
+  const { error } = await supabase.from("clubs").update({ status }).eq("id", clubId);
+  if (error) throw error;
+}
+
 /** Every club the given user belongs to, whatever their role. */
 export async function listClubsForUser(supabase: Client, userId: string): Promise<Club[]> {
   const { data: memberships, error: membershipsError } = await supabase

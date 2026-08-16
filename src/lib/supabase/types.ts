@@ -228,6 +228,8 @@ export type Post = {
   user_id: string;
   content: string;
   image_url: string | null;
+  /** Up to 5 storage paths (see posts_image_paths_max_5). Resolve via getPublicImageUrl(). */
+  image_paths: string[];
   like_count: number;
   comment_count: number;
   /** Trigger-maintained, same as like_count. */
@@ -272,6 +274,7 @@ export type Follow = {
 export type ClubSkillLevel = "beginner" | "intermediate" | "advanced" | "mixed";
 export type ClubType = "social" | "competitive" | "training" | "casual";
 export type ClubVisibility = "public" | "approval_required" | "private";
+export type ClubStatus = "pending_review" | "active" | "suspended";
 export type ClubMemberRole = "owner" | "admin" | "member";
 export type ClubMemberStatus = "active" | "pending" | "blocked";
 
@@ -285,7 +288,8 @@ export type Club = {
   skill_level: ClubSkillLevel;
   club_type: ClubType;
   visibility: ClubVisibility;
-  status: "active" | "suspended";
+  /** Clubs start as pending_review and are hidden from discovery until an admin approves. */
+  status: ClubStatus;
   /** Denormalized, trigger-maintained (active members only) — never client-writable. */
   member_count: number;
   /**

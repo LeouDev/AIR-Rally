@@ -8,6 +8,8 @@ import { PostComments } from "@/components/court-side/PostComments";
 import { AdminDeletePostButton } from "@/components/admin/AdminDeletePostButton";
 import type { PostWithAuthor } from "@/lib/services/posts";
 import type { ClubMentionMap } from "@/lib/services/clubs";
+import { createClient } from "@/lib/supabase/client";
+import { getPostImageUrl } from "@/lib/services/postImages";
 import { cn } from "@/lib/utils";
 
 export function initialsFrom(name: string) {
@@ -141,6 +143,34 @@ export function PostCard({
       </div>
 
       <p className="mt-3 text-sm leading-relaxed text-foreground">{highlightMentions(post.content, clubMentions)}</p>
+
+      {post.image_paths.length > 0 && (
+        <div
+          className={cn(
+            "mt-3 grid gap-1.5 overflow-hidden rounded-xl",
+            post.image_paths.length === 1 ? "grid-cols-1" : "grid-cols-2"
+          )}
+        >
+          {post.image_paths.map((path) => {
+            const url = getPostImageUrl(createClient(), path);
+            return (
+              // Supabase storage host isn't in next.config's image
+              // allowlist, so next/image would fail at runtime here.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={path}
+                src={url}
+                alt=""
+                loading="lazy"
+                className={cn(
+                  "w-full object-cover",
+                  post.image_paths.length === 1 ? "max-h-96" : "aspect-square"
+                )}
+              />
+            );
+          })}
+        </div>
+      )}
 
       <div className="mt-3 flex items-center gap-5 border-t border-border pt-3">
         <button

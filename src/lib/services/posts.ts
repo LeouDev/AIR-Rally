@@ -65,10 +65,16 @@ export async function listPostsByUser(
   return { posts, nextCursor };
 }
 
-export async function createPost(supabase: Client, userId: string, content: string, imageUrl?: string | null): Promise<Post> {
+export async function createPost(
+  supabase: Client,
+  userId: string,
+  content: string,
+  imageUrl?: string | null,
+  imagePaths: string[] = []
+): Promise<Post> {
   const { data, error } = await supabase
     .from("posts")
-    .insert({ user_id: userId, content, image_url: imageUrl ?? null })
+    .insert({ user_id: userId, content, image_url: imageUrl ?? null, image_paths: imagePaths })
     .select()
     .single();
   if (error) throw error;

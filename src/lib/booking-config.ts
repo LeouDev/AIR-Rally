@@ -6,10 +6,17 @@
  * scatter them across the codebase.
  */
 
-/** Bookable start times fall on this many minutes past the hour/half-hour — matches the brief's own worked examples (7:00–7:30 valid, 7:15–8:15 invalid). */
-export const SLOT_INCREMENT_MINUTES = 30;
+/**
+ * Bookable start times fall on the hour. Half-hour starts were dropped in
+ * favour of whole-hour slots only — courts are sold by the hour, and a
+ * 30-minute grid produced starts (7:30, 8:30) that no venue actually
+ * offered. Changing this reshapes both the availability grid and the
+ * duration options below, since a duration must be a whole multiple of it.
+ */
+export const SLOT_INCREMENT_MINUTES = 60;
 
-export const MIN_DURATION_MINUTES = 30;
+/** One hour is the shortest bookable session. */
+export const MIN_DURATION_MINUTES = 60;
 export const MAX_DURATION_MINUTES = 240;
 
 /** Matches the brief's own example. No product policy exists beyond it yet — documented as a default, not a researched business rule. */

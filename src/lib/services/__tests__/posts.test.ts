@@ -23,6 +23,7 @@ const POST_ROW: Post = {
   user_id: "user-1",
   content: "Golden hour games today.",
   image_url: null,
+  image_paths: [],
   like_count: 3,
   comment_count: 1,
   reshare_count: 0,

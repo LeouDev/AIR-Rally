@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const createPostSchema = z.object({
+  /** Storage paths, capped at 5 to match the posts_image_paths_max_5 CHECK. */
+  imagePaths: z.array(z.string().max(500)).max(5).optional(),
   content: z.string().trim().min(1, "Say something first.").max(280),
   imageUrl: z.string().trim().url().optional(),
 });

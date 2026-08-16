@@ -64,6 +64,7 @@ describe("createPostAction", () => {
       user_id: "user-1",
       content: "hi",
       image_url: null,
+      image_paths: [],
       like_count: 0,
       comment_count: 0,
       reshare_count: 0,
@@ -74,7 +75,7 @@ describe("createPostAction", () => {
     const result = await createPostAction({ content: "hi" });
 
     expect(result.success).toBe(true);
-    expect(mockCreatePost).toHaveBeenCalledWith(expect.anything(), "user-1", "hi", undefined);
+    expect(mockCreatePost).toHaveBeenCalledWith(expect.anything(), "user-1", "hi", undefined, []);
   });
 });
 

@@ -9,10 +9,12 @@ import {
   approveClubMember,
   removeClubMember,
   setClubMemberRole,
+  setClubStatus,
 } from "@/lib/services/clubs";
 import { createClubSchema, updateClubSchema, type CreateClubValues, type UpdateClubValues } from "@/lib/validations/club";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import { getServerClient, type ActionResult } from "@/lib/actions/auth";
+import { requireAdmin } from "@/lib/services/admin";
 import type { Club, ClubMemberRole } from "@/lib/supabase/types";
 
 /**
@@ -172,5 +174,31 @@ export async function setClubMemberRoleAction(
   } catch (error) {
     logServerError("clubs.setMemberRole", error);
     return { success: false, error: getFriendlyErrorMessage(error, "We couldn't update that member.") };
+  }
+}
+
+/**
+ * Admin moderation of a club listing. Gated three ways: requireAdmin()
+ * here, the clubs UPDATE policy, and the enforce_club_status_change()
+ * trigger, which reverts a status change from any non-admin regardless of
+ * how the write arrived.
+ */
+export async function setClubStatusAdminAction(clubId: string, status: Club["status"]): Promise<ActionResult<null>> {
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  const adminCheck = await requireAdmin(supabase);
+  if (!adminCheck.ok) return { success: false, error: adminCheck.error };
+
+  try {
+    await setClubStatus(supabase, clubId, status);
+    revalidatePath("/admin/community");
+    revalidatePath("/clubs");
+    revalidatePath(`/clubs/${clubId}`);
+    return { success: true, data: null };
+  } catch (error) {
+    logServerError("clubs.setStatusAdmin", error);
+    return { success: false, error: getFriendlyErrorMessage(error, "We couldn't update that club.") };
   }
 }

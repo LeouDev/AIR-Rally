@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Image as ImageIcon, AtSign, Smile, Users } from "lucide-react";
+import { Image as ImageIcon, AtSign, Smile, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase/client";
 import { listFeedPosts, listLikedPostIds, listResharedPostIds, type PostWithAuthor } from "@/lib/services/posts";
 import { searchPublicProfiles } from "@/lib/services/profiles";
 import { searchClubs, clubMentionHandle, type ClubMentionMap } from "@/lib/services/clubs";
+import { uploadPostImages, MAX_POST_IMAGES } from "@/lib/services/postImages";
 import { CourtSideSearch } from "@/components/court-side/CourtSideSearch";
 import { createPostAction, deletePostAction, toggleLikeAction, toggleReshareAction } from "@/lib/actions/posts";
 import { toggleFollowAction } from "@/lib/actions/follows";
@@ -90,6 +91,40 @@ export function CourtSideFeed({
   // Ids of people actually chosen from the "@" picker. Only these get a
   // mention notification — a hand-typed "@Lea" can't identify which Lea.
   const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
+  // Files stay local until the post is submitted, so abandoning a draft
+  // never leaves orphaned objects in storage.
+  const [pendingImages, setPendingImages] = useState<File[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function addImages(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const room = MAX_POST_IMAGES - pendingImages.length;
+    if (room <= 0) {
+      toast.error(`You can attach up to ${MAX_POST_IMAGES} photos.`);
+      return;
+    }
+    const accepted = Array.from(files).slice(0, room);
+    if (files.length > room) toast(`Only ${room} more photo${room === 1 ? "" : "s"} could be added.`);
+
+    setPendingImages((current) => [...current, ...accepted]);
+    setPreviewUrls((current) => [...current, ...accepted.map((f) => URL.createObjectURL(f))]);
+  }
+
+  function removeImage(index: number) {
+    // Release the object URL as it goes, or the blob leaks for the life
+    // of the page.
+    URL.revokeObjectURL(previewUrls[index]);
+    setPendingImages((current) => current.filter((_, i) => i !== index));
+    setPreviewUrls((current) => current.filter((_, i) => i !== index));
+  }
+
+  function clearImages() {
+    previewUrls.forEach((url) => URL.revokeObjectURL(url));
+    setPendingImages([]);
+    setPreviewUrls([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set(initialFollowingIds));
   const [expandedPostIds, setExpandedPostIds] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState("");
@@ -227,7 +262,22 @@ export function CourtSideFeed({
   async function handlePost() {
     if (!draft.trim() || isPosting) return;
     setIsPosting(true);
-    const result = await createPostAction({ content: draft.trim() }, mentionedUserIds);
+
+    // Images upload first: if storage fails we can still tell the user
+    // before anything is published, rather than orphaning a post.
+    let imagePaths: string[] = [];
+    if (pendingImages.length > 0) {
+      const supabase = createClient();
+      const upload = await uploadPostImages(supabase, currentUserId, pendingImages);
+      imagePaths = upload.paths;
+      upload.errors.forEach((message) => toast.error(message));
+      if (imagePaths.length === 0) {
+        setIsPosting(false);
+        return;
+      }
+    }
+
+    const result = await createPostAction({ content: draft.trim(), imagePaths }, mentionedUserIds);
     setIsPosting(false);
     if (!result.success) {
       toast.error(result.error);
@@ -240,6 +290,7 @@ export function CourtSideFeed({
     setDraft("");
     setTagQuery(null);
     setMentionedUserIds([]);
+    clearImages();
     toast.success("Your rally is live.");
   }
 
@@ -460,17 +511,53 @@ export function CourtSideFeed({
                 )}
               </div>
             )}
+            {previewUrls.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {previewUrls.map((url, index) => (
+                  <div key={url} className="relative">
+                    {/* Local blob preview, not a remote asset — next/image
+                        would add no benefit and can't optimize a blob URL. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt="" className="size-16 rounded-lg border border-border object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(index)}
+                      aria-label={`Remove photo ${index + 1}`}
+                      className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background"
+                    >
+                      <X className="size-3" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+                <span className="self-end text-xs text-muted-foreground">
+                  {previewUrls.length}/{MAX_POST_IMAGES}
+                </span>
+              </div>
+            )}
+
             <div className="mt-2 flex items-center gap-0.5 border-t border-border pt-2.5 sm:gap-1">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
-                onClick={() => toast("Media upload is coming soon.")}
+                disabled={pendingImages.length >= MAX_POST_IMAGES}
+                onClick={() => fileInputRef.current?.click()}
               >
                 <ImageIcon className="size-3.5" aria-hidden="true" />
                 <span className="hidden sm:inline">Media</span>
               </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                hidden
+                onChange={(e) => {
+                  addImages(e.target.files);
+                  e.target.value = "";
+                }}
+              />
               <Button
                 type="button"
                 variant="ghost"

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { CalendarCheck, Heart, LogOut, Shield, Store, UserCheck, User as UserIcon } from "lucide-react";
+import { CalendarCheck, Heart, LogOut, Shield, Store, UserCheck, Users, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -118,6 +118,18 @@ export function UserMenu({ displayName, email, avatarUrl, role }: UserMenuProps)
         )}
         {role === "admin" && (
           <>
+            <DropdownMenuItem asChild>
+              <Link href="/admin">
+                <Shield />
+                Admin Dashboard
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/admin/community">
+                <Users />
+                Club Moderation
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/admin/venues">
                 <Shield />
