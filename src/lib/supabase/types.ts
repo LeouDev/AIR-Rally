@@ -352,6 +352,27 @@ export type SettlementIssue = {
   detail: string;
 };
 
+/** Whether AIR/Rally will pay a venue — distinct from PayMongo's own activation status. */
+export type VenuePaymentAccountStatus = "not_connected" | "pending_verification" | "verified" | "restricted" | "disabled";
+
+/**
+ * Venue payout readiness. PayMongo facts are mirrored from venues.paymongo_*
+ * by trigger and are never client-writable; only an admin's
+ * restrict/disable decision is independently owned. See
+ * supabase/migrations/20260810000043_venue_payment_accounts.sql.
+ */
+export type VenuePaymentAccount = {
+  id: string;
+  venue_id: string;
+  provider: "paymongo";
+  paymongo_account_id: string | null;
+  status: VenuePaymentAccountStatus;
+  status_reason: string | null;
+  verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 /** Lifecycle of an internal payout preparation record. */
 export type PayoutBatchStatus = "draft" | "reviewing" | "approved" | "processing" | "completed" | "failed" | "cancelled";
 
@@ -809,6 +830,8 @@ export type Database = {
       credit_transactions: TableDef<CreditTransaction, never, never>;
       /** Read-only to every client role — written only by triggers. */
       booking_settlements: TableDef<BookingSettlement, never, never>;
+      /** Read-only to clients — mirrored by trigger, changed via set_venue_payment_account_status(). */
+      venue_payment_accounts: TableDef<VenuePaymentAccount, never, never>;
       /** Created through create_payout_batch(); status moves via the admin RPCs. */
       payout_batches: TableDef<PayoutBatch, never, Partial<Pick<PayoutBatch, "status" | "notes">>>;
       payout_batch_items: TableDef<
@@ -953,6 +976,22 @@ export type Database = {
           p_amount: number;
         };
         Returns: number;
+      };
+      /** Venue payout readiness counts plus settlements blocked by missing setup. Admin-only. */
+      venue_payout_readiness: {
+        Args: Record<string, never>;
+        Returns: {
+          venues_ready: number;
+          venues_missing_setup: number;
+          venues_restricted: number;
+          blocked_settlement_amount: number;
+          blocked_settlement_count: number;
+        }[];
+      };
+      /** Admin-only. Accepts verified | restricted | disabled; the mirror owns the rest. */
+      set_venue_payment_account_status: {
+        Args: { p_venue_id: string; p_status: string; p_reason?: string | null };
+        Returns: boolean;
       };
       /**
        * Platform cash position for payout decisions. Admin-only (the

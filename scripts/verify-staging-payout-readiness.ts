@@ -159,6 +159,16 @@ async function main() {
     }
     await pg.query(`select public.issue_credit($1, 300000, 'admin_adjustment', null, 'test wallet')`, [player]);
 
+    // Since 20260810000043 a settlement can only be batched when its venue's
+    // payment account is verified. Both test venues therefore need one —
+    // that requirement has its own dedicated coverage in
+    // scripts/verify-staging-payment-readiness.ts.
+    for (const venueId of venueIds) {
+      await pg.query(`update public.venue_payment_accounts set status = 'verified', verified_at = now() where venue_id = $1`, [
+        venueId,
+      ]);
+    }
+
     // Owner A: one delivered PayMongo booking, one delivered credit-only,
     // one still-future (pending). Owner B: one delivered mixed booking.
     const payableA1 = await settledBooking(courtIds[0], 50000, 0, true);

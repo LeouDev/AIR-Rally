@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
 import { getPayoutReadiness } from "@/lib/services/payoutReadiness";
 import { getAdminSettlementSummary } from "@/lib/services/settlements";
+import { getVenuePayoutReadiness } from "@/lib/services/venuePaymentAccounts";
 import { formatSettlementMoney } from "@/lib/settlementFormat";
 
 // Live financial position — never statically cached.
@@ -44,7 +45,11 @@ export default async function AdminFinancePage() {
   const adminCheck = await requireAdmin(supabase);
   if (!adminCheck.ok) notFound();
 
-  const [readiness, summary] = await Promise.all([getPayoutReadiness(supabase), getAdminSettlementSummary(supabase)]);
+  const [readiness, summary, venueReadiness] = await Promise.all([
+    getPayoutReadiness(supabase),
+    getAdminSettlementSummary(supabase),
+    getVenuePayoutReadiness(supabase),
+  ]);
   const { cash } = readiness;
 
   return (
@@ -110,8 +115,43 @@ export default async function AdminFinancePage() {
         </p>
       </div>
 
+      {/* Venue-side readiness sits before the ledger checks: a perfectly
+          reconciled ledger still cannot be paid out to a venue that has
+          nowhere to receive it. */}
       <section className="flex flex-col gap-4">
-        <h2 className="text-base font-semibold text-foreground">Payout readiness</h2>
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Venue payout readiness</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Earnings can only be batched for venues whose payment account is verified.
+          </p>
+        </div>
+        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <dt className="text-xs text-muted-foreground">Venues ready</dt>
+            <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{venueReadiness.venuesReady}</dd>
+          </div>
+          <div className="rounded-2xl border border-warning/40 bg-warning/5 p-6">
+            <dt className="text-xs text-warning">Missing payment setup</dt>
+            <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{venueReadiness.venuesMissingSetup}</dd>
+            <p className="mt-1 text-xs text-muted-foreground">{venueReadiness.venuesRestricted} restricted or disabled.</p>
+          </div>
+          <div className="rounded-2xl border border-warning/40 bg-warning/5 p-6">
+            <dt className="text-xs text-warning">Blocked settlements</dt>
+            <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
+              {formatSettlementMoney(venueReadiness.blockedSettlementAmount, cash.currency)}
+            </dd>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {venueReadiness.blockedSettlementCount} earned settlement(s) with nowhere to send the money.
+            </p>
+          </div>
+        </dl>
+        <Link href="/admin/payment-accounts" className="text-sm font-medium text-primary hover:underline">
+          Manage payment accounts →
+        </Link>
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <h2 className="text-base font-semibold text-foreground">Ledger readiness</h2>
 
         {readiness.ready ? (
           <div className="flex items-start gap-3 rounded-2xl border border-success/40 bg-success/5 px-5 py-4">

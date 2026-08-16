@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Building2, Users, ClipboardCheck, CreditCard, Share2, Wallet, Landmark } from "lucide-react";
+import { Building2, Users, ClipboardCheck, CreditCard, Share2, Wallet, Landmark, BadgeCheck } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
@@ -75,6 +75,13 @@ export default async function AdminDashboardPage() {
       icon: Landmark,
       title: "Finance",
       description: "Payout readiness, cash position, and payout batches.",
+      pending: 0,
+    },
+    {
+      href: "/admin/payment-accounts",
+      icon: BadgeCheck,
+      title: "Payment accounts",
+      description: "Which venues are ready to receive payouts.",
       pending: 0,
     },
     {
