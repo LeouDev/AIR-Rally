@@ -18,6 +18,7 @@ const VALID_INPUT = {
   password: "password123",
   confirmPassword: "password123",
   agreedToTerms: true,
+  intendedRole: "player" as const,
 };
 
 function fakeClient(overrides: { signUpResult?: unknown; signUpError?: unknown; rpc?: jest.Mock }) {
@@ -46,6 +47,26 @@ describe("signUp", () => {
 
     expect(result.success).toBe(false);
     expect((client as unknown as { auth: { signUp: jest.Mock } }).auth.signUp).not.toHaveBeenCalled();
+  });
+
+  // Every account starts as 'player' regardless of intendedRole (Phase
+  // 6, Part 2) — intendedRole is a client-only routing hint the signUp()
+  // action never reads or forwards; auth.signUp()'s own options.data
+  // only ever carries name fields, and role/owner_status come purely
+  // from the profiles table's own defaults via handle_new_user().
+  it("never forwards intendedRole to auth.signUp() — role/owner_status are decided entirely by the profiles table default, not this action", async () => {
+    const rpc = jest.fn().mockResolvedValue({ data: null, error: null });
+    const client = fakeClient({ rpc });
+    mockCreateClient.mockResolvedValue(client);
+
+    await signUp({ ...VALID_INPUT, intendedRole: "venue_owner" });
+
+    const signUpCall = (client as unknown as { auth: { signUp: jest.Mock } }).auth.signUp.mock.calls[0][0];
+    expect(signUpCall.options.data).toEqual({
+      first_name: "Jamie",
+      last_name: "Cruz",
+      display_name: "Jamie Cruz",
+    });
   });
 
   it("records agreement acceptance server-side, for the real new user id, after a successful signUp", async () => {

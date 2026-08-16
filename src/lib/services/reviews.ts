@@ -92,6 +92,105 @@ export async function getReviewEligibility(
   return booking ? { eligible: true, bookingId: booking.id } : { eligible: false, bookingId: null };
 }
 
+/**
+ * Booking-specific eligibility, unlike getReviewEligibility() above which
+ * only ever reports the single *most recent* eligible booking at a venue.
+ * That venue-level shape is fine for Court Details ("show the form for my
+ * last visit here"), but it's wrong for a My Bookings row: a customer
+ * with two completed bookings at the same venue must be able to review
+ * the *older* one too, and getReviewEligibility()'s "most recent only"
+ * result would reject that. This checks the exact booking instead:
+ * belongs to the caller, confirmed, already ended, and not already
+ * reviewed (belt-and-suspenders alongside the DB's own unique constraint
+ * on reviews.booking_id — see the migration that added it).
+ */
+export async function canReviewBooking(
+  supabase: Client,
+  userId: string,
+  bookingId: string
+): Promise<{ eligible: boolean; venueId: string | null }> {
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("user_id, status, end_time, court_id")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (bookingError) throw bookingError;
+  if (!booking || booking.user_id !== userId) return { eligible: false, venueId: null };
+  if (booking.status !== "confirmed") return { eligible: false, venueId: null };
+  if (new Date(booking.end_time).getTime() >= Date.now()) return { eligible: false, venueId: null };
+
+  const { data: court, error: courtError } = await supabase
+    .from("courts")
+    .select("venue_id")
+    .eq("id", booking.court_id)
+    .maybeSingle();
+  if (courtError) throw courtError;
+  if (!court) return { eligible: false, venueId: null };
+
+  const { data: existingReview, error: reviewError } = await supabase
+    .from("reviews")
+    .select("id")
+    .eq("booking_id", bookingId)
+    .maybeSingle();
+  if (reviewError) throw reviewError;
+  if (existingReview) return { eligible: false, venueId: court.venue_id };
+
+  return { eligible: true, venueId: court.venue_id };
+}
+
+export type ReviewableBooking = { bookingId: string; venueId: string };
+
+/**
+ * Every one of the caller's own confirmed, already-ended bookings that
+ * doesn't have a review yet — what My Bookings uses to decide which rows
+ * get a "How was your experience?" prompt. Three batched queries across
+ * the whole list (bookings, then their courts, then any existing
+ * reviews), not one query per booking.
+ */
+export async function listReviewableBookings(supabase: Client, userId: string): Promise<ReviewableBooking[]> {
+  const { data: bookings, error: bookingsError } = await supabase
+    .from("bookings")
+    .select("id, court_id")
+    .eq("user_id", userId)
+    .eq("status", "confirmed")
+    .lt("end_time", new Date().toISOString());
+  if (bookingsError) throw bookingsError;
+  if (!bookings || bookings.length === 0) return [];
+
+  const courtIds = Array.from(new Set(bookings.map((b) => b.court_id)));
+  const { data: courts, error: courtsError } = await supabase.from("courts").select("id, venue_id").in("id", courtIds);
+  if (courtsError) throw courtsError;
+  const venueIdByCourtId = new Map((courts ?? []).map((c) => [c.id, c.venue_id]));
+
+  const { data: existingReviews, error: reviewsError } = await supabase
+    .from("reviews")
+    .select("booking_id")
+    .in(
+      "booking_id",
+      bookings.map((b) => b.id)
+    );
+  if (reviewsError) throw reviewsError;
+  const reviewedBookingIds = new Set((existingReviews ?? []).map((r) => r.booking_id));
+
+  return bookings
+    .filter((b) => !reviewedBookingIds.has(b.id) && venueIdByCourtId.has(b.court_id))
+    .map((b) => ({ bookingId: b.id, venueId: venueIdByCourtId.get(b.court_id)! }));
+}
+
+/**
+ * No ownership check happens here — RLS is the real enforcement (a
+ * review's own "delete" policy allows the author or is_admin(), see
+ * supabase/migrations/20260809000007_reviews.sql), same posture as every
+ * other RLS-backed delete in this codebase. In practice the only caller
+ * is the admin moderation action (lib/actions/review.ts), since a
+ * reviewer editing/removing their own review isn't a UI this app exposes
+ * yet — but the function itself doesn't assume that.
+ */
+export async function deleteReview(supabase: Client, reviewId: string): Promise<void> {
+  const { error } = await supabase.from("reviews").delete().eq("id", reviewId);
+  if (error) throw error;
+}
+
 export type CreateReviewInput = {
   venueId: string;
   bookingId: string;
@@ -101,20 +200,19 @@ export type CreateReviewInput = {
 };
 
 /**
- * Never trusts a client-supplied bookingId at face value — re-verifies
- * eligibility server-side (same posture as every other write in this
- * codebase: the client's input shapes the request, live server data
- * decides whether it's allowed) before inserting. `venues.average_rating`/
- * `review_count` update automatically via the existing
- * `update_venue_rating_stats()` trigger (Phase 2) — nothing here
- * recomputes them.
+ * Never trusts client-supplied input at face value — re-verifies
+ * eligibility server-side against the specific bookingId (canReviewBooking,
+ * not the venue-level getReviewEligibility — see its doc comment for why)
+ * before inserting. `venues.average_rating`/`review_count` update
+ * automatically via the existing `update_venue_rating_stats()` trigger
+ * (Phase 2) — nothing here recomputes them.
  */
 export async function createReview(supabase: Client, userId: string, input: CreateReviewInput): Promise<Review> {
-  const eligibility = await getReviewEligibility(supabase, userId, input.venueId);
+  const eligibility = await canReviewBooking(supabase, userId, input.bookingId);
   if (!eligibility.eligible) {
     throw new ReviewError("not_eligible", "You can review a venue after you've played a confirmed booking there.");
   }
-  if (eligibility.bookingId !== input.bookingId) {
+  if (eligibility.venueId !== input.venueId) {
     throw new ReviewError("booking_mismatch", "That booking doesn't match an eligible booking for this venue.");
   }
 

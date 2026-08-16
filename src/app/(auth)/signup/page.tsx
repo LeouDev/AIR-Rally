@@ -1,27 +1,52 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MailCheck } from "lucide-react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CourtSurface } from "@/components/court/CourtSurface";
+import { cn } from "@/lib/utils";
 import { signUp } from "@/lib/actions/auth";
+import { requestOwnerAccessAction } from "@/lib/actions/ownerApplications";
 import { signUpSchema, type SignUpValues } from "@/lib/validations/auth";
 
-export default function SignupPage() {
+const ROLE_OPTIONS = [
+  {
+    value: "player" as const,
+    title: "I want to play",
+    description: "Find courts, book games, and discover new places to play.",
+  },
+  {
+    value: "venue_owner" as const,
+    title: "I own a court",
+    description: "List your court, manage bookings, and grow your facility.",
+  },
+];
+
+function SignupForm() {
   const router = useRouter();
-  const [needsConfirmation, setNeedsConfirmation] = useState(false);
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("redirect") || "/";
+  const requestedRole = searchParams.get("intendedRole") === "venue_owner" ? "venue_owner" : "player";
+
+  const [needsConfirmation, setNeedsConfirmation] = useState<{ intendedOwner: boolean } | null>(null);
 
   const {
     register,
     handleSubmit,
     setError,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
-  } = useForm<SignUpValues>({ resolver: zodResolver(signUpSchema) });
+  } = useForm<SignUpValues>({ resolver: zodResolver(signUpSchema), defaultValues: { intendedRole: requestedRole } });
+
+  const intendedRole = watch("intendedRole");
 
   async function onSubmit(values: SignUpValues) {
     const result = await signUp(values);
@@ -30,10 +55,16 @@ export default function SignupPage() {
       return;
     }
     if (result.data.requiresEmailConfirmation) {
-      setNeedsConfirmation(true);
+      setNeedsConfirmation({ intendedOwner: values.intendedRole === "venue_owner" });
       return;
     }
-    router.push("/");
+
+    if (values.intendedRole === "venue_owner") {
+      await requestOwnerAccessAction();
+      router.push("/owner/onboarding");
+    } else {
+      router.push(redirectTo);
+    }
     router.refresh();
   }
 
@@ -47,6 +78,11 @@ export default function SignupPage() {
         <p className="mt-1.5 text-sm text-muted-foreground">
           We sent you a confirmation link. Click it to activate your account, then sign in.
         </p>
+        {needsConfirmation.intendedOwner && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Once confirmed, visit your profile to start your owner application.
+          </p>
+        )}
         <Button asChild variant="outline" className="mt-6">
           <Link href="/login">Back to Sign In</Link>
         </Button>
@@ -60,6 +96,36 @@ export default function SignupPage() {
       <p className="mt-1 text-sm text-muted-foreground">Play More. Rally More.</p>
 
       <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)} noValidate>
+        <div className="flex flex-col gap-1.5">
+          <Label>How will you use AIR/Rally?</Label>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {ROLE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setValue("intendedRole", option.value, { shouldDirty: true })}
+                aria-pressed={intendedRole === option.value}
+                className={cn(
+                  "flex flex-col items-start gap-1 rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                  intendedRole === option.value
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/40"
+                )}
+              >
+                {option.value === "player" ? (
+                  <Image src="/brand/mark-transparent.png" alt="" width={28} height={28} className="size-7" />
+                ) : (
+                  <span className="size-7 overflow-hidden rounded-md">
+                    <CourtSurface surfaceColor="blue" indoor={false} />
+                  </span>
+                )}
+                <span className="text-sm font-medium text-foreground">{option.title}</span>
+                <span className="text-xs text-muted-foreground">{option.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="firstName">First name</Label>
@@ -159,5 +225,13 @@ export default function SignupPage() {
         </Link>
       </p>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense>
+      <SignupForm />
+    </Suspense>
   );
 }

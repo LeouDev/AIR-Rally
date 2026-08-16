@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { SectionHeader } from "@/components/shared/SectionHeader";
-import { CourtCard } from "@/components/court/CourtCard";
+import { FeaturedCourtsGrid } from "@/components/marketing/FeaturedCourtsGrid";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
@@ -36,11 +36,7 @@ export async function FeaturedCourts() {
         }
       />
 
-      <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {cards.map((venue) => (
-          <CourtCard key={venue.id} venue={venue} isFavorited={favoritedIds.has(venue.id)} />
-        ))}
-      </div>
+      <FeaturedCourtsGrid initialCards={cards} initialFavoritedIds={Array.from(favoritedIds)} />
     </section>
   );
 }

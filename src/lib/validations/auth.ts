@@ -26,6 +26,17 @@ export const signUpSchema = z
     // record_agreement_acceptance() rather than trusting this boolean as
     // proof of anything by itself. See lib/actions/auth.ts.
     agreedToTerms: z.boolean(),
+    // Client-only routing hint, never sent to auth.signUp() — the signUp()
+    // action ignores it entirely. A "venue_owner" pick never grants
+    // anything by itself; it only decides whether the signup page redirects
+    // to /owner/onboarding and calls requestOwnerAccessAction() afterward
+    // (see Phase 6, Part 2/3). `role` in `profiles` still always starts as
+    // 'player' regardless of this value. No `.default()` here deliberately
+    // — that would make Zod's inferred output type required while the
+    // input type stays optional, breaking react-hook-form's resolver
+    // generic; the signup page supplies the default via useForm's own
+    // `defaultValues` instead.
+    intendedRole: z.enum(["player", "venue_owner"]),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords don't match",

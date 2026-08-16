@@ -1,9 +1,9 @@
 /**
  * @jest-environment node
  */
-import { submitReviewAction } from "../review";
+import { submitReviewAction, deleteReviewAsAdminAction } from "../review";
 import { getServerClient } from "../auth";
-import { createReview, ReviewError } from "../../services/reviews";
+import { createReview, deleteReview, ReviewError } from "../../services/reviews";
 import type { Review } from "../../supabase/types";
 
 // Relative paths for jest.mock — see MEMORY.md (air-rally-jest-mock-colon-path-bug).
@@ -19,6 +19,7 @@ jest.mock("../../services/reviews", () => {
   }
   return {
     createReview: jest.fn(),
+    deleteReview: jest.fn(),
     ReviewError,
   };
 });
@@ -26,9 +27,20 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
 const mockGetServerClient = getServerClient as jest.MockedFunction<typeof getServerClient>;
 const mockCreateReview = createReview as jest.MockedFunction<typeof createReview>;
+const mockDeleteReview = deleteReview as jest.MockedFunction<typeof deleteReview>;
 
 function fakeClient(user: { id: string } | null) {
   return { auth: { getUser: jest.fn().mockResolvedValue({ data: { user } }) } } as never;
+}
+
+/** Matches refund.test.ts's own fakeClient — exercises the real requireAdmin() against a stubbed profiles lookup, rather than mocking requireAdmin itself. */
+function fakeAdminClient(user: { id: string } | null, role: string | null) {
+  return {
+    auth: { getUser: jest.fn().mockResolvedValue({ data: { user } }) },
+    from: jest.fn(() => ({
+      select: jest.fn(() => ({ eq: jest.fn(() => ({ single: jest.fn().mockResolvedValue({ data: role ? { role } : null, error: role ? null : { message: "not found" } }) })) })),
+    })),
+  } as never;
 }
 
 const validInput = {
@@ -42,6 +54,7 @@ const REVIEW_ROW = { id: "review-1", rating: 5 } as Review;
 beforeEach(() => {
   mockGetServerClient.mockReset();
   mockCreateReview.mockReset();
+  mockDeleteReview.mockReset();
 });
 
 describe("submitReviewAction", () => {
@@ -87,5 +100,40 @@ describe("submitReviewAction", () => {
     const result = await submitReviewAction(validInput);
 
     expect(result).toEqual({ success: false, error: "We couldn't submit your review." });
+  });
+});
+
+describe("deleteReviewAsAdminAction", () => {
+  it("rejects a non-admin session before ever calling deleteReview", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeAdminClient({ id: "user-1" }, "player") });
+    const result = await deleteReviewAsAdminAction("review-1", "venue-1");
+    expect(result).toEqual({ success: false, error: "This area is admin-only." });
+    expect(mockDeleteReview).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unauthenticated session", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeAdminClient(null, null) });
+    const result = await deleteReviewAsAdminAction("review-1", "venue-1");
+    expect(result.success).toBe(false);
+    expect(mockDeleteReview).not.toHaveBeenCalled();
+  });
+
+  it("deletes the review for an admin session", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeAdminClient({ id: "admin-1" }, "admin") });
+    mockDeleteReview.mockResolvedValue(undefined);
+
+    const result = await deleteReviewAsAdminAction("review-1", "venue-1");
+
+    expect(result).toEqual({ success: true, data: undefined });
+    expect(mockDeleteReview).toHaveBeenCalledWith(expect.anything(), "review-1");
+  });
+
+  it("falls back to the generic friendly-error mapper when deleteReview throws", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeAdminClient({ id: "admin-1" }, "admin") });
+    mockDeleteReview.mockRejectedValue(new Error("connection reset"));
+
+    const result = await deleteReviewAsAdminAction("review-1", "venue-1");
+
+    expect(result).toEqual({ success: false, error: "We couldn't remove that review." });
   });
 });

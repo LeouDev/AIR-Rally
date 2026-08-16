@@ -2,7 +2,7 @@ import Link from "next/link";
 import { TriangleAlert, UserCircle } from "lucide-react";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui/button";
-import { ProfileForm } from "@/components/profile/ProfileForm";
+import { ProfileActionsMenu } from "@/components/profile/ProfileActionsMenu";
 import { ProfileHeader } from "@/components/profile/ProfileHeader";
 import { getCurrentUserWithProfile } from "@/lib/supabase/auth";
 import { getProfileStats } from "@/lib/services/profiles";
@@ -60,7 +60,7 @@ async function ProfileWithStats({ profile, email }: { profile: Profile; email: s
   return (
     <div className="flex flex-col gap-8">
       <ProfileHeader profile={profile} email={email} stats={stats} />
-      <ProfileForm profile={profile} email={email} />
+      <ProfileActionsMenu profile={profile} email={email} />
     </div>
   );
 }

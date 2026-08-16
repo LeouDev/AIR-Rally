@@ -2,10 +2,15 @@ import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
 import { AuthNavSection } from "@/components/layout/AuthNavSection";
 
+// "List Your Court" deliberately lives in AuthNavSection, not here — it
+// should only ever appear to a signed-out visitor (a legitimate
+// top-of-funnel acquisition link). A signed-in player should never see
+// it post-login (Phase 6, Part 1); a signed-in owner/admin already has
+// their own entry point via UserMenu's role-branched items. Putting it
+// here would show it unconditionally to everyone, signed in or not.
 const NAV_LINKS = [
   { href: "/explore", label: "Explore" },
   { href: "/#how-it-works", label: "How It Works" },
-  { href: "/list-your-court", label: "List Your Court" },
 ];
 
 export function Navbar() {

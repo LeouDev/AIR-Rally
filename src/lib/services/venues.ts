@@ -1,9 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Venue, VenueMarketplaceRow, VenueDetail, Amenity, VenueOperatingHours } from "@/lib/supabase/types";
+import type { Database, Venue, VenueMarketplaceRow, VenueDetail, VenueStatus, Amenity, Court, VenueOperatingHours, ReviewWithAuthor } from "@/lib/supabase/types";
 import type { CreateVenueDraftValues, UpdateVenueValues } from "@/lib/validations/venue";
 import type { SetOperatingHoursValues } from "@/lib/validations/venueOperatingHours";
 import type { LatLng } from "@/lib/services/maps";
 import { getPublicImageUrl } from "@/lib/services/images";
+import { listReviewsByVenue } from "@/lib/services/reviews";
 
 type Client = SupabaseClient<Database>;
 
@@ -275,7 +276,12 @@ export async function searchMarketplaceVenues(
   }
 
   if (filters.city) {
-    query = query.ilike("city", sanitizeSearchTerm(filters.city));
+    // Free-text location (city, municipality, or barangay) from the
+    // SearchBar's "Where?" field — city is an exact administrative area,
+    // but a barangay/street-level term only shows up in the address, so
+    // match either rather than requiring an exact city match.
+    const locationTerm = sanitizeSearchTerm(filters.city);
+    query = query.or(`city.ilike.%${locationTerm}%,address.ilike.%${locationTerm}%`);
   }
   if (filters.indoorOutdoor) {
     query = query.eq("indoor_outdoor", filters.indoorOutdoor);
@@ -361,6 +367,44 @@ export async function listFeaturedVenues(supabase: Client, limit = 6): Promise<V
     .limit(limit);
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * Great-circle distance in km — used only to rank an already-small
+ * marketplace by proximity, not for any billing/legal distance
+ * calculation, so a spherical approximation (not a geodesic ellipsoid
+ * model) is perfectly adequate here.
+ */
+function haversineDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * Active venues ranked by real distance from the given coordinates.
+ * Fetches the whole active marketplace and ranks in JS with the
+ * Haversine formula rather than a PostGIS/earthdistance extension this
+ * project doesn't have installed — a reasonable trade-off while the
+ * marketplace is still small (see ARCHITECTURE.md); revisit with a
+ * database-side nearest-neighbor query if the venue count grows large
+ * enough for this to matter. A venue with no coordinates yet (its
+ * geocoding attempt failed at creation time — see geocodeAddress())
+ * is excluded outright, never ranked last with a fake distance.
+ */
+export async function listNearbyVenues(supabase: Client, lat: number, lng: number, limit = 6): Promise<VenueMarketplaceRow[]> {
+  const { data, error } = await supabase.from("venue_marketplace").select("*");
+  if (error) throw error;
+
+  return (data ?? [])
+    .filter((v): v is VenueMarketplaceRow & { latitude: number; longitude: number } => v.latitude !== null && v.longitude !== null)
+    .map((venue) => ({ venue, distanceKm: haversineDistanceKm(lat, lng, venue.latitude, venue.longitude) }))
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .slice(0, limit)
+    .map((entry) => entry.venue);
 }
 
 /** Distinct cities among active venues, for the search location dropdown. */
@@ -487,4 +531,104 @@ export async function syncVenuePaymongoActivation(
   });
   if (error) throw error;
   return data ?? false;
+}
+
+// --- Admin operations (Phase 5.4) ---------------------------------------
+
+/**
+ * Sibling to setVenueStatus() above, not a widened version of it — that
+ * function's type restriction ("archived" | "pending_review") stays
+ * exactly as-is for the owner self-service path. Setting active/suspended
+ * is an admin-only decision; venues_prevent_status_escalation (see
+ * supabase/migrations/20260809000002_venues.sql, function redefined in
+ * 20260810000020_venue_archive_status.sql) already permits any status
+ * change once is_admin() is true, so this function is purely the missing
+ * app-layer entry point, not a new database guarantee.
+ */
+export async function setVenueStatusAsAdmin(
+  supabase: Client,
+  venueId: string,
+  status: Extract<VenueStatus, "active" | "suspended">
+): Promise<Venue> {
+  const { data, error } = await supabase.from("venues").update({ status }).eq("id", venueId).select("*").single();
+  if (error) throw error;
+  return data;
+}
+
+export type AdminVenueSummary = Venue & { ownerDisplayName: string | null; courtCount: number };
+
+/**
+ * Every venue regardless of status, for the admin pending/active/
+ * suspended tabs — `venues` RLS already lets is_admin() select any row,
+ * so this is a plain read, not a privileged bypass. Owner display names
+ * and court counts are fetched in two batched queries (never one query
+ * per venue), same pattern as listVenuesByOwnerWithSummary() above.
+ */
+export async function listVenuesForAdmin(supabase: Client, status?: VenueStatus): Promise<AdminVenueSummary[]> {
+  let query = supabase.from("venues").select("*").order("created_at", { ascending: false });
+  if (status) query = query.eq("status", status);
+  const { data: venues, error } = await query;
+  if (error) throw error;
+  if (!venues || venues.length === 0) return [];
+
+  const ownerIds = Array.from(new Set(venues.map((v) => v.owner_id)));
+  const venueIds = venues.map((v) => v.id);
+
+  const [ownersResult, courtsResult] = await Promise.all([
+    supabase.from("profiles").select("id, display_name").in("id", ownerIds),
+    supabase.from("courts").select("id, venue_id").in("venue_id", venueIds),
+  ]);
+  if (ownersResult.error) throw ownersResult.error;
+  if (courtsResult.error) throw courtsResult.error;
+
+  const ownerNameById = new Map((ownersResult.data ?? []).map((o) => [o.id, o.display_name]));
+  const courtCountByVenue = new Map<string, number>();
+  for (const c of courtsResult.data ?? []) {
+    courtCountByVenue.set(c.venue_id, (courtCountByVenue.get(c.venue_id) ?? 0) + 1);
+  }
+
+  return venues.map((v) => ({
+    ...v,
+    ownerDisplayName: ownerNameById.get(v.owner_id) ?? null,
+    courtCount: courtCountByVenue.get(v.id) ?? 0,
+  }));
+}
+
+export type AdminVenueDetail = Venue & {
+  ownerDisplayName: string | null;
+  courts: Court[];
+  recentReviews: ReviewWithAuthor[];
+};
+
+/**
+ * Same shape as getVenueDetail() but reads `venues` directly instead of
+ * the venue_marketplace view — deliberately, since the view is
+ * active-only and excludes owner_id/status by construction (see
+ * supabase/migrations/20260809000008_marketplace_view.sql), and an admin
+ * needs to see a pending/suspended/draft venue's real status and owner,
+ * not just what a player would see. All courts (any status), not just
+ * active ones, for the same reason.
+ */
+export async function getVenueForAdmin(supabase: Client, venueId: string): Promise<AdminVenueDetail | null> {
+  const { data: venue, error } = await supabase.from("venues").select("*").eq("id", venueId).maybeSingle();
+  if (error) {
+    if (error.code === POSTGRES_INVALID_TEXT_REPRESENTATION) return null;
+    throw error;
+  }
+  if (!venue) return null;
+
+  const [ownerResult, courtsResult, recentReviews] = await Promise.all([
+    supabase.from("profiles").select("display_name").eq("id", venue.owner_id).maybeSingle(),
+    supabase.from("courts").select("*").eq("venue_id", venueId).order("name"),
+    listReviewsByVenue(supabase, venueId, 10),
+  ]);
+  if (ownerResult.error) throw ownerResult.error;
+  if (courtsResult.error) throw courtsResult.error;
+
+  return {
+    ...venue,
+    ownerDisplayName: ownerResult.data?.display_name ?? null,
+    courts: courtsResult.data ?? [],
+    recentReviews,
+  };
 }

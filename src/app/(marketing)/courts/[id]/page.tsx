@@ -11,6 +11,7 @@ import { Rating } from "@/components/court/Rating";
 import { BookingWidget } from "@/components/court/BookingWidget";
 import { MobileBookingBar } from "@/components/court/MobileBookingBar";
 import { VenueMapLoader } from "@/components/search/VenueMapLoader";
+import { GetDirectionsButton } from "@/components/court/GetDirectionsButton";
 import { FavoriteButton } from "@/components/court/FavoriteButton";
 import { BackButton } from "@/components/shared/BackButton";
 import { deterministicSurfaceColor } from "@/components/court/CourtSurface";
@@ -173,7 +174,10 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-foreground">Location</h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-foreground">Location</h2>
+              <GetDirectionsButton latitude={venue.latitude} longitude={venue.longitude} venueName={venue.name} />
+            </div>
             <div className="mt-3 h-64">
               <VenueMapLoader
                 markers={

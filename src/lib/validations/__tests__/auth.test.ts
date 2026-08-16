@@ -25,6 +25,7 @@ describe("signUpSchema", () => {
     password: "supersecret1",
     confirmPassword: "supersecret1",
     agreedToTerms: true,
+    intendedRole: "player" as const,
   };
 
   it("accepts matching passwords of sufficient length, with the agreement accepted", () => {
@@ -54,6 +55,14 @@ describe("signUpSchema", () => {
     if (!result.success) {
       expect(result.error.issues.some((issue) => issue.path.includes("agreedToTerms"))).toBe(true);
     }
+  });
+
+  it("accepts intendedRole 'venue_owner'", () => {
+    expect(signUpSchema.safeParse({ ...base, intendedRole: "venue_owner" }).success).toBe(true);
+  });
+
+  it("rejects an unrecognized intendedRole value", () => {
+    expect(signUpSchema.safeParse({ ...base, intendedRole: "admin" }).success).toBe(false);
   });
 });
 

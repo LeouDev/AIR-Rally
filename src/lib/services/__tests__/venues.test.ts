@@ -11,6 +11,9 @@ import {
   syncVenuePaymongoActivation,
   listOperatingHours,
   setOperatingHours,
+  setVenueStatusAsAdmin,
+  listVenuesForAdmin,
+  getVenueForAdmin,
 } from "@/lib/services/venues";
 import { createMockSupabase, createTableMockSupabase, postgrestError } from "@/lib/test-helpers/mockSupabase";
 import type { VenueMarketplaceRow, Venue } from "@/lib/supabase/types";
@@ -119,6 +122,24 @@ describe("searchMarketplaceVenues", () => {
     await expect(
       searchMarketplaceVenues(supabase, { amenityIds: ["not-a-uuid", "'; drop table venues;--"] })
     ).resolves.toBeDefined();
+  });
+
+  // The SearchBar's "Where?" field accepts free text — city, municipality,
+  // or barangay — so a bare city column match isn't enough (a barangay
+  // only ever shows up in the address). Matches either, wildcarded.
+  it("matches a free-text location against city OR address, wildcarded", async () => {
+    const supabase = createMockSupabase({ data: [marketplaceRow], error: null, count: 1 });
+    let orSpy: jest.Mock | undefined;
+    const originalFrom = (supabase as unknown as { from: jest.Mock }).from;
+    (supabase as unknown as { from: jest.Mock }).from = jest.fn((table: string) => {
+      const b = originalFrom(table);
+      orSpy = b.or as jest.Mock;
+      return b;
+    });
+
+    await searchMarketplaceVenues(supabase, { city: "Lahug" });
+
+    expect(orSpy).toHaveBeenCalledWith("city.ilike.%Lahug%,address.ilike.%Lahug%");
   });
 });
 
@@ -485,5 +506,100 @@ describe("deleteVenue", () => {
   it("throws when RLS matches zero rows (non-draft or not-owned venue)", async () => {
     const supabase = createMockSupabase({ data: null, error: postgrestError("PGRST116") });
     await expect(deleteVenue(supabase, "venue-1")).rejects.toMatchObject({ code: "PGRST116" });
+  });
+});
+
+describe("setVenueStatusAsAdmin", () => {
+  it("updates status by id", async () => {
+    const eqMock = jest.fn(() => ({
+      select: jest.fn(() => ({
+        single: jest.fn().mockResolvedValue({ data: ownerVenueRow({ status: "active" }), error: null }),
+      })),
+    }));
+    const updateMock = jest.fn(() => ({ eq: eqMock }));
+    const supabase = { from: jest.fn(() => ({ update: updateMock })) } as never;
+
+    const result = await setVenueStatusAsAdmin(supabase, "venue-1", "active");
+
+    expect(updateMock).toHaveBeenCalledWith({ status: "active" });
+    expect(eqMock).toHaveBeenCalledWith("id", "venue-1");
+    expect(result.status).toBe("active");
+  });
+
+  it("propagates a database error", async () => {
+    const supabase = createMockSupabase({ data: null, error: postgrestError("PGRST116") });
+    await expect(setVenueStatusAsAdmin(supabase, "venue-1", "suspended")).rejects.toMatchObject({ code: "PGRST116" });
+  });
+});
+
+describe("listVenuesForAdmin", () => {
+  it("returns an empty array without any follow-up queries when there are no venues", async () => {
+    const supabase = createTableMockSupabase({ venues: { data: [], error: null } });
+    await expect(listVenuesForAdmin(supabase)).resolves.toEqual([]);
+  });
+
+  it("attaches owner display name and court count per venue", async () => {
+    const supabase = createTableMockSupabase({
+      venues: {
+        data: [ownerVenueRow({ id: "venue-a", owner_id: "owner-1" }), ownerVenueRow({ id: "venue-b", owner_id: "owner-2" })],
+        error: null,
+      },
+      profiles: { data: [{ id: "owner-1", display_name: "Alex Owner" }], error: null },
+      courts: {
+        data: [
+          { id: "court-1", venue_id: "venue-a" },
+          { id: "court-2", venue_id: "venue-a" },
+        ],
+        error: null,
+      },
+    });
+
+    const result = await listVenuesForAdmin(supabase);
+
+    expect(result).toEqual([
+      expect.objectContaining({ id: "venue-a", ownerDisplayName: "Alex Owner", courtCount: 2 }),
+      expect.objectContaining({ id: "venue-b", ownerDisplayName: null, courtCount: 0 }),
+    ]);
+  });
+
+  it("filters by status when given", async () => {
+    const eqMock = jest.fn(() => Promise.resolve({ data: [], error: null }));
+    const orderMock = jest.fn(() => ({ eq: eqMock }));
+    const supabase = { from: jest.fn(() => ({ select: jest.fn(() => ({ order: orderMock })) })) } as never;
+
+    await listVenuesForAdmin(supabase, "pending_review");
+
+    expect(eqMock).toHaveBeenCalledWith("status", "pending_review");
+  });
+});
+
+describe("getVenueForAdmin", () => {
+  it("returns null for a venue that doesn't exist", async () => {
+    const supabase = createTableMockSupabase({ venues: { data: null, error: null } });
+    await expect(getVenueForAdmin(supabase, "venue-1")).resolves.toBeNull();
+  });
+
+  it("returns null for a malformed venue id rather than throwing", async () => {
+    const supabase = createTableMockSupabase({ venues: { data: null, error: postgrestError("22P02") } });
+    await expect(getVenueForAdmin(supabase, "not-a-uuid")).resolves.toBeNull();
+  });
+
+  it("attaches owner display name, all courts (any status), and recent reviews", async () => {
+    const supabase = createTableMockSupabase({
+      venues: { data: ownerVenueRow({ id: "venue-1", owner_id: "owner-1", status: "suspended" }), error: null },
+      profiles: { data: { display_name: "Alex Owner" }, error: null },
+      courts: { data: [{ id: "court-1", venue_id: "venue-1", status: "inactive" }], error: null },
+      reviews: { data: [], error: null },
+    });
+
+    const result = await getVenueForAdmin(supabase, "venue-1");
+
+    expect(result).toMatchObject({
+      id: "venue-1",
+      status: "suspended",
+      ownerDisplayName: "Alex Owner",
+      courts: [{ id: "court-1", venue_id: "venue-1", status: "inactive" }],
+      recentReviews: [],
+    });
   });
 });

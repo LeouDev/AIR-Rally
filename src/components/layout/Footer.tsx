@@ -28,7 +28,11 @@ export function Footer() {
           <FooterColumn title="Product" links={PRODUCT_LINKS} />
           <FooterColumn title="Account" links={ACCOUNT_LINKS} />
 
-          <div className="col-span-2 flex flex-col gap-3 sm:col-span-1">
+          {/* Web-only (Phase 6) — the store badges aren't real download
+              links yet, and a dead App Store/Google Play row read as
+              wasted vertical space on the mobile footer specifically;
+              kept for desktop/tablet visitors. */}
+          <div className="col-span-2 hidden flex-col gap-3 sm:col-span-1 sm:flex">
             <h3 className="text-sm font-semibold text-foreground">Get the app</h3>
             <p className="text-sm text-muted-foreground">
               Native apps are on the way. For now, Air/Rally installs straight from your browser.

@@ -45,6 +45,14 @@ const PATTERNS: Array<{ test: (e: ErrorLike) => boolean; message: string }> = [
     message: "We couldn't save that — please check the form and try again.",
   },
   {
+    // Postgres insufficient_privilege — most commonly an RLS policy
+    // rejecting the write outright (e.g. a still-'player' account
+    // hitting createVenueDraftAction before their owner application is
+    // approved — see Phase 6's owner-approval gatekeeper).
+    test: (e) => e.code === "42501",
+    message: "You need an approved owner account to do that.",
+  },
+  {
     // Postgres exclusion_violation — the bookings_no_overlap constraint
     // (see supabase/migrations/20260810000004_bookings.sql) rejecting a
     // double-booking attempt. lib/services/bookings.ts already catches

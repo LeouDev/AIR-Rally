@@ -8,6 +8,7 @@ import type { LatLng } from "@/lib/services/maps";
  * without one get silently rate-limited harder or blocked.
  */
 const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
+const NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse";
 const USER_AGENT = "AirRally/1.0 (pickleball court marketplace; contact via app support)";
 
 /**
@@ -44,6 +45,36 @@ export async function geocodeAddress(parts: {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
     return { lat, lng };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reverse of geocodeAddress — coordinates to a human city/municipality
+ * name, used to prefill the "Where?" search field's placeholder with the
+ * visitor's own location. Called from the browser (SearchBar), so the
+ * custom User-Agent header is a best-effort only: browsers silently strip
+ * it as a forbidden header, but the request still succeeds unauthenticated.
+ * Best-effort, same posture as geocodeAddress — null on any failure.
+ */
+export async function reverseGeocodeCity(lat: number, lng: number): Promise<string | null> {
+  try {
+    const url = new URL(NOMINATIM_REVERSE_URL);
+    url.searchParams.set("lat", String(lat));
+    url.searchParams.set("lon", String(lng));
+    url.searchParams.set("format", "jsonv2");
+    url.searchParams.set("zoom", "10");
+
+    const response = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+    if (!response.ok) return null;
+
+    const result: unknown = await response.json();
+    if (typeof result !== "object" || result === null || !("address" in result)) return null;
+
+    const address = (result as { address?: Record<string, unknown> }).address ?? {};
+    const candidate = address.city ?? address.town ?? address.municipality ?? address.county ?? address.state_district;
+    return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
   } catch {
     return null;
   }

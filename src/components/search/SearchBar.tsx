@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, CalendarDays, Users, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,11 +11,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { mockLocations } from "@/lib/mock-data";
+import { reverseGeocodeCity } from "@/lib/services/geocoding";
 import { cn } from "@/lib/utils";
 
 const WHEN_OPTIONS = ["Today", "Tomorrow", "This Weekend", "Next Week"];
 const PLAYER_OPTIONS = [2, 4, 6, 8];
+const LOCATION_PLACEHOLDER = "City, municipality, or barangay";
 
 type SearchBarProps = {
   className?: string;
@@ -24,12 +25,36 @@ type SearchBarProps = {
 
 export function SearchBar({ className, variant = "hero" }: SearchBarProps) {
   const router = useRouter();
-  const [location, setLocation] = useState(mockLocations[0].city);
+  const [location, setLocation] = useState("");
+  const [detectedCity, setDetectedCity] = useState<string | null>(null);
   const [when, setWhen] = useState(WHEN_OPTIONS[0]);
   const [players, setPlayers] = useState(PLAYER_OPTIONS[1]);
 
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+
+    let cancelled = false;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        reverseGeocodeCity(position.coords.latitude, position.coords.longitude).then((city) => {
+          if (!cancelled && city) setDetectedCity(city);
+        });
+      },
+      () => {
+        // Denied/unavailable — the field just keeps its generic placeholder.
+      },
+      { timeout: 5000, maximumAge: 300_000 }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function handleSearch() {
-    const params = new URLSearchParams({ location, when, players: String(players) });
+    const effectiveLocation = location.trim() || detectedCity || "";
+    const params = new URLSearchParams({ when, players: String(players) });
+    if (effectiveLocation) params.set("location", effectiveLocation);
     router.push(`/explore?${params.toString()}`);
   }
 
@@ -46,18 +71,14 @@ export function SearchBar({ className, variant = "hero" }: SearchBarProps) {
         label="Where?"
         className="sm:flex-1"
       >
-        <Select value={location} onValueChange={setLocation}>
-          <SelectTrigger className="h-auto w-full border-none bg-transparent p-0 shadow-none focus-visible:ring-0 [&>svg]:hidden">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {mockLocations.map((loc) => (
-              <SelectItem key={loc.id} value={loc.city}>
-                {loc.city}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <input
+          type="text"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          placeholder={detectedCity ?? LOCATION_PLACEHOLDER}
+          aria-label="Where"
+          className="w-full min-w-0 border-none bg-transparent p-0 text-sm font-medium text-foreground shadow-none outline-none placeholder:font-normal placeholder:text-muted-foreground focus-visible:ring-0"
+        />
       </Field>
 
       <Divider />

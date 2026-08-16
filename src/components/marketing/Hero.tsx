@@ -3,6 +3,7 @@ import { ArrowRight, Sparkles, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/search/SearchBar";
 import { CourtSurface } from "@/components/court/CourtSurface";
+import { HeroSecondaryCTA } from "@/components/marketing/HeroSecondaryCTA";
 
 export function Hero() {
   return (
@@ -12,7 +13,7 @@ export function Hero() {
           <div className="flex flex-col items-start gap-6">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
               <Sparkles className="size-3.5 text-primary" aria-hidden="true" />
-              Now booking courts in Cebu &amp; Manila
+              Now booking courts in the Philippines
             </span>
 
             <h1 className="text-4xl leading-[1.08] font-semibold tracking-tight text-foreground sm:text-5xl lg:text-6xl">
@@ -30,9 +31,7 @@ export function Hero() {
                   <ArrowRight className="size-4" />
                 </Link>
               </Button>
-              <Button asChild variant="outline" size="lg" className="h-12 rounded-full px-6 text-base">
-                <Link href="/list-your-court">List Your Court</Link>
-              </Button>
+              <HeroSecondaryCTA />
             </div>
           </div>
 

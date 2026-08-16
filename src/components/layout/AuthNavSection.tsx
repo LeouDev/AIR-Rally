@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { UserMenu } from "@/components/layout/UserMenu";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 import { createClient } from "@/lib/supabase/client";
 import { getProfile } from "@/lib/services/profiles";
 import type { UserRole } from "@/lib/supabase/types";
@@ -11,7 +12,14 @@ import type { UserRole } from "@/lib/supabase/types";
 type AuthState =
   | { status: "loading" }
   | { status: "signed-out" }
-  | { status: "signed-in"; email: string; displayName: string; avatarUrl: string | null; role: UserRole };
+  | {
+      status: "signed-in";
+      userId: string;
+      email: string;
+      displayName: string;
+      avatarUrl: string | null;
+      role: UserRole;
+    };
 
 /**
  * Client-side by design. The Navbar renders on every marketing page, and
@@ -61,6 +69,7 @@ export function AuthNavSection() {
 
       setState({
         status: "signed-in",
+        userId: user.id,
         email: user.email ?? "",
         displayName: profile?.display_name || user.email || "Your account",
         avatarUrl: profile?.avatar_url ?? null,
@@ -92,12 +101,24 @@ export function AuthNavSection() {
 
   if (state.status === "signed-in") {
     return (
-      <UserMenu displayName={state.displayName} email={state.email} avatarUrl={state.avatarUrl} role={state.role} />
+      <div className="flex items-center gap-1">
+        <NotificationBell userId={state.userId} />
+        <UserMenu displayName={state.displayName} email={state.email} avatarUrl={state.avatarUrl} role={state.role} />
+      </div>
     );
   }
 
   return (
-    <div className="hidden items-center gap-2 sm:flex">
+    <div className="hidden items-center gap-1 sm:flex">
+      {/* Acquisition link for anonymous visitors only — a signed-in
+          player never sees this (Phase 6, Part 1); owners/admins reach
+          their dashboard via UserMenu instead. */}
+      <Link
+        href="/list-your-court"
+        className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      >
+        List Your Court
+      </Link>
       <Button asChild variant="ghost">
         <Link href="/login">Sign In</Link>
       </Button>

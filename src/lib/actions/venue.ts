@@ -38,15 +38,12 @@ export async function createVenueDraftAction(values: CreateVenueDraftValues): Pr
   }
 
   try {
-    // Grants 'venue_owner' the first time a 'player' reaches this step —
-    // a safe no-op for an account that's already venue_owner/admin (see
-    // request_venue_owner_role() and the role/permission audit). This is
-    // what venues' own INSERT policy now actually checks; without this
-    // call, createDraftVenue() below would fail RLS for a still-'player'
-    // account.
-    const { error: roleError } = await supabase.rpc("request_venue_owner_role");
-    if (roleError) throw roleError;
-
+    // No self-promotion here (Phase 6) — venues' own INSERT policy
+    // requires role in ('venue_owner', 'admin'), and the only way to
+    // reach 'venue_owner' now is an admin approving an owner_applications
+    // row (see lib/actions/ownerApplications.ts#approveOwnerApplicationAction).
+    // A still-'player' account correctly fails RLS here, surfaced below
+    // as a friendly error rather than a silent auto-promotion.
     const coords = await geocodeAddress({
       address: parsed.data.address,
       city: parsed.data.city,

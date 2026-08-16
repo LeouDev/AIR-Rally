@@ -19,6 +19,17 @@ export type CourtIndoorOutdoor = "indoor" | "outdoor";
  */
 export type VenuePaymongoActivationStatus = "unlinked" | "pending" | "under_review" | "activated" | "declined";
 
+/**
+ * Account-level owner approval state (Phase 6), independent of `role`.
+ * `role` only ever flips to `venue_owner` at the moment an admin
+ * approves the matching `owner_applications` row — see
+ * supabase/migrations/20260810000025_owner_approval.sql. `none` is the
+ * default for every account; `pending` is the one self-service
+ * transition (requestOwnerAccessAction); `approved`/`rejected` are
+ * admin-only.
+ */
+export type OwnerStatus = "none" | "pending" | "approved" | "rejected";
+
 export type Profile = {
   id: string;
   first_name: string | null;
@@ -27,6 +38,9 @@ export type Profile = {
   avatar_url: string | null;
   phone: string | null;
   role: UserRole;
+  owner_status: OwnerStatus;
+  /** Stable per-user code embedded in their shareable referral link — generated unconditionally on signup, never null. */
+  referral_code: string;
   created_at: string;
   updated_at: string;
 };
@@ -131,6 +145,74 @@ export type Review = {
   rating: number;
   title: string | null;
   comment: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Row shape of `notifications` (see
+ * supabase/migrations/20260810000024_notifications.sql). Every row is
+ * written exclusively by security-definer trigger functions — there is
+ * no insert policy for any client role, so `type`/`title`/`message`
+ * are never client-writable; the only client mutation is marking a row
+ * read (see lib/services/notifications.ts).
+ */
+export type NotificationType = "booking_confirmed" | "booking_received" | "booking_cancelled" | "reschedule_completed" | "review_received";
+
+export type Notification = {
+  id: string;
+  user_id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  read_at: string | null;
+  created_at: string;
+};
+
+/**
+ * Row shape of `owner_applications` (see
+ * supabase/migrations/20260810000025_owner_approval.sql). A lightweight
+ * pre-approval application, not a venue draft — a real venue can't exist
+ * yet at this point (the applicant isn't `venue_owner` until an admin
+ * approves). Only `status`/`reviewed_at`/`reviewed_by` are ever admin-set;
+ * every other field is submitted once by the applicant.
+ */
+export type OwnerApplicationStatus = "pending" | "approved" | "rejected";
+
+export type OwnerApplication = {
+  id: string;
+  user_id: string;
+  business_name: string;
+  business_phone: string;
+  business_email: string;
+  venue_name: string;
+  venue_address: string;
+  venue_city: string;
+  venue_description: string | null;
+  court_count: number;
+  status: OwnerApplicationStatus;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Row shape of `referrals` (see
+ * supabase/migrations/20260810000026_referrals.sql). Purely descriptive
+ * tracking — never grants role/owner_status/venue permissions by itself.
+ * `sent` is reserved for a future phase (anonymous pre-signup link
+ * visits) and is never written by this phase's code.
+ */
+export type ReferralStatus = "sent" | "started" | "completed" | "approved";
+
+export type Referral = {
+  id: string;
+  referral_code: string;
+  referrer_user_id: string;
+  referred_user_id: string | null;
+  converted_owner_id: string | null;
+  status: ReferralStatus;
   created_at: string;
   updated_at: string;
 };
@@ -421,6 +503,27 @@ export type Database = {
         BookingReschedule,
         Pick<BookingReschedule, "original_booking_id" | "new_booking_id" | "price_difference" | "initiated_by"> &
           Partial<Omit<BookingReschedule, "id" | "original_booking_id" | "new_booking_id" | "price_difference" | "initiated_by" | "created_at" | "updated_at">>
+      >;
+      // never for Insert — no client role has an insert policy; every row
+      // comes from a security-definer trigger. Only read_at is updatable.
+      notifications: TableDef<Notification, never, Partial<Pick<Notification, "read_at">>>;
+      owner_applications: TableDef<
+        OwnerApplication,
+        Pick<
+          OwnerApplication,
+          "user_id" | "business_name" | "business_phone" | "business_email" | "venue_name" | "venue_address" | "venue_city" | "court_count"
+        > &
+          Partial<
+            Omit<
+              OwnerApplication,
+              "id" | "user_id" | "business_name" | "business_phone" | "business_email" | "venue_name" | "venue_address" | "venue_city" | "court_count" | "created_at" | "updated_at"
+            >
+          >
+      >;
+      referrals: TableDef<
+        Referral,
+        Pick<Referral, "referral_code" | "referrer_user_id" | "referred_user_id"> &
+          Partial<Omit<Referral, "id" | "referral_code" | "referrer_user_id" | "referred_user_id" | "created_at" | "updated_at">>
       >;
     };
     Views: Record<string, never>;
