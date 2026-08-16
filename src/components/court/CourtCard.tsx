@@ -41,7 +41,7 @@ export function CourtCard({ venue, isFavorited = false }: CourtCardProps) {
       className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-all duration-200 hover:-translate-y-1 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <div className="relative aspect-[4/3] w-full overflow-hidden">
-        <div className="size-full transition-transform duration-300 group-hover:scale-105">
+        <div className="relative size-full transition-transform duration-300 group-hover:scale-105">
           {venue.coverImageUrl ? (
             <Image
               src={venue.coverImageUrl}

@@ -23,7 +23,18 @@ function toIsoInstant(datetimeLocalValue: string): string {
   return new Date(datetimeLocalValue).toISOString();
 }
 
-export function CourtBlockDialog({ courtId, courtName, defaultDate }: { courtId: string; courtName: string; defaultDate: string }) {
+export function CourtBlockDialog({
+  courtId,
+  courtName,
+  defaultDate,
+  iconOnly = false,
+}: {
+  courtId: string;
+  courtName: string;
+  defaultDate: string;
+  /** Icon-only trigger for tight spaces (e.g. a grid-timeline row header) — same dialog, no label text. */
+  iconOnly?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -58,10 +69,16 @@ export function CourtBlockDialog({ courtId, courtName, defaultDate }: { courtId:
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm" className="gap-1.5">
-          <Ban className="size-4" />
-          Block Time
-        </Button>
+        {iconOnly ? (
+          <Button type="button" variant="outline" size="icon-sm" aria-label={`Block time for ${courtName}`}>
+            <Ban className="size-3.5" />
+          </Button>
+        ) : (
+          <Button type="button" variant="outline" size="sm" className="gap-1.5">
+            <Ban className="size-4" />
+            Block Time
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
