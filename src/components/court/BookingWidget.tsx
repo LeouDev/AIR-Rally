@@ -334,7 +334,7 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
 
       {(phone || email) && (
         <div className="flex flex-col gap-2 border-t border-border pt-4 text-sm">
-          <p className="text-xs text-muted-foreground">Prefer to book by phone or email?</p>
+          <p className="text-xs text-muted-foreground">Need more information? Connect with us directly and we&apos;ll assist you.</p>
           {phone && (
             <a href={`tel:${phone}`} className="flex items-center gap-2 text-foreground hover:text-primary">
               <Phone className="size-4 shrink-0" aria-hidden="true" />
