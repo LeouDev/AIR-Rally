@@ -5,9 +5,9 @@ import { ArrowLeft } from "lucide-react";
 import { OwnerAvailabilityCalendar } from "@/components/owner/OwnerAvailabilityCalendar";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getVenueForOwner } from "@/lib/services/venues";
+import { getVenueForOwner, listOperatingHours } from "@/lib/services/venues";
 import { listCourtsByVenue } from "@/lib/services/courts";
-import { getOwnerCourtSchedule, type OwnerScheduleSlot } from "@/lib/services/ownerAvailability";
+import { getOwnerCourtSchedule, mergeWithClosedSlots, todayInTimezone, type MergedSlot } from "@/lib/services/ownerAvailability";
 
 // Reads real-time bookings/blocks for the owner's own venue — never
 // cacheable, same posture as the parent venue-management page.
@@ -16,11 +16,6 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Availability Calendar",
 };
-
-/** "Today" in the venue's own timezone, not the server's — a venue in Manila and a server running in another region must agree on what day it currently is there. */
-function todayInTimezone(timezone: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-}
 
 export default async function VenueAvailabilityPage({
   params,
@@ -45,10 +40,15 @@ export default async function VenueAvailabilityPage({
   if (!venue) notFound();
 
   const date = requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : todayInTimezone(venue.timezone);
+  // `date` is a plain local calendar date, not an instant — parse as UTC
+  // so the day-of-week doesn't depend on the server's own timezone.
+  const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
 
-  const courts = await listCourtsByVenue(supabase, venueId);
+  const [courts, operatingHours] = await Promise.all([listCourtsByVenue(supabase, venueId), listOperatingHours(supabase, venueId)]);
   const schedules = await Promise.all(courts.map((court) => getOwnerCourtSchedule(supabase, court.id, date)));
-  const schedulesByCourt = Object.fromEntries(courts.map((court, i) => [court.id, schedules[i]])) as Record<string, OwnerScheduleSlot[]>;
+  const schedulesByCourt = Object.fromEntries(
+    courts.map((court, i) => [court.id, mergeWithClosedSlots(schedules[i], operatingHours, dayOfWeek, venue.timezone)])
+  ) as Record<string, MergedSlot[]>;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-12 sm:px-6 lg:px-8">
@@ -66,7 +66,7 @@ export default async function VenueAvailabilityPage({
         </p>
       </div>
 
-      <OwnerAvailabilityCalendar venueId={venueId} date={date} timezone={venue.timezone} courts={courts} schedulesByCourt={schedulesByCourt} />
+      <OwnerAvailabilityCalendar venueId={venueId} date={date} courts={courts} schedulesByCourt={schedulesByCourt} />
     </div>
   );
 }

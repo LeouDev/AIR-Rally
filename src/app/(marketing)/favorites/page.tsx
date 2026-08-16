@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { listFavoritedVenues } from "@/lib/services/venues";
+import { getPublicImageUrl } from "@/lib/services/images";
 
 export const metadata = { title: "Favorites" };
 // Real, per-user data — proxy.ts already redirects unauthenticated
@@ -37,6 +38,7 @@ export default async function FavoritesPage() {
                   averageRating: venue.average_rating,
                   reviewCount: venue.review_count,
                   startingPrice: venue.starting_price,
+                  coverImageUrl: venue.cover_image_path ? getPublicImageUrl(supabase, venue.cover_image_path) : null,
                 }}
                 isFavorited
               />

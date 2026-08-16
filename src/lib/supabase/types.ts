@@ -338,6 +338,9 @@ export type VenueMarketplaceRow = Pick<
 > & {
   starting_price: number | null;
   active_court_count: number;
+  /** Storage path (not a resolved URL) of the venue's first venue-level
+   * photo, or null if none uploaded — resolve via getPublicImageUrl(). */
+  cover_image_path: string | null;
 };
 
 export type VenueDetail = VenueMarketplaceRow & {

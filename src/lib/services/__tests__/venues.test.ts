@@ -34,6 +34,7 @@ const marketplaceRow: VenueMarketplaceRow = {
   review_count: 42,
   created_at: "2026-01-01T00:00:00Z",
   timezone: "Asia/Manila",
+  cover_image_path: null,
   starting_price: 500,
   active_court_count: 4,
 };

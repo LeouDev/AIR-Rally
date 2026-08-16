@@ -9,6 +9,7 @@ import { Rating } from "@/components/court/Rating";
 import { BookingWidget } from "@/components/court/BookingWidget";
 import { MapPlaceholder } from "@/components/search/MapPlaceholder";
 import { FavoriteButton } from "@/components/court/FavoriteButton";
+import { BackButton } from "@/components/shared/BackButton";
 import { deterministicSurfaceColor } from "@/components/court/CourtSurface";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
@@ -73,6 +74,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+      <BackButton />
       <div className="relative">
         <ImageGallery
           images={galleryImages}

@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/services/profiles";
 import type { Profile } from "@/lib/supabase/types";
@@ -33,4 +34,22 @@ export async function getCurrentUserWithProfile(): Promise<{ user: User; profile
   } catch {
     return null;
   }
+}
+
+/**
+ * The repeated "getCurrentUser() then redirect to /login?redirect=... if
+ * signed out" prologue every owner page already wrote inline (see
+ * list-your-court/[venueId]/page.tsx) — factored out once a handful of
+ * new owner-dashboard pages started about to copy-paste it again.
+ * Deliberately just an auth check, not a role check: see the owner
+ * dashboard pages' own comments for why a role gate here would be wrong
+ * (this page tree is also the public onboarding entry point for a
+ * still-`player` visitor).
+ */
+export async function requireSignedIn(redirectPath: string): Promise<User> {
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect(`/login?redirect=${encodeURIComponent(redirectPath)}`);
+  }
+  return user;
 }

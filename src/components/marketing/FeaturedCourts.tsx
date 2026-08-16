@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { listFeaturedVenues } from "@/lib/services/venues";
 import { listFavoriteVenueIds } from "@/lib/services/favorites";
+import { getPublicImageUrl } from "@/lib/services/images";
 
 export async function FeaturedCourts() {
   const supabase = await createClient();
@@ -46,6 +47,7 @@ export async function FeaturedCourts() {
               averageRating: venue.average_rating,
               reviewCount: venue.review_count,
               startingPrice: venue.starting_price,
+              coverImageUrl: venue.cover_image_path ? getPublicImageUrl(supabase, venue.cover_image_path) : null,
             }}
             isFavorited={favoritedIds.has(venue.id)}
           />

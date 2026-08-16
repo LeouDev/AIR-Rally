@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { MapPin, Sun, Home, Layers } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Rating } from "@/components/court/Rating";
@@ -21,6 +22,8 @@ export type VenueCardData = {
   averageRating: number;
   reviewCount: number;
   startingPrice: number | null;
+  /** Already-resolved public URL, or null/undefined to fall back to the illustration. */
+  coverImageUrl?: string | null;
 };
 
 type CourtCardProps = {
@@ -39,7 +42,17 @@ export function CourtCard({ venue, isFavorited = false }: CourtCardProps) {
     >
       <div className="relative aspect-[4/3] w-full overflow-hidden">
         <div className="size-full transition-transform duration-300 group-hover:scale-105">
-          <CourtSurface surfaceColor={deterministicSurfaceColor(venue.id)} indoor={isIndoor} />
+          {venue.coverImageUrl ? (
+            <Image
+              src={venue.coverImageUrl}
+              alt={venue.name}
+              fill
+              sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 100vw"
+              className="object-cover"
+            />
+          ) : (
+            <CourtSurface surfaceColor={deterministicSurfaceColor(venue.id)} indoor={isIndoor} />
+          )}
         </div>
         <div className="absolute top-3 left-3">
           <Badge variant="secondary" className="gap-1 bg-background/90 text-foreground backdrop-blur">
