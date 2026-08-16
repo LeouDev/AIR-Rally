@@ -3,15 +3,17 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { addDays, format, isToday, isTomorrow } from "date-fns";
-import { Mail, Phone, Loader2 } from "lucide-react";
+import { Mail, Phone, Loader2, CalendarDays } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DatePickerCalendar } from "@/components/shared/DatePickerCalendar";
 import { cn } from "@/lib/utils";
 import { getAvailableSlotsAction } from "@/lib/actions/availability";
 import { createCheckoutSessionAction } from "@/lib/actions/checkout";
-import { SLOT_INCREMENT_MINUTES, MIN_DURATION_MINUTES, MAX_DURATION_MINUTES } from "@/lib/booking-config";
+import { SLOT_INCREMENT_MINUTES, MIN_DURATION_MINUTES, MAX_DURATION_MINUTES, MAX_BOOKING_WINDOW_DAYS } from "@/lib/booking-config";
 import type { AvailableSlot, Court } from "@/lib/supabase/types";
 
 const VISIBLE_DAYS = 14;
@@ -74,9 +76,12 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [selectedSlot, setSelectedSlot] = useState<AvailableSlot | null>(null);
   const [isBooking, startBooking] = useTransition();
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   const selectedCourt = courts.find((c) => c.id === selectedCourtId) ?? null;
   const localDate = format(selectedDate, "yyyy-MM-dd");
+  const today = new Date();
+  const maxBookableDate = addDays(today, MAX_BOOKING_WINDOW_DAYS);
 
   // requestKey identifies "the fetch this effect run is for" — comparing
   // it to resolvedKey (set only inside the .then() callback, never
@@ -177,28 +182,54 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
 
       <div className="flex flex-col gap-1.5">
         <p className="text-xs font-medium text-muted-foreground uppercase">Date</p>
-        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
-          {Array.from({ length: VISIBLE_DAYS }, (_, i) => addDays(new Date(), i)).map((date) => {
-            const label = formatDayLabel(date);
-            const active = format(date, "yyyy-MM-dd") === localDate;
-            return (
+        <div className="flex items-stretch gap-1.5">
+          <div className="-mx-1 flex flex-1 gap-1.5 overflow-x-auto px-1 pb-1">
+            {Array.from({ length: VISIBLE_DAYS }, (_, i) => addDays(today, i)).map((date) => {
+              const label = formatDayLabel(date);
+              const active = format(date, "yyyy-MM-dd") === localDate;
+              return (
+                <button
+                  key={date.toISOString()}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setSelectedDate(date)}
+                  className={cn(
+                    "flex shrink-0 flex-col items-center gap-0.5 rounded-xl border px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    active
+                      ? "border-primary bg-accent text-accent-foreground"
+                      : "border-border text-muted-foreground hover:border-primary/40"
+                  )}
+                >
+                  <span>{label.top}</span>
+                  <span className="text-[11px] text-muted-foreground">{label.bottom}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger asChild>
               <button
-                key={date.toISOString()}
                 type="button"
-                aria-pressed={active}
-                onClick={() => setSelectedDate(date)}
-                className={cn(
-                  "flex shrink-0 flex-col items-center gap-0.5 rounded-xl border px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                  active
-                    ? "border-primary bg-accent text-accent-foreground"
-                    : "border-border text-muted-foreground hover:border-primary/40"
-                )}
+                aria-label="Pick a date from the calendar"
+                className="flex shrink-0 items-center justify-center rounded-xl border border-border px-3 text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
-                <span>{label.top}</span>
-                <span className="text-[11px] text-muted-foreground">{label.bottom}</span>
+                <CalendarDays className="size-4" aria-hidden="true" />
               </button>
-            );
-          })}
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-auto">
+              <DatePickerCalendar
+                selected={selectedDate}
+                minDate={today}
+                maxDate={maxBookableDate}
+                onSelect={(date) => {
+                  setSelectedDate(date);
+                  setCalendarOpen(false);
+                }}
+              />
+              <p className="px-1 pt-1 text-xs text-muted-foreground">Bookable up to {MAX_BOOKING_WINDOW_DAYS} days ahead.</p>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
