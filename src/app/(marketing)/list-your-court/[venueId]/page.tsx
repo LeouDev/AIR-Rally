@@ -5,12 +5,14 @@ import { VenueAmenitiesEditor } from "@/components/owner/VenueAmenitiesEditor";
 import { VenueOperatingHoursEditor } from "@/components/owner/VenueOperatingHoursEditor";
 import { VenueReadinessChecklist } from "@/components/owner/VenueReadinessChecklist";
 import { CourtsManager } from "@/components/owner/CourtsManager";
+import { VenuePhotosCard } from "@/components/owner/VenuePhotosCard";
 import { PaymongoOnboardingCard } from "@/components/owner/PaymongoOnboardingCard";
 import { VenueEarningsCard } from "@/components/owner/VenueEarningsCard";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getVenueForOwner, listOperatingHours } from "@/lib/services/venues";
 import { listCourtsByVenue } from "@/lib/services/courts";
+import { listImagesForVenue } from "@/lib/services/images";
 import { listAmenities, listAmenityIdsForVenue } from "@/lib/services/amenities";
 import { getVenueReadiness } from "@/lib/services/venueReadiness";
 import { getVenueEarnings } from "@/lib/services/venueEarnings";
@@ -43,14 +45,20 @@ export default async function ManageVenuePage({
   const venue = await getVenueForOwner(supabase, venueId);
   if (!venue) notFound();
 
-  const [courts, allAmenities, selectedAmenityIds, operatingHours, readiness, earnings] = await Promise.all([
+  const [courts, allAmenities, selectedAmenityIds, operatingHours, readiness, earnings, images] = await Promise.all([
     listCourtsByVenue(supabase, venueId),
     listAmenities(supabase),
     listAmenityIdsForVenue(supabase, venueId),
     listOperatingHours(supabase, venueId),
     getVenueReadiness(supabase, venueId),
     getVenueEarnings(supabase, venueId),
+    listImagesForVenue(supabase, venueId),
   ]);
+
+  // court_id null = venue-level (see the VenuePhotosCard below); every
+  // other row belongs to one of `courts`, filtered per-court inside
+  // CourtsManager/CourtFormDialog.
+  const venueImages = images.filter((image) => image.court_id === null);
 
   const initialValues: CreateVenueDraftValues = {
     name: venue.name,
@@ -78,6 +86,7 @@ export default async function ManageVenuePage({
       <VenueReadinessChecklist readiness={readiness} />
       <VenueEarningsCard earnings={earnings} />
       <VenueForm mode="edit" venueId={venueId} initialValues={initialValues} />
+      <VenuePhotosCard venueId={venueId} images={venueImages} />
       <PaymongoOnboardingCard
         venueId={venueId}
         activationStatus={venue.paymongo_activation_status}
@@ -85,7 +94,7 @@ export default async function ManageVenuePage({
       />
       <VenueAmenitiesEditor venueId={venueId} allAmenities={allAmenities} initialSelectedIds={selectedAmenityIds} />
       <VenueOperatingHoursEditor venueId={venueId} initialHours={operatingHours} />
-      <CourtsManager venueId={venueId} courts={courts} />
+      <CourtsManager venueId={venueId} courts={courts} images={images} />
     </div>
   );
 }

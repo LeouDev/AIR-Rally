@@ -4,6 +4,8 @@ import {
   listFavoritedVenues,
   getVenueForOwner,
   createDraftVenue,
+  deleteVenue,
+  listVenuesByOwnerWithSummary,
   linkVenuePaymongoAccount,
   syncVenuePaymongoActivation,
   listOperatingHours,
@@ -360,5 +362,98 @@ describe("setOperatingHours", () => {
 
     expect(deleteBuilder.eq).toHaveBeenCalledWith("venue_id", "venue-1");
     expect(insertBuilder).not.toHaveBeenCalled();
+  });
+});
+
+function ownerVenueRow(overrides: Partial<Venue> = {}): Venue {
+  return {
+    id: "venue-1",
+    owner_id: "user-1",
+    name: "Banilad Pickle Club",
+    description: "desc",
+    address: "123 Test St",
+    city: "Cebu City",
+    state_province: "Cebu",
+    country: "Philippines",
+    latitude: null,
+    longitude: null,
+    phone: "+639171234567",
+    email: "owner@example.com",
+    website: null,
+    indoor_outdoor: "outdoor",
+    number_of_courts: 4,
+    average_rating: 0,
+    review_count: 0,
+    status: "draft",
+    timezone: "Asia/Manila",
+    paymongo_account_id: null,
+    paymongo_activation_status: "unlinked",
+    paymongo_onboarding_started_at: null,
+    paymongo_activated_at: null,
+    paymongo_declined_reason: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("listVenuesByOwnerWithSummary", () => {
+  it("returns an empty array without any follow-up queries when the owner has no venues", async () => {
+    const supabase = createTableMockSupabase({ venues: { data: [], error: null } });
+    await expect(listVenuesByOwnerWithSummary(supabase, "user-1")).resolves.toEqual([]);
+  });
+
+  it("attaches a real court count (not the static number_of_courts field) and the lowest-sort_order venue-level cover image", async () => {
+    const venueA = ownerVenueRow({ id: "venue-a", number_of_courts: 99 });
+    const venueB = ownerVenueRow({ id: "venue-b", name: "No Photos Yet" });
+
+    const supabase = {
+      ...createTableMockSupabase({
+        venues: { data: [venueA, venueB], error: null },
+        courts: {
+          data: [
+            { id: "court-1", venue_id: "venue-a" },
+            { id: "court-2", venue_id: "venue-a" },
+          ],
+          error: null,
+        },
+        court_images: {
+          data: [
+            { venue_id: "venue-a", storage_path: "venue-a/cover.jpg", sort_order: 0 },
+            { venue_id: "venue-a", storage_path: "venue-a/second.jpg", sort_order: 1 },
+          ],
+          error: null,
+        },
+      }),
+      storage: { from: jest.fn(() => ({ getPublicUrl: jest.fn(() => ({ data: { publicUrl: "https://cdn.test/venue-a/cover.jpg" } })) })) },
+    } as never;
+
+    const result = await listVenuesByOwnerWithSummary(supabase, "user-1");
+
+    expect(result).toEqual([
+      expect.objectContaining({ id: "venue-a", courtCount: 2, coverImageUrl: "https://cdn.test/venue-a/cover.jpg" }),
+      expect.objectContaining({ id: "venue-b", courtCount: 0, coverImageUrl: null }),
+    ]);
+  });
+});
+
+describe("deleteVenue", () => {
+  it("deletes by id", async () => {
+    const eqMock = jest.fn(() => ({ select: jest.fn(() => ({ single: jest.fn().mockResolvedValue({ data: { id: "venue-1" }, error: null }) })) }));
+    const supabase = { from: jest.fn(() => ({ delete: jest.fn(() => ({ eq: eqMock })) })) } as never;
+
+    await deleteVenue(supabase, "venue-1");
+
+    expect(eqMock).toHaveBeenCalledWith("id", "venue-1");
+  });
+
+  // RLS (owner_id=auth.uid() AND status='draft', see
+  // supabase/migrations/20260809000002_venues.sql) is what actually
+  // prevents deleting a non-draft or not-owned venue — this proves the
+  // service layer surfaces that as a thrown error rather than a silent
+  // no-op success.
+  it("throws when RLS matches zero rows (non-draft or not-owned venue)", async () => {
+    const supabase = createMockSupabase({ data: null, error: postgrestError("PGRST116") });
+    await expect(deleteVenue(supabase, "venue-1")).rejects.toMatchObject({ code: "PGRST116" });
   });
 });

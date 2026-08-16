@@ -39,3 +39,5 @@ export const setVenueAmenitiesSchema = z.object({
   amenityIds: z.array(z.string()).max(50),
 });
 export type SetVenueAmenitiesValues = z.infer<typeof setVenueAmenitiesSchema>;
+
+export const deleteVenueSchema = z.uuid();

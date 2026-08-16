@@ -21,6 +21,7 @@ export function createQueryBuilder<T>(result: QueryResult<T>) {
     ilike: jest.fn(() => builder),
     or: jest.fn(() => builder),
     in: jest.fn(() => builder),
+    is: jest.fn(() => builder),
     gt: jest.fn(() => builder),
     gte: jest.fn(() => builder),
     lt: jest.fn(() => builder),

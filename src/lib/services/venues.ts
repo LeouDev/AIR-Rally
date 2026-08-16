@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Venue, VenueMarketplaceRow, VenueDetail, Amenity, VenueOperatingHours } from "@/lib/supabase/types";
 import type { CreateVenueDraftValues, UpdateVenueValues } from "@/lib/validations/venue";
 import type { SetOperatingHoursValues } from "@/lib/validations/venueOperatingHours";
+import { getPublicImageUrl } from "@/lib/services/images";
 
 type Client = SupabaseClient<Database>;
 
@@ -46,6 +47,61 @@ export async function listVenuesByOwner(supabase: Client, ownerId: string): Prom
   return data;
 }
 
+export type OwnerVenueSummary = Venue & {
+  courtCount: number;
+  coverImageUrl: string | null;
+};
+
+/**
+ * The card-dashboard version of listVenuesByOwner(): same venues, plus a
+ * real court count (from `courts`, not the static `venues.number_of_courts`
+ * field an owner sets once at creation and can go stale) and a cover
+ * image (the lowest-`sort_order` venue-level photo, `court_id is null` —
+ * see supabase/migrations/20260809000005_court_images.sql). Three flat
+ * queries total regardless of how many venues the owner has — court
+ * counts and cover images are fetched once each for every venue id, then
+ * reduced in JS, rather than one query per venue.
+ */
+export async function listVenuesByOwnerWithSummary(supabase: Client, ownerId: string): Promise<OwnerVenueSummary[]> {
+  const venues = await listVenuesByOwner(supabase, ownerId);
+  if (venues.length === 0) return [];
+
+  const venueIds = venues.map((v) => v.id);
+
+  const [courtsResult, imagesResult] = await Promise.all([
+    supabase.from("courts").select("id, venue_id").in("venue_id", venueIds),
+    supabase
+      .from("court_images")
+      .select("venue_id, storage_path, sort_order")
+      .in("venue_id", venueIds)
+      .is("court_id", null)
+      .order("sort_order", { ascending: true }),
+  ]);
+  if (courtsResult.error) throw courtsResult.error;
+  if (imagesResult.error) throw imagesResult.error;
+
+  const courtCountByVenue = new Map<string, number>();
+  for (const c of courtsResult.data ?? []) {
+    courtCountByVenue.set(c.venue_id, (courtCountByVenue.get(c.venue_id) ?? 0) + 1);
+  }
+
+  // Rows are already ordered by sort_order, so the first row seen per
+  // venue_id is the cover image — no separate max/min query needed.
+  const coverPathByVenue = new Map<string, string>();
+  for (const img of imagesResult.data ?? []) {
+    if (!coverPathByVenue.has(img.venue_id)) coverPathByVenue.set(img.venue_id, img.storage_path);
+  }
+
+  return venues.map((v) => {
+    const coverPath = coverPathByVenue.get(v.id);
+    return {
+      ...v,
+      courtCount: courtCountByVenue.get(v.id) ?? 0,
+      coverImageUrl: coverPath ? getPublicImageUrl(supabase, coverPath) : null,
+    };
+  });
+}
+
 /**
  * Full row, any status — for the owner's own management pages only. RLS
  * (see supabase/migrations/20260809000002_venues.sql) already ensures
@@ -60,6 +116,26 @@ export async function getVenueForOwner(supabase: Client, venueId: string): Promi
     throw error;
   }
   return data;
+}
+
+/**
+ * Hard delete — safe only because the existing RLS policy (see
+ * supabase/migrations/20260809000002_venues.sql) already restricts this
+ * to `owner_id = auth.uid() AND status = 'draft'` (or admin). A draft
+ * venue can't have any bookings yet (booking creation requires an active,
+ * listed venue), so the cascade onto `courts`/`court_images`/
+ * `court_blocked_periods` (all `on delete cascade`) can never reach a
+ * `bookings` row — which does NOT cascade (`courts.id` is referenced by
+ * `bookings.court_id` with no `on delete` clause, i.e. restrict), so a
+ * delete attempt against a venue with real booking history would fail
+ * outright rather than silently destroying it. No app-level ownership or
+ * status check here for the same reason every other owner mutation in
+ * this file has none: if RLS filters the row out, `.single()` throws and
+ * the caller (deleteVenueAction) surfaces a friendly, specific message.
+ */
+export async function deleteVenue(supabase: Client, venueId: string): Promise<void> {
+  const { error } = await supabase.from("venues").delete().eq("id", venueId).select("id").single();
+  if (error) throw error;
 }
 
 export async function updateVenue(supabase: Client, venueId: string, values: UpdateVenueValues): Promise<Venue> {

@@ -1,9 +1,9 @@
 /**
  * @jest-environment node
  */
-import { createVenueDraftAction, updateVenueAction, setVenueAmenitiesAction, setOperatingHoursAction } from "../venue";
+import { createVenueDraftAction, updateVenueAction, deleteVenueAction, setVenueAmenitiesAction, setOperatingHoursAction } from "../venue";
 import { getServerClient } from "../auth";
-import { createDraftVenue, updateVenue, setOperatingHours } from "../../services/venues";
+import { createDraftVenue, updateVenue, deleteVenue, setOperatingHours } from "../../services/venues";
 import { setVenueAmenities } from "../../services/amenities";
 import type { CreateVenueDraftValues } from "../../validations/venue";
 
@@ -12,6 +12,7 @@ jest.mock("../auth", () => ({ getServerClient: jest.fn() }));
 jest.mock("../../services/venues", () => ({
   createDraftVenue: jest.fn(),
   updateVenue: jest.fn(),
+  deleteVenue: jest.fn(),
   setOperatingHours: jest.fn(),
 }));
 jest.mock("../../services/amenities", () => ({ setVenueAmenities: jest.fn() }));
@@ -20,6 +21,7 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 const mockGetServerClient = getServerClient as jest.MockedFunction<typeof getServerClient>;
 const mockCreateDraftVenue = createDraftVenue as jest.MockedFunction<typeof createDraftVenue>;
 const mockUpdateVenue = updateVenue as jest.MockedFunction<typeof updateVenue>;
+const mockDeleteVenue = deleteVenue as jest.MockedFunction<typeof deleteVenue>;
 const mockSetVenueAmenities = setVenueAmenities as jest.MockedFunction<typeof setVenueAmenities>;
 const mockSetOperatingHours = setOperatingHours as jest.MockedFunction<typeof setOperatingHours>;
 
@@ -145,6 +147,53 @@ describe("updateVenueAction", () => {
     expect(result).toEqual({
       success: false,
       error: "We couldn't save that — please check the form and try again.",
+    });
+  });
+});
+
+describe("deleteVenueAction", () => {
+  beforeEach(() => {
+    mockGetServerClient.mockReset();
+    mockDeleteVenue.mockReset();
+  });
+
+  it("rejects a malformed venue id before ever contacting Supabase", async () => {
+    const result = await deleteVenueAction("not-a-uuid");
+    expect(result.success).toBe(false);
+    expect(mockGetServerClient).not.toHaveBeenCalled();
+  });
+
+  it("requires an authenticated session", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient(null) });
+    const result = await deleteVenueAction("223e4567-e89b-12d3-a456-426614174000");
+    expect(result).toEqual({ success: false, error: "Your session has expired. Please sign in again." });
+    expect(mockDeleteVenue).not.toHaveBeenCalled();
+  });
+
+  it("deletes the venue by id, relying on RLS to allow only the owner's own draft venues", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+    mockDeleteVenue.mockResolvedValue(undefined);
+
+    const result = await deleteVenueAction("223e4567-e89b-12d3-a456-426614174000");
+
+    expect(result).toEqual({ success: true, data: undefined });
+    expect(mockDeleteVenue).toHaveBeenCalledWith(expect.anything(), "223e4567-e89b-12d3-a456-426614174000");
+  });
+
+  // The venues DELETE RLS policy only matches owner_id=auth.uid() AND
+  // status='draft' — an active/pending/suspended venue (or someone else's)
+  // matches zero rows, which deleteVenue()'s .single() turns into a
+  // thrown "no rows" error. This proves that surfaces as a specific,
+  // honest message rather than a generic one or a silent success.
+  it("surfaces a specific message when RLS blocks the delete (non-draft or not-owned venue)", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+    mockDeleteVenue.mockRejectedValue(Object.assign(new Error("no rows"), { code: "PGRST116" }));
+
+    const result = await deleteVenueAction("223e4567-e89b-12d3-a456-426614174000");
+
+    expect(result).toEqual({
+      success: false,
+      error: "Only draft venues can be deleted — active venues can't be removed this way.",
     });
   });
 });

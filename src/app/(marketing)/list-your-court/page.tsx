@@ -4,10 +4,10 @@ import { CalendarClock, LineChart, Users2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared/SectionHeader";
 import { VenueForm } from "@/components/owner/VenueForm";
-import { OwnerVenueList } from "@/components/owner/OwnerVenueList";
+import { OwnerVenueGrid } from "@/components/owner/OwnerVenueGrid";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { listVenuesByOwner } from "@/lib/services/venues";
+import { listVenuesByOwnerWithSummary } from "@/lib/services/venues";
 
 // Reads the current user's own venues via a cookie-scoped Supabase session
 // — must never be cached/shared across visitors like a static page would be.
@@ -38,7 +38,7 @@ const BENEFITS = [
 
 export default async function ListYourCourtPage() {
   const user = await getCurrentUser();
-  const venues = user ? await listVenuesByOwner(await createClient(), user.id) : [];
+  const venues = user ? await listVenuesByOwnerWithSummary(await createClient(), user.id) : [];
 
   return (
     <div>
@@ -99,9 +99,11 @@ export default async function ListYourCourtPage() {
         </div>
 
         {user ? (
-          <div className="mx-auto mt-12 flex max-w-2xl flex-col gap-8">
-            <OwnerVenueList venues={venues} />
-            <VenueForm mode="create" />
+          <div className="mx-auto mt-12 flex max-w-4xl flex-col gap-8">
+            <OwnerVenueGrid venues={venues} />
+            <div className="mx-auto w-full max-w-2xl">
+              <VenueForm mode="create" />
+            </div>
           </div>
         ) : (
           <div className="mt-12 rounded-2xl border border-dashed border-border bg-muted/40 p-6 text-center">

@@ -1,12 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createDraftVenue, updateVenue, setOperatingHours } from "@/lib/services/venues";
+import { createDraftVenue, updateVenue, deleteVenue, setOperatingHours } from "@/lib/services/venues";
 import { setVenueAmenities } from "@/lib/services/amenities";
 import {
   createVenueDraftSchema,
   updateVenueSchema,
   setVenueAmenitiesSchema,
+  deleteVenueSchema,
   type CreateVenueDraftValues,
   type UpdateVenueValues,
   type SetVenueAmenitiesValues,
@@ -87,6 +88,46 @@ export async function updateVenueAction(venueId: string, values: UpdateVenueValu
   } catch (error) {
     logServerError("venue.update", error);
     return { success: false, error: getFriendlyErrorMessage(error, "We couldn't save your venue.") };
+  }
+}
+
+/**
+ * Only succeeds for the caller's own draft venues — the existing
+ * `venues` DELETE RLS policy (owner_id = auth.uid() AND status =
+ * 'draft', or admin — see supabase/migrations/20260809000002_venues.sql)
+ * is the entire enforcement here, same posture as every other owner
+ * mutation in this file. A non-draft or not-owned venue simply matches
+ * zero rows, which `deleteVenue()`'s `.single()` turns into a thrown
+ * error, surfaced below as a specific, honest message rather than a
+ * generic one.
+ */
+export async function deleteVenueAction(venueId: string): Promise<ActionResult> {
+  const parsed = deleteVenueSchema.safeParse(venueId);
+  if (!parsed.success) {
+    return { success: false, error: "Please try again." };
+  }
+
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { success: false, error: "Your session has expired. Please sign in again." };
+  }
+
+  try {
+    await deleteVenue(supabase, parsed.data);
+    revalidatePath("/list-your-court");
+    return { success: true, data: undefined };
+  } catch (error) {
+    logServerError("venue.delete", error);
+    return {
+      success: false,
+      error: getFriendlyErrorMessage(error, "Only draft venues can be deleted — active venues can't be removed this way."),
+    };
   }
 }
 

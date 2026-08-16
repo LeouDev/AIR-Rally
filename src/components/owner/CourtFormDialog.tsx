@@ -17,13 +17,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ImageUploadManager } from "@/components/owner/ImageUploadManager";
 import { createCourtAction, updateCourtAction } from "@/lib/actions/court";
 import { createCourtSchema, type CreateCourtValues } from "@/lib/validations/court";
-import type { Court } from "@/lib/supabase/types";
+import type { Court, CourtImage } from "@/lib/supabase/types";
 
 type CourtFormDialogProps =
   | { venueId: string; mode: "create"; trigger: ReactNode }
-  | { venueId: string; mode: "edit"; court: Court; trigger: ReactNode };
+  | { venueId: string; mode: "edit"; court: Court; images: CourtImage[]; trigger: ReactNode };
 
 const COURT_STATUS_OPTIONS: { value: Court["status"]; label: string }[] = [
   { value: "active", label: "Active" },
@@ -155,6 +156,13 @@ export function CourtFormDialog(props: CourtFormDialogProps) {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">Only active courts are shown to players.</p>
+            </div>
+          )}
+
+          {isEdit && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Court photos</Label>
+              <ImageUploadManager venueId={props.venueId} courtId={props.court.id} images={props.images} />
             </div>
           )}
 

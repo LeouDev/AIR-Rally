@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { CourtFormDialog } from "@/components/owner/CourtFormDialog";
 import { setCourtStatusAction } from "@/lib/actions/court";
 import { cn } from "@/lib/utils";
-import type { Court, CourtStatus } from "@/lib/supabase/types";
+import type { Court, CourtStatus, CourtImage } from "@/lib/supabase/types";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
@@ -23,7 +23,7 @@ const STATUS_LABELS: Record<CourtStatus, string> = {
   maintenance: "Maintenance",
 };
 
-function CourtRow({ venueId, court }: { venueId: string; court: Court }) {
+function CourtRow({ venueId, court, images }: { venueId: string; court: Court; images: CourtImage[] }) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -65,6 +65,7 @@ function CourtRow({ venueId, court }: { venueId: string; court: Court }) {
           venueId={venueId}
           mode="edit"
           court={court}
+          images={images}
           trigger={
             <Button type="button" variant="ghost" size="icon" aria-label={`Edit ${court.name}`}>
               <Pencil className="size-4" />
@@ -76,7 +77,7 @@ function CourtRow({ venueId, court }: { venueId: string; court: Court }) {
   );
 }
 
-export function CourtsManager({ venueId, courts }: { venueId: string; courts: Court[] }) {
+export function CourtsManager({ venueId, courts, images }: { venueId: string; courts: Court[]; images: CourtImage[] }) {
   // Read `courts` directly rather than copying it into useState — every
   // add/edit/status-change flows through a server action + router.refresh(),
   // which re-fetches this prop from the server. Forking it into local state
@@ -109,7 +110,12 @@ export function CourtsManager({ venueId, courts }: { venueId: string; courts: Co
       ) : (
         <ul className="flex flex-col gap-3">
           {courts.map((court) => (
-            <CourtRow key={court.id} venueId={venueId} court={court} />
+            <CourtRow
+              key={court.id}
+              venueId={venueId}
+              court={court}
+              images={images.filter((image) => image.court_id === court.id)}
+            />
           ))}
         </ul>
       )}
