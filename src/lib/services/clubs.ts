@@ -72,6 +72,57 @@ export function clubMentionHandle(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, "");
 }
 
+/** A club mention resolved to something linkable. */
+export type ClubMentionTarget = { id: string; name: string };
+
+/**
+ * Plain object rather than a Map: this crosses the server→client
+ * component boundary, and a Map doesn't survive serialization.
+ */
+export type ClubMentionMap = Record<string, ClubMentionTarget>;
+
+/** Every "@handle" token in a block of post text, deduped. */
+export function extractMentionHandles(text: string): string[] {
+  return Array.from(new Set(Array.from(text.matchAll(/@([a-zA-Z0-9_]+)/g), (m) => m[1])));
+}
+
+/**
+ * Resolves mention tokens to clubs in one batched query, matching against
+ * the `mention_handle` generated column (see
+ * 20260810000031_club_mention_handle.sql).
+ *
+ * Unresolvable tokens are simply absent from the result — a person's
+ * mention, a typo, or a private club the viewer can't see all fall
+ * through to plain highlighted text rather than a broken link. RLS does
+ * the visibility half; this function does not filter for it.
+ *
+ * Where two clubs collapse to the same handle, the one with more members
+ * wins, since ordering ascending and overwriting leaves the largest last.
+ */
+export async function resolveClubMentions(supabase: Client, handles: string[]): Promise<ClubMentionMap> {
+  if (handles.length === 0) return {};
+
+  const { data, error } = await supabase
+    .from("clubs")
+    .select("id, name, mention_handle, member_count")
+    .eq("status", "active")
+    .in("mention_handle", handles)
+    .order("member_count", { ascending: true });
+  if (error) throw error;
+
+  const map: ClubMentionMap = {};
+  for (const club of data ?? []) {
+    if (club.mention_handle) map[club.mention_handle] = { id: club.id, name: club.name };
+  }
+  return map;
+}
+
+/** Convenience: pull every mention out of a batch of posts and resolve them at once. */
+export async function resolveClubMentionsForPosts(supabase: Client, contents: string[]): Promise<ClubMentionMap> {
+  const handles = Array.from(new Set(contents.flatMap(extractMentionHandles)));
+  return resolveClubMentions(supabase, handles);
+}
+
 /** Every club the given user belongs to, whatever their role. */
 export async function listClubsForUser(supabase: Client, userId: string): Promise<Club[]> {
   const { data: memberships, error: membershipsError } = await supabase

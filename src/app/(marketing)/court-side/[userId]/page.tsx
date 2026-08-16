@@ -7,8 +7,9 @@ import { UserRallyProfile } from "@/components/court-side/UserRallyProfile";
 import { getCurrentUserWithProfile } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getPublicProfile } from "@/lib/services/profiles";
-import { listPostsByUser, listLikedPostIds } from "@/lib/services/posts";
+import { listPostsByUser, listLikedPostIds, listResharedPostIds } from "@/lib/services/posts";
 import { listFollowingIds, getFollowCounts } from "@/lib/services/follows";
+import { resolveClubMentionsForPosts } from "@/lib/services/clubs";
 
 // Renders per-viewer data (own like/follow state via a cookie-scoped
 // Supabase session) for whichever profile the URL names — never cached
@@ -62,9 +63,11 @@ export default async function UserRallyProfilePage({ params }: PageProps) {
   ]);
 
   const postIds = posts.map((p) => p.id);
-  const [likedPostIds, viewerFollowsThisUser] = await Promise.all([
+  const [likedPostIds, resharedPostIds, viewerFollowsThisUser, clubMentions] = await Promise.all([
     listLikedPostIds(supabase, session.user.id, postIds),
+    listResharedPostIds(supabase, session.user.id, postIds),
     listFollowingIds(supabase, session.user.id, [userId]),
+    resolveClubMentionsForPosts(supabase, posts.map((p) => p.content)),
   ]);
 
   return (
@@ -79,6 +82,8 @@ export default async function UserRallyProfilePage({ params }: PageProps) {
         initialPosts={posts}
         initialNextCursor={nextCursor}
         initialLikedPostIds={likedPostIds}
+        initialResharedPostIds={resharedPostIds}
+        clubMentions={clubMentions}
       />
     </div>
   );

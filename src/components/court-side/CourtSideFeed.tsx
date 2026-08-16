@@ -11,11 +11,11 @@ import { PostCard, initialsFrom } from "@/components/court-side/PostCard";
 import { FollowListDialog } from "@/components/court-side/FollowListDialog";
 import { ShareDialog } from "@/components/court-side/ShareDialog";
 import { createClient } from "@/lib/supabase/client";
-import { listFeedPosts, listLikedPostIds, type PostWithAuthor } from "@/lib/services/posts";
+import { listFeedPosts, listLikedPostIds, listResharedPostIds, type PostWithAuthor } from "@/lib/services/posts";
 import { searchPublicProfiles } from "@/lib/services/profiles";
-import { searchClubs, clubMentionHandle } from "@/lib/services/clubs";
+import { searchClubs, clubMentionHandle, type ClubMentionMap } from "@/lib/services/clubs";
 import { CourtSideSearch } from "@/components/court-side/CourtSideSearch";
-import { createPostAction, deletePostAction, toggleLikeAction } from "@/lib/actions/posts";
+import { createPostAction, deletePostAction, toggleLikeAction, toggleReshareAction } from "@/lib/actions/posts";
 import { toggleFollowAction } from "@/lib/actions/follows";
 import { listFollowerProfiles, listFollowingProfiles } from "@/lib/services/follows";
 import { toggleEventJoinAction } from "@/lib/actions/events";
@@ -54,6 +54,9 @@ type CourtSideFeedProps = {
   initialAttendingEventIds: string[];
   initialFollowerCount: number;
   initialFollowingCount: number;
+  initialResharedPostIds: string[];
+  /** Club mentions resolved server-side so "@ClubName" renders as a link. */
+  clubMentions: ClubMentionMap;
 };
 
 /**
@@ -75,12 +78,18 @@ export function CourtSideFeed({
   initialAttendingEventIds,
   initialFollowerCount,
   initialFollowingCount,
+  initialResharedPostIds,
+  clubMentions,
 }: CourtSideFeedProps) {
   const [activeTab, setActiveTab] = useState<(typeof FEED_TABS)[number]>("For you");
   const [posts, setPosts] = useState<PostWithAuthor[]>(initialPosts);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [loadingMore, setLoadingMore] = useState(false);
   const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set(initialLikedPostIds));
+  const [resharedPostIds, setResharedPostIds] = useState<Set<string>>(new Set(initialResharedPostIds));
+  // Ids of people actually chosen from the "@" picker. Only these get a
+  // mention notification — a hand-typed "@Lea" can't identify which Lea.
+  const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set(initialFollowingIds));
   const [expandedPostIds, setExpandedPostIds] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState("");
@@ -144,8 +153,38 @@ export function CourtSideFeed({
         ? clubMentionHandle(suggestion.name)
         : suggestion.name.trim().split(/\s+/)[0].replace(/[^a-zA-Z0-9_]/g, "");
     setDraft((current) => current.replace(/@[a-zA-Z0-9_]*$/, `@${handle} `));
+    if (suggestion.kind === "person") {
+      setMentionedUserIds((current) => (current.includes(suggestion.id) ? current : [...current, suggestion.id]));
+    }
     setTagQuery(null);
     setTagResults([]);
+  }
+
+  async function toggleReshare(postId: string) {
+    const wasReshared = resharedPostIds.has(postId);
+    setResharedPostIds((current) => {
+      const next = new Set(current);
+      if (wasReshared) next.delete(postId);
+      else next.add(postId);
+      return next;
+    });
+    setPosts((current) =>
+      current.map((p) => (p.id === postId ? { ...p, reshare_count: p.reshare_count + (wasReshared ? -1 : 1) } : p))
+    );
+
+    const result = await toggleReshareAction(postId, wasReshared);
+    if (!result.success) {
+      setResharedPostIds((current) => {
+        const next = new Set(current);
+        if (wasReshared) next.add(postId);
+        else next.delete(postId);
+        return next;
+      });
+      setPosts((current) =>
+        current.map((p) => (p.id === postId ? { ...p, reshare_count: p.reshare_count + (wasReshared ? 1 : -1) } : p))
+      );
+      toast.error(result.error);
+    }
   }
 
   // Debounced real search across both registered users and clubs, so an
@@ -188,7 +227,7 @@ export function CourtSideFeed({
   async function handlePost() {
     if (!draft.trim() || isPosting) return;
     setIsPosting(true);
-    const result = await createPostAction({ content: draft.trim() });
+    const result = await createPostAction({ content: draft.trim() }, mentionedUserIds);
     setIsPosting(false);
     if (!result.success) {
       toast.error(result.error);
@@ -200,6 +239,7 @@ export function CourtSideFeed({
     ]);
     setDraft("");
     setTagQuery(null);
+    setMentionedUserIds([]);
     toast.success("Your rally is live.");
   }
 
@@ -309,13 +349,14 @@ export function CourtSideFeed({
     try {
       const supabase = createClient();
       const { posts: morePosts, nextCursor: newCursor } = await listFeedPosts(supabase, { cursor: nextCursor });
-      const moreLikedIds = await listLikedPostIds(
-        supabase,
-        currentUserId,
-        morePosts.map((p) => p.id)
-      );
+      const morePostIds = morePosts.map((p) => p.id);
+      const [moreLikedIds, moreResharedIds] = await Promise.all([
+        listLikedPostIds(supabase, currentUserId, morePostIds),
+        listResharedPostIds(supabase, currentUserId, morePostIds),
+      ]);
       setPosts((current) => [...current, ...morePosts]);
       setLikedPostIds((current) => new Set([...current, ...moreLikedIds]));
+      setResharedPostIds((current) => new Set([...current, ...moreResharedIds]));
       setNextCursor(newCursor);
     } catch {
       toast.error("We couldn't load more posts.");
@@ -489,6 +530,9 @@ export function CourtSideFeed({
                 onDeleteOwnPost={handleDeleteOwnPost}
                 onShare={() => setShareOpen(true)}
                 onCommentCountChange={handleCommentCountChange}
+                clubMentions={clubMentions}
+                reshared={resharedPostIds.has(post.id)}
+                onToggleReshare={toggleReshare}
               />
             ))}
           </div>

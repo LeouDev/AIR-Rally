@@ -66,6 +66,7 @@ describe("createPostAction", () => {
       image_url: null,
       like_count: 0,
       comment_count: 0,
+      reshare_count: 0,
       created_at: "now",
       updated_at: "now",
     });

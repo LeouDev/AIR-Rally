@@ -9,6 +9,9 @@ import {
   listCommentsForPost,
   createComment,
   deleteComment,
+  resharePost,
+  unresharePost,
+  recordPostMentions,
 } from "@/lib/services/posts";
 import { createTableMockSupabase, createMockSupabase, postgrestError } from "@/lib/test-helpers/mockSupabase";
 import type { Post, PostComment, PublicProfile } from "@/lib/supabase/types";
@@ -22,6 +25,7 @@ const POST_ROW: Post = {
   image_url: null,
   like_count: 3,
   comment_count: 1,
+  reshare_count: 0,
   created_at: "2026-08-12T00:00:00Z",
   updated_at: "2026-08-12T00:00:00Z",
 };
@@ -126,5 +130,49 @@ describe("comments", () => {
   it("deleteComment relies on RLS — a mismatched id is a silent no-op", async () => {
     const supabase = createMockSupabase({ data: null, error: null });
     await expect(deleteComment(supabase, "comment-1")).resolves.toBeUndefined();
+  });
+});
+
+describe("resharePost / unresharePost", () => {
+  it("is idempotent — resharing twice does not throw", async () => {
+    const supabase = createMockSupabase({ data: null, error: postgrestError("23505") });
+    await expect(resharePost(supabase, "user-1", "post-1")).resolves.toBeUndefined();
+  });
+
+  it("propagates a genuine, unrelated database error", async () => {
+    const supabase = createMockSupabase({ data: null, error: postgrestError("42501", "denied") });
+    await expect(resharePost(supabase, "user-1", "post-1")).rejects.toBeTruthy();
+  });
+
+  it("undoing a reshare is a plain delete", async () => {
+    const supabase = createMockSupabase({ data: null, error: null });
+    await expect(unresharePost(supabase, "user-1", "post-1")).resolves.toBeUndefined();
+  });
+});
+
+describe("recordPostMentions", () => {
+  it("does nothing at all when there are no mentions", async () => {
+    const supabase = createMockSupabase({ data: null, error: null });
+    await recordPostMentions(supabase, "post-1", "user-1", []);
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  // Being notified that you mentioned yourself is noise.
+  it("drops a self-mention, and skips the write when that leaves nothing", async () => {
+    const supabase = createMockSupabase({ data: null, error: null });
+    await recordPostMentions(supabase, "post-1", "user-1", ["user-1"]);
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it("dedupes repeated mentions of the same person into one row", async () => {
+    const supabase = createMockSupabase({ data: null, error: null });
+    await recordPostMentions(supabase, "post-1", "user-1", ["user-2", "user-2", "user-3"]);
+
+    const fromMock = supabase.from as jest.Mock;
+    const builder = fromMock.mock.results[0].value as { insert: jest.Mock };
+    expect(builder.insert).toHaveBeenCalledWith([
+      { post_id: "post-1", user_id: "user-2" },
+      { post_id: "post-1", user_id: "user-3" },
+    ]);
   });
 });

@@ -101,6 +101,45 @@ export async function listLikedPostIds(supabase: Client, userId: string, postIds
   return data.map((row) => row.post_id);
 }
 
+/** Idempotent — resharing something already reshared is a no-op, not an error. */
+export async function resharePost(supabase: Client, userId: string, postId: string): Promise<void> {
+  const { error } = await supabase.from("post_reshares").insert({ post_id: postId, user_id: userId });
+  if (error && !isUniqueViolation(error)) throw error;
+}
+
+/** Idempotent — undoing a reshare that isn't there is a no-op, not an error. */
+export async function unresharePost(supabase: Client, userId: string, postId: string): Promise<void> {
+  const { error } = await supabase.from("post_reshares").delete().eq("post_id", postId).eq("user_id", userId);
+  if (error) throw error;
+}
+
+/** Batched, same shape as listLikedPostIds. */
+export async function listResharedPostIds(supabase: Client, userId: string, postIds: string[]): Promise<string[]> {
+  if (postIds.length === 0) return [];
+  const { data, error } = await supabase.from("post_reshares").select("post_id").eq("user_id", userId).in("post_id", postIds);
+  if (error) throw error;
+  return (data ?? []).map((row) => row.post_id);
+}
+
+/**
+ * Records who a post tagged, which is what makes a mention notifiable.
+ * Ids come from the composer's picker rather than re-parsing the text,
+ * because "@Lea" doesn't identify a person — two players can share a
+ * first name. Self-mentions are dropped here as well as in the trigger.
+ *
+ * Best-effort: a failure to record mentions must not lose the post that
+ * was already created, so the caller logs and moves on.
+ */
+export async function recordPostMentions(supabase: Client, postId: string, authorId: string, userIds: string[]): Promise<void> {
+  const targets = Array.from(new Set(userIds)).filter((id) => id !== authorId);
+  if (targets.length === 0) return;
+
+  const { error } = await supabase
+    .from("post_mentions")
+    .insert(targets.map((userId) => ({ post_id: postId, user_id: userId })));
+  if (error && !isUniqueViolation(error)) throw error;
+}
+
 export async function listCommentsForPost(supabase: Client, postId: string): Promise<PostCommentWithAuthor[]> {
   const { data, error } = await supabase
     .from("post_comments")

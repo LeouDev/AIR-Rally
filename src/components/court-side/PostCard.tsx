@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { MessageCircle, Repeat2, Heart, Share2, Trash2 } from "lucide-react";
-import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { PostComments } from "@/components/court-side/PostComments";
 import { AdminDeletePostButton } from "@/components/admin/AdminDeletePostButton";
 import type { PostWithAuthor } from "@/lib/services/posts";
+import type { ClubMentionMap } from "@/lib/services/clubs";
 import { cn } from "@/lib/utils";
 
 export function initialsFrom(name: string) {
@@ -19,17 +19,37 @@ export function initialsFrom(name: string) {
     .join("");
 }
 
-export function highlightMentions(text: string) {
+/**
+ * Renders post text with mentions picked out. A mention that resolves to
+ * a club the viewer can see becomes a link to it; everything else — a
+ * person, a typo, a private club — stays highlighted plain text, so an
+ * unresolvable mention degrades instead of producing a dead link.
+ */
+export function highlightMentions(text: string, clubMentions: ClubMentionMap = {}) {
   const parts = text.split(/(@[a-zA-Z0-9_]+)/g);
-  return parts.map((part, i) =>
-    part.startsWith("@") ? (
+  return parts.map((part, i) => {
+    if (!part.startsWith("@")) return <span key={i}>{part}</span>;
+
+    const club = clubMentions[part.slice(1)];
+    if (club) {
+      return (
+        <Link
+          key={i}
+          href={`/clubs/${club.id}`}
+          title={club.name}
+          className="font-semibold text-primary hover:underline"
+        >
+          {part}
+        </Link>
+      );
+    }
+
+    return (
       <strong key={i} className="font-semibold text-primary">
         {part}
       </strong>
-    ) : (
-      <span key={i}>{part}</span>
-    )
-  );
+    );
+  });
 }
 
 type PostCardProps = {
@@ -45,6 +65,10 @@ type PostCardProps = {
   onDeleteOwnPost: (postId: string) => void;
   onShare: () => void;
   onCommentCountChange: (postId: string, delta: number) => void;
+  /** Resolved club mentions, so "@ClubName" in the body can link through. */
+  clubMentions?: ClubMentionMap;
+  reshared: boolean;
+  onToggleReshare: (postId: string) => void;
 };
 
 /**
@@ -66,6 +90,9 @@ export function PostCard({
   onDeleteOwnPost,
   onShare,
   onCommentCountChange,
+  clubMentions,
+  reshared,
+  onToggleReshare,
 }: PostCardProps) {
   const authorName = post.author?.display_name || "Player";
   const isOwnPost = post.user_id === currentUserId;
@@ -113,7 +140,7 @@ export function PostCard({
         {!isOwnPost && isAdmin && <AdminDeletePostButton postId={post.id} />}
       </div>
 
-      <p className="mt-3 text-sm leading-relaxed text-foreground">{highlightMentions(post.content)}</p>
+      <p className="mt-3 text-sm leading-relaxed text-foreground">{highlightMentions(post.content, clubMentions)}</p>
 
       <div className="mt-3 flex items-center gap-5 border-t border-border pt-3">
         <button
@@ -126,10 +153,15 @@ export function PostCard({
         </button>
         <button
           type="button"
-          onClick={() => toast("Reshare is coming soon.")}
-          className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+          onClick={() => onToggleReshare(post.id)}
+          aria-pressed={reshared}
+          className={cn(
+            "flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground",
+            reshared && "text-success"
+          )}
         >
           <Repeat2 className="size-4" aria-hidden="true" />
+          {post.reshare_count}
         </button>
         <button
           type="button"

@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { CourtSideFeed } from "@/components/court-side/CourtSideFeed";
 import { getCurrentUserWithProfile } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { listFeedPosts, listLikedPostIds } from "@/lib/services/posts";
+import { listFeedPosts, listLikedPostIds, listResharedPostIds } from "@/lib/services/posts";
 import { listUpcomingEvents, listAttendingEventIds } from "@/lib/services/events";
 import { listFollowingIds, getFollowCounts } from "@/lib/services/follows";
+import { resolveClubMentionsForPosts } from "@/lib/services/clubs";
 
 export const metadata = { title: "COURT/Side" };
 // Renders per-user data (own profile, own like/follow/RSVP state via a
@@ -47,11 +48,16 @@ export default async function CourtSidePage() {
   const eventIds = events.map((e) => e.id);
   const authorIds = Array.from(new Set(posts.map((p) => p.user_id)));
 
-  const [likedPostIds, followingIds, attendingEventIds, followCounts] = await Promise.all([
+  const [likedPostIds, resharedPostIds, followingIds, attendingEventIds, followCounts, clubMentions] = await Promise.all([
     listLikedPostIds(supabase, session.user.id, postIds),
+    listResharedPostIds(supabase, session.user.id, postIds),
     listFollowingIds(supabase, session.user.id, authorIds),
     listAttendingEventIds(supabase, session.user.id, eventIds),
     getFollowCounts(supabase, session.user.id),
+    resolveClubMentionsForPosts(
+      supabase,
+      posts.map((p) => p.content)
+    ),
   ]);
 
   return (
@@ -69,6 +75,8 @@ export default async function CourtSidePage() {
         initialAttendingEventIds={attendingEventIds}
         initialFollowerCount={followCounts.followers}
         initialFollowingCount={followCounts.following}
+        initialResharedPostIds={resharedPostIds}
+        clubMentions={clubMentions}
       />
     </div>
   );

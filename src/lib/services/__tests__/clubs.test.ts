@@ -12,6 +12,8 @@ import {
   setClubMemberRole,
   searchClubs,
   clubMentionHandle,
+  extractMentionHandles,
+  resolveClubMentions,
 } from "../clubs";
 import { createMockSupabase, createTableMockSupabase, postgrestError } from "../../test-helpers/mockSupabase";
 import type { Club, PublicProfile } from "@/lib/supabase/types";
@@ -28,6 +30,7 @@ const CLUB: Club = {
   visibility: "public",
   status: "active",
   member_count: 3,
+  mention_handle: "CebuWeekendPicklers",
   created_at: "2026-08-12T00:00:00Z",
   updated_at: "2026-08-12T00:00:00Z",
 };
@@ -235,5 +238,55 @@ describe("approveClubMember / setClubMemberRole", () => {
     const fromMock = supabase.from as jest.Mock;
     const builder = fromMock.mock.results[0].value as { update: jest.Mock };
     expect(builder.update).toHaveBeenCalledWith({ role: "admin" });
+  });
+});
+
+describe("extractMentionHandles", () => {
+  it("pulls every distinct @token out of post text", () => {
+    expect(extractMentionHandles("hey @Lea and @CebuWeekendPicklers and @Lea again")).toEqual([
+      "Lea",
+      "CebuWeekendPicklers",
+    ]);
+  });
+
+  it("returns nothing for text with no mentions", () => {
+    expect(extractMentionHandles("great game today")).toEqual([]);
+  });
+});
+
+describe("resolveClubMentions", () => {
+  it("returns an empty map without querying when there are no handles", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await expect(resolveClubMentions(supabase, [])).resolves.toEqual({});
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it("maps each handle to its club, keyed by the generated mention_handle", async () => {
+    const supabase = createMockSupabase({
+      data: [{ id: "club-1", name: "Cebu Weekend Picklers", mention_handle: "CebuWeekendPicklers", member_count: 3 }],
+      error: null,
+    });
+    await expect(resolveClubMentions(supabase, ["CebuWeekendPicklers"])).resolves.toEqual({
+      CebuWeekendPicklers: { id: "club-1", name: "Cebu Weekend Picklers" },
+    });
+  });
+
+  // Two clubs can legitimately collapse to the same handle. Ascending
+  // member_count means the largest is written last and therefore wins.
+  it("prefers the larger club when two names collapse to the same handle", async () => {
+    const supabase = createMockSupabase({
+      data: [
+        { id: "small", name: "Court-9", mention_handle: "Court9", member_count: 2 },
+        { id: "big", name: "Court 9", mention_handle: "Court9", member_count: 50 },
+      ],
+      error: null,
+    });
+    const map = await resolveClubMentions(supabase, ["Court9"]);
+    expect(map.Court9.id).toBe("big");
+  });
+
+  it("omits handles that match no club, so they stay plain text", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await expect(resolveClubMentions(supabase, ["NotAClub"])).resolves.toEqual({});
   });
 });

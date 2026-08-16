@@ -1,13 +1,31 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createPost, deletePost, likePost, unlikePost, createComment, deleteComment } from "@/lib/services/posts";
+import {
+  createPost,
+  deletePost,
+  likePost,
+  unlikePost,
+  resharePost,
+  unresharePost,
+  recordPostMentions,
+  createComment,
+  deleteComment,
+} from "@/lib/services/posts";
 import { createPostSchema, createCommentSchema, type CreatePostValues, type CreateCommentValues } from "@/lib/validations/post";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import { getServerClient, type ActionResult } from "@/lib/actions/auth";
 import type { Post, PostComment } from "@/lib/supabase/types";
 
-export async function createPostAction(values: CreatePostValues): Promise<ActionResult<Post>> {
+/**
+ * Publishes a post. `mentionedUserIds` comes from the composer's picker,
+ * not from re-parsing the text — "@Lea" alone can't identify which Lea,
+ * so only mentions actually chosen from the list notify anyone.
+ */
+export async function createPostAction(
+  values: CreatePostValues,
+  mentionedUserIds: string[] = []
+): Promise<ActionResult<Post>> {
   const parsed = createPostSchema.safeParse(values);
   if (!parsed.success) {
     return { success: false, error: "Please fix the errors below and try again." };
@@ -26,6 +44,17 @@ export async function createPostAction(values: CreatePostValues): Promise<Action
 
   try {
     const post = await createPost(supabase, user.id, parsed.data.content, parsed.data.imageUrl);
+
+    // Best-effort: the post is already published, so a mention-recording
+    // failure is logged rather than surfaced as a failed post.
+    if (mentionedUserIds.length > 0) {
+      try {
+        await recordPostMentions(supabase, post.id, user.id, mentionedUserIds);
+      } catch (mentionError) {
+        logServerError("posts.recordMentions", mentionError);
+      }
+    }
+
     revalidatePath("/court-side");
     return { success: true, data: post };
   } catch (error) {
@@ -125,5 +154,35 @@ export async function deleteCommentAction(commentId: string): Promise<ActionResu
   } catch (error) {
     logServerError("posts.deleteComment", error);
     return { success: false, error: getFriendlyErrorMessage(error, "We couldn't remove that comment.") };
+  }
+}
+
+/**
+ * Reshare toggle. Mirrors toggleLikeAction — insert to reshare, delete to
+ * undo, with the notify_on_post_reshare() trigger telling the original
+ * author (never on a self-reshare).
+ */
+export async function toggleReshareAction(postId: string, currentlyReshared: boolean): Promise<ActionResult<{ reshared: boolean }>> {
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { success: false, error: "Sign in to reshare posts." };
+  }
+
+  try {
+    if (currentlyReshared) {
+      await unresharePost(supabase, user.id, postId);
+    } else {
+      await resharePost(supabase, user.id, postId);
+    }
+    return { success: true, data: { reshared: !currentlyReshared } };
+  } catch (error) {
+    logServerError("posts.toggleReshare", error);
+    return { success: false, error: getFriendlyErrorMessage(error, "We couldn't update that.") };
   }
 }

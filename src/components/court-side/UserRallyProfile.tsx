@@ -8,11 +8,12 @@ import { PostCard, initialsFrom } from "@/components/court-side/PostCard";
 import { FollowListDialog } from "@/components/court-side/FollowListDialog";
 import { ShareDialog } from "@/components/court-side/ShareDialog";
 import { createClient } from "@/lib/supabase/client";
-import { listPostsByUser, type PostWithAuthor } from "@/lib/services/posts";
-import { deletePostAction, toggleLikeAction } from "@/lib/actions/posts";
+import { listPostsByUser, listResharedPostIds, type PostWithAuthor } from "@/lib/services/posts";
+import { deletePostAction, toggleLikeAction, toggleReshareAction } from "@/lib/actions/posts";
 import { toggleFollowAction } from "@/lib/actions/follows";
 import { listFollowerProfiles, listFollowingProfiles } from "@/lib/services/follows";
 import type { PublicProfile } from "@/lib/supabase/types";
+import type { ClubMentionMap } from "@/lib/services/clubs";
 
 type UserRallyProfileProps = {
   viewerId: string;
@@ -24,6 +25,8 @@ type UserRallyProfileProps = {
   initialPosts: PostWithAuthor[];
   initialNextCursor: string | null;
   initialLikedPostIds: string[];
+  initialResharedPostIds: string[];
+  clubMentions: ClubMentionMap;
 };
 
 /**
@@ -42,6 +45,8 @@ export function UserRallyProfile({
   initialPosts,
   initialNextCursor,
   initialLikedPostIds,
+  initialResharedPostIds,
+  clubMentions,
 }: UserRallyProfileProps) {
   const isOwnProfile = profile.id === viewerId;
   const displayName = profile.display_name || "Player";
@@ -50,6 +55,7 @@ export function UserRallyProfile({
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [loadingMore, setLoadingMore] = useState(false);
   const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set(initialLikedPostIds));
+  const [resharedPostIds, setResharedPostIds] = useState<Set<string>>(new Set(initialResharedPostIds));
   const [expandedPostIds, setExpandedPostIds] = useState<Set<string>>(new Set());
   const [isFollowing, setIsFollowing] = useState(initialIsFollowing);
   const [followerCount, setFollowerCount] = useState(initialFollowerCount);
@@ -120,6 +126,33 @@ export function UserRallyProfile({
     }
   }
 
+  async function toggleReshare(postId: string) {
+    const wasReshared = resharedPostIds.has(postId);
+    setResharedPostIds((current) => {
+      const next = new Set(current);
+      if (wasReshared) next.delete(postId);
+      else next.add(postId);
+      return next;
+    });
+    setPosts((current) =>
+      current.map((p) => (p.id === postId ? { ...p, reshare_count: p.reshare_count + (wasReshared ? -1 : 1) } : p))
+    );
+
+    const result = await toggleReshareAction(postId, wasReshared);
+    if (!result.success) {
+      setResharedPostIds((current) => {
+        const next = new Set(current);
+        if (wasReshared) next.add(postId);
+        else next.delete(postId);
+        return next;
+      });
+      setPosts((current) =>
+        current.map((p) => (p.id === postId ? { ...p, reshare_count: p.reshare_count + (wasReshared ? 1 : -1) } : p))
+      );
+      toast.error(result.error);
+    }
+  }
+
   async function handleDeleteOwnPost(postId: string) {
     const previous = posts;
     setPosts((current) => current.filter((p) => p.id !== postId));
@@ -149,7 +182,13 @@ export function UserRallyProfile({
     try {
       const supabase = createClient();
       const { posts: morePosts, nextCursor: newCursor } = await listPostsByUser(supabase, profile.id, { cursor: nextCursor });
+      const moreResharedIds = await listResharedPostIds(
+        supabase,
+        viewerId,
+        morePosts.map((p) => p.id)
+      );
       setPosts((current) => [...current, ...morePosts]);
+      setResharedPostIds((current) => new Set([...current, ...moreResharedIds]));
       setNextCursor(newCursor);
     } catch {
       toast.error("We couldn't load more posts.");
@@ -206,6 +245,9 @@ export function UserRallyProfile({
               onDeleteOwnPost={handleDeleteOwnPost}
               onShare={() => setShareOpen(true)}
               onCommentCountChange={handleCommentCountChange}
+              clubMentions={clubMentions}
+              reshared={resharedPostIds.has(post.id)}
+              onToggleReshare={toggleReshare}
             />
           ))
         )}

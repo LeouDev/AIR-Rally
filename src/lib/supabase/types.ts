@@ -230,8 +230,23 @@ export type Post = {
   image_url: string | null;
   like_count: number;
   comment_count: number;
+  /** Trigger-maintained, same as like_count. */
+  reshare_count: number;
   created_at: string;
   updated_at: string;
+};
+
+export type PostReshare = {
+  post_id: string;
+  user_id: string;
+  created_at: string;
+};
+
+/** Who a post tagged, recorded from the composer's picker at post time. */
+export type PostMention = {
+  post_id: string;
+  user_id: string;
+  created_at: string;
 };
 
 export type PostLike = {
@@ -273,6 +288,12 @@ export type Club = {
   status: "active" | "suspended";
   /** Denormalized, trigger-maintained (active members only) — never client-writable. */
   member_count: number;
+  /**
+   * Generated column: `name` with non-alphanumerics stripped, so a post's
+   * "@CebuWeekendPicklers" can be matched back to this club. Derived by
+   * Postgres, never written by the app.
+   */
+  mention_handle: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -640,8 +661,11 @@ export type Database = {
       >;
       posts: TableDef<
         Post,
-        Pick<Post, "user_id" | "content"> & Partial<Omit<Post, "id" | "user_id" | "content" | "like_count" | "comment_count" | "created_at" | "updated_at">>
+        Pick<Post, "user_id" | "content"> &
+          Partial<Omit<Post, "id" | "user_id" | "content" | "like_count" | "comment_count" | "reshare_count" | "created_at" | "updated_at">>
       >;
+      post_reshares: TableDef<PostReshare, Pick<PostReshare, "post_id" | "user_id">>;
+      post_mentions: TableDef<PostMention, Pick<PostMention, "post_id" | "user_id">>;
       post_likes: TableDef<PostLike, Pick<PostLike, "post_id" | "user_id">>;
       post_comments: TableDef<
         PostComment,
@@ -660,7 +684,7 @@ export type Database = {
       clubs: TableDef<
         Club,
         Pick<Club, "owner_id" | "name"> &
-          Partial<Omit<Club, "id" | "owner_id" | "name" | "member_count" | "created_at" | "updated_at">>
+          Partial<Omit<Club, "id" | "owner_id" | "name" | "member_count" | "mention_handle" | "created_at" | "updated_at">>
       >;
       club_members: TableDef<
         ClubMember,
