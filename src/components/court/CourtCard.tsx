@@ -1,10 +1,10 @@
 import Link from "next/link";
-import Image from "next/image";
 import { MapPin, Sun, Home, Layers } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Rating } from "@/components/court/Rating";
 import { FavoriteButton } from "@/components/court/FavoriteButton";
-import { CourtSurface, deterministicSurfaceColor } from "@/components/court/CourtSurface";
+import { CourtCardGallery } from "@/components/court/CourtCardGallery";
+import { deterministicSurfaceColor } from "@/components/court/CourtSurface";
 import { cn } from "@/lib/utils";
 import type { IndoorOutdoor } from "@/lib/supabase/types";
 
@@ -28,7 +28,7 @@ export type VenueCardData = {
   activeCourtCount: number;
   /** Already-resolved public URL, or null/undefined to fall back to the illustration. */
   coverImageUrl?: string | null;
-  /** Up to a few active courts' own photos (or null per-court to fall back to an illustration swatch) — a peek at the actual courts, distinct from the one venue-level cover photo. */
+  /** Up to a few active courts' own photos (null per-court when that court has none). Merged with coverImageUrl into one swipeable gallery — see the imageUrl-filtering in CourtCard itself. */
   courtThumbnails?: { id: string; imageUrl: string | null; surfaceType: string | null }[];
   /** Computed purely from operating hours, no booking lookups — see computeOpenStatus(). */
   openStatus?: { isOpenNow: boolean; label: string };
@@ -43,6 +43,20 @@ export function CourtCard({ venue, isFavorited = false }: CourtCardProps) {
   const isIndoor = venue.indoorOutdoor === "indoor";
   const isOutdoor = venue.indoorOutdoor === "outdoor";
 
+  // Cover photo first, then each court's own photo — one swipeable
+  // gallery instead of a cover photo plus a separate thumbnail strip.
+  // Only real uploaded photos go in; a court with no photo just isn't a
+  // slide (no illustrated swatch mixed in with real photography).
+  const galleryImages: { url: string; alt: string }[] = [];
+  if (venue.coverImageUrl) {
+    galleryImages.push({ url: venue.coverImageUrl, alt: venue.name });
+  }
+  for (const court of venue.courtThumbnails ?? []) {
+    if (court.imageUrl && !galleryImages.some((image) => image.url === court.imageUrl)) {
+      galleryImages.push({ url: court.imageUrl, alt: venue.name });
+    }
+  }
+
   return (
     <Link
       href={`/courts/${venue.id}`}
@@ -50,17 +64,7 @@ export function CourtCard({ venue, isFavorited = false }: CourtCardProps) {
     >
       <div className="relative aspect-[4/3] w-full overflow-hidden">
         <div className="relative size-full transition-transform duration-300 group-hover:scale-105">
-          {venue.coverImageUrl ? (
-            <Image
-              src={venue.coverImageUrl}
-              alt={venue.name}
-              fill
-              sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 100vw"
-              className="object-cover"
-            />
-          ) : (
-            <CourtSurface surfaceColor={deterministicSurfaceColor(venue.id)} indoor={isIndoor} />
-          )}
+          <CourtCardGallery images={galleryImages} fallbackSurfaceColor={deterministicSurfaceColor(venue.id)} indoor={isIndoor} />
         </div>
         <div className="absolute top-3 left-3">
           <Badge variant="secondary" className="gap-1 bg-background/90 text-foreground backdrop-blur">
@@ -94,22 +98,6 @@ export function CourtCard({ venue, isFavorited = false }: CourtCardProps) {
             />
             {venue.openStatus.label}
           </p>
-        )}
-        {venue.courtThumbnails && venue.courtThumbnails.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            {venue.courtThumbnails.map((court) => (
-              <div key={court.id} className="relative size-7 shrink-0 overflow-hidden rounded-md ring-1 ring-border">
-                {court.imageUrl ? (
-                  <Image src={court.imageUrl} alt="" fill sizes="28px" className="object-cover" />
-                ) : (
-                  <CourtSurface surfaceColor={deterministicSurfaceColor(court.id)} indoor={isIndoor} />
-                )}
-              </div>
-            ))}
-            {venue.activeCourtCount > venue.courtThumbnails.length && (
-              <span className="text-xs text-muted-foreground">+{venue.activeCourtCount - venue.courtThumbnails.length}</span>
-            )}
-          </div>
         )}
         <div className="mt-auto flex items-center justify-between pt-2">
           <p className="text-sm text-muted-foreground">

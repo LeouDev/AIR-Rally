@@ -75,7 +75,14 @@ export function PhotoCarousel({
           <button
             type="button"
             aria-label="Previous photo"
-            onClick={() => go(activeIndex - 1)}
+            onClick={(e) => {
+              // Stops a click here from bubbling to an ancestor <Link> —
+              // e.g. CourtCard wraps this carousel in a link to the court
+              // page, and paging photos must never trigger navigation.
+              e.preventDefault();
+              e.stopPropagation();
+              go(activeIndex - 1);
+            }}
             className="absolute left-3 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-background/80 text-foreground shadow-sm transition-opacity hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <ChevronLeft className="size-4" aria-hidden="true" />
@@ -83,7 +90,11 @@ export function PhotoCarousel({
           <button
             type="button"
             aria-label="Next photo"
-            onClick={() => go(activeIndex + 1)}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              go(activeIndex + 1);
+            }}
             className="absolute right-3 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-background/80 text-foreground shadow-sm transition-opacity hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             <ChevronRight className="size-4" aria-hidden="true" />
@@ -96,7 +107,11 @@ export function PhotoCarousel({
                 role="tab"
                 aria-selected={i === activeIndex}
                 aria-label={`Go to photo ${i + 1} of ${images.length}`}
-                onClick={() => go(i)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  go(i);
+                }}
                 className={cn("size-1.5 rounded-full transition-colors", i === activeIndex ? "bg-white" : "bg-white/50 hover:bg-white/75")}
               />
             ))}
