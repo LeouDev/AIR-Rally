@@ -1,5 +1,5 @@
 import type { OwnerSettlementSummary, SettlementRow } from "@/lib/services/settlements";
-import type { SettlementSource, SettlementStatus } from "@/lib/supabase/types";
+import type { PayoutBatchStatus, SettlementSource, SettlementStatus } from "@/lib/supabase/types";
 import { formatSettlementMoney } from "@/lib/settlementFormat";
 
 const SOURCE_LABELS: Record<SettlementSource, string> = {
@@ -53,7 +53,17 @@ function SummaryCard({
   );
 }
 
-export function SettlementPanel({ summary, rows }: { summary: OwnerSettlementSummary; rows: SettlementRow[] }) {
+export function SettlementPanel({
+  summary,
+  rows,
+  batchBySettlement,
+}: {
+  summary: OwnerSettlementSummary;
+  rows: SettlementRow[];
+  /** Live payout batches covering this owner's settlements, keyed by settlement id. */
+  batchBySettlement: Map<string, { reference: string; status: PayoutBatchStatus }>;
+}) {
+  const batchedCount = rows.filter((r) => batchBySettlement.has(r.settlementId)).length;
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -85,12 +95,26 @@ export function SettlementPanel({ summary, rows }: { summary: OwnerSettlementSum
         />
       </dl>
 
-      {/* Said plainly rather than left for an owner to wonder about: they
-          can see what they have earned, and payouts are a later phase. */}
-      <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-        Automatic payouts are not live yet. These figures show what AIR/Rally owes you; transfers are arranged manually in the
-        meantime.
-      </p>
+      {/* Payout status, stated plainly. Never says "paid" — that word is
+          reserved for settlements that genuinely reached 'settled', which
+          nothing can currently do. */}
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <p className="text-sm font-medium text-foreground">Payout status</p>
+        {summary.available > 0 ? (
+          <p className="mt-1 text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground">{formatSettlementMoney(summary.available, summary.currency)}</span>{" "}
+            payable — awaiting payout processing.
+            {batchedCount > 0 && ` ${batchedCount} settlement(s) are already in a payout batch.`}
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-muted-foreground">
+            Nothing is payable yet. Earnings become payable once the booked court time has been played.
+          </p>
+        )}
+        <p className="mt-2 text-xs text-muted-foreground">
+          Automatic payouts are not live yet — transfers are arranged manually in the meantime.
+        </p>
+      </div>
 
       {rows.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-6 text-center text-sm text-muted-foreground">
@@ -110,6 +134,7 @@ export function SettlementPanel({ summary, rows }: { summary: OwnerSettlementSum
                 <th scope="col" className="px-4 py-3 text-right font-medium">You earn</th>
                 <th scope="col" className="px-4 py-3 font-medium">Paid with</th>
                 <th scope="col" className="px-4 py-3 font-medium">Status</th>
+                <th scope="col" className="px-4 py-3 font-medium">Payout</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -133,6 +158,9 @@ export function SettlementPanel({ summary, rows }: { summary: OwnerSettlementSum
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[row.settlementStatus]}`}>
                       {STATUS_LABELS[row.settlementStatus]}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">
+                    {batchBySettlement.get(row.settlementId)?.reference ?? "—"}
                   </td>
                 </tr>
               ))}

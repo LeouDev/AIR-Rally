@@ -352,6 +352,43 @@ export type SettlementIssue = {
   detail: string;
 };
 
+/** Lifecycle of an internal payout preparation record. */
+export type PayoutBatchStatus = "draft" | "reviewing" | "approved" | "processing" | "completed" | "failed" | "cancelled";
+
+/**
+ * A group of payable settlements assembled ahead of a payout. Purely
+ * internal: nothing in the codebase moves money, and approving a batch does
+ * NOT change any settlement_status. `processing` and `completed` are part
+ * of the intended lifecycle but are actively refused by the database until
+ * a real payout executor exists.
+ * See supabase/migrations/20260810000041_payout_batches.sql.
+ */
+export type PayoutBatch = {
+  id: string;
+  batch_reference: string;
+  status: PayoutBatchStatus;
+  /** Derived from the batch's items by trigger. */
+  total_amount: number;
+  settlement_count: number;
+  created_by: string;
+  approved_by: string | null;
+  notes: string | null;
+  created_at: string;
+  approved_at: string | null;
+  completed_at: string | null;
+  updated_at: string;
+};
+
+export type PayoutBatchItem = {
+  id: string;
+  payout_batch_id: string;
+  settlement_id: string;
+  venue_id: string;
+  /** Forced to equal the settlement's venue_amount by trigger. */
+  amount: number;
+  created_at: string;
+};
+
 export type ClubSkillLevel = "beginner" | "intermediate" | "advanced" | "mixed";
 export type ClubType = "social" | "competitive" | "training" | "casual";
 export type ClubVisibility = "public" | "approval_required" | "private";
@@ -772,6 +809,13 @@ export type Database = {
       credit_transactions: TableDef<CreditTransaction, never, never>;
       /** Read-only to every client role — written only by triggers. */
       booking_settlements: TableDef<BookingSettlement, never, never>;
+      /** Created through create_payout_batch(); status moves via the admin RPCs. */
+      payout_batches: TableDef<PayoutBatch, never, Partial<Pick<PayoutBatch, "status" | "notes">>>;
+      payout_batch_items: TableDef<
+        PayoutBatchItem,
+        Pick<PayoutBatchItem, "payout_batch_id" | "settlement_id" | "venue_id" | "amount">,
+        never
+      >;
       clubs: TableDef<
         Club,
         Pick<Club, "owner_id" | "name"> &
@@ -909,6 +953,48 @@ export type Database = {
           p_amount: number;
         };
         Returns: number;
+      };
+      /**
+       * Platform cash position for payout decisions. Admin-only (the
+       * function enforces it). Returns a single row.
+       */
+      payout_cash_position: {
+        Args: Record<string, never>;
+        Returns: {
+          available_payable_amount: number;
+          credit_funded_exposure: number;
+          cash_position_total: number;
+          on_hold_amount: number;
+          pending_amount: number;
+          batched_amount: number;
+        }[];
+      };
+      /** Payable settlements not already committed to a live batch. Admin-only. */
+      available_settlements_for_payout: {
+        Args: Record<string, never>;
+        Returns: BookingSettlement[];
+      };
+      /**
+       * Creates a draft batch from the given settlements, in one
+       * transaction. Admin-only; throws if any settlement is ineligible.
+       * Returns the new batch id. Moves no money.
+       */
+      create_payout_batch: {
+        Args: { p_settlement_ids: string[]; p_notes?: string | null };
+        Returns: string;
+      };
+      /**
+       * draft/reviewing -> approved. Admin-only. Records a decision; does
+       * NOT pay anyone and does NOT change any settlement_status.
+       */
+      approve_payout_batch: {
+        Args: { p_batch_id: string };
+        Returns: boolean;
+      };
+      /** Cancels a batch, releasing its settlements back to the candidate pool. Admin-only. */
+      cancel_payout_batch: {
+        Args: { p_batch_id: string; p_reason?: string | null };
+        Returns: boolean;
       };
       /**
        * Ledger integrity check. Returns one row per problem found and

@@ -3,6 +3,7 @@ import { requireSignedIn } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getOwnerAnalytics, type RevenuePeriod } from "@/lib/services/ownerAnalytics";
 import { getOwnerSettlementSummary, listOwnerSettlements } from "@/lib/services/settlements";
+import { getOwnerBatchStatusBySettlement } from "@/lib/services/payouts";
 import { SettlementPanel } from "@/components/owner/SettlementPanel";
 
 export const dynamic = "force-dynamic";
@@ -48,10 +49,13 @@ export default async function OwnerEarningsPage() {
   // Settlement reads carry no owner id: booking_settlements' RLS policy
   // already scopes them to venues this caller owns. Passing an id would
   // imply the filtering happened here rather than in the database.
-  const [analytics, settlementSummary, settlementRows] = await Promise.all([
+  const [analytics, settlementSummary, settlementRows, batchBySettlement] = await Promise.all([
     getOwnerAnalytics(supabase, user.id),
     getOwnerSettlementSummary(supabase),
     listOwnerSettlements(supabase),
+    // RLS scopes payout_batch_items to this owner's own venues, so an
+    // owner learns about their own payouts and nobody else's.
+    getOwnerBatchStatusBySettlement(supabase),
   ]);
 
   return (
@@ -66,7 +70,7 @@ export default async function OwnerEarningsPage() {
       {/* Settlements lead: "what am I owed" is the question an owner opens
           this page to answer. The revenue/occupancy analytics below are
           Phase 7.2 and stay exactly as they were. */}
-      <SettlementPanel summary={settlementSummary} rows={settlementRows} />
+      <SettlementPanel summary={settlementSummary} rows={settlementRows} batchBySettlement={batchBySettlement} />
 
       <div className="flex flex-col gap-4">
         <h2 className="text-base font-semibold text-foreground">Revenue</h2>

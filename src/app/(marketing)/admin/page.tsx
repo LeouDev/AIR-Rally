@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Building2, Users, ClipboardCheck, CreditCard, Share2, Wallet } from "lucide-react";
+import { Building2, Users, ClipboardCheck, CreditCard, Share2, Wallet, Landmark } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
@@ -69,6 +69,13 @@ export default async function AdminDashboardPage() {
       description: "What venues are owed, and the platform's cash exposure.",
       // On-hold settlements are the only ones needing a human decision.
       pending: onHoldSettlements,
+    },
+    {
+      href: "/admin/finance",
+      icon: Landmark,
+      title: "Finance",
+      description: "Payout readiness, cash position, and payout batches.",
+      pending: 0,
     },
     {
       href: "/admin/referrals",
