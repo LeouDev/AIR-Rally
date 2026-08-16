@@ -3,9 +3,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { OwnerAvailabilityCalendar } from "@/components/owner/OwnerAvailabilityCalendar";
+import { VenueSwitcher } from "@/components/owner/VenueSwitcher";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getVenueForOwner, listOperatingHours } from "@/lib/services/venues";
+import { getVenueForOwner, listOperatingHours, listVenuesByOwner } from "@/lib/services/venues";
 import { listCourtsByVenue } from "@/lib/services/courts";
 import { getOwnerCourtSchedule, mergeWithClosedSlots, todayInTimezone, type MergedSlot } from "@/lib/services/ownerAvailability";
 
@@ -44,7 +45,14 @@ export default async function VenueAvailabilityPage({
   // so the day-of-week doesn't depend on the server's own timezone.
   const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
 
-  const [courts, operatingHours] = await Promise.all([listCourtsByVenue(supabase, venueId), listOperatingHours(supabase, venueId)]);
+  const [courts, operatingHours, ownedVenues] = await Promise.all([
+    listCourtsByVenue(supabase, venueId),
+    listOperatingHours(supabase, venueId),
+    listVenuesByOwner(supabase, user.id),
+  ]);
+  // Archived venues have nothing bookable left to schedule — omit them
+  // from the switcher rather than offering a calendar with no purpose.
+  const switchableVenues = ownedVenues.filter((v) => v.status !== "archived").map((v) => ({ id: v.id, name: v.name }));
   const schedules = await Promise.all(courts.map((court) => getOwnerCourtSchedule(supabase, court.id, date)));
   const schedulesByCourt = Object.fromEntries(
     courts.map((court, i) => [court.id, mergeWithClosedSlots(schedules[i], operatingHours, dayOfWeek, venue.timezone)])
@@ -60,10 +68,15 @@ export default async function VenueAvailabilityPage({
           <ArrowLeft className="size-4" />
           Back to {venue.name}
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">Availability Calendar</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          See what&apos;s booked, blocked, or open across your courts, and block time for maintenance or private use.
-        </p>
+        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Availability Calendar</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              See what&apos;s booked, blocked, or open across your courts, and block time for maintenance or private use.
+            </p>
+          </div>
+          <VenueSwitcher venues={switchableVenues} currentVenueId={venueId} date={date} />
+        </div>
       </div>
 
       <OwnerAvailabilityCalendar venueId={venueId} date={date} courts={courts} schedulesByCourt={schedulesByCourt} />

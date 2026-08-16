@@ -63,30 +63,35 @@ export default async function OwnerOverviewPage() {
 
       <div className="flex flex-col gap-4">
         <h2 className="text-base font-semibold text-foreground">Today, by venue</h2>
-        {summary.today.map((venue) => (
-          <div key={venue.venueId} className="rounded-2xl border border-border bg-card p-6">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="font-semibold text-foreground">{venue.venueName}</h3>
-              <Link href={`/list-your-court/${venue.venueId}/availability`} className="text-sm font-medium text-primary hover:underline">
-                View calendar →
-              </Link>
+        {/* Single column on mobile; a real grid from tablet width up, since
+            stacking every venue vertically stops scaling once an owner has
+            more than a couple of them. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {summary.today.map((venue) => (
+            <div key={venue.venueId} className="flex flex-col rounded-2xl border border-border bg-card p-6">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-semibold text-foreground">{venue.venueName}</h3>
+                <Link href={`/list-your-court/${venue.venueId}/availability`} className="text-sm font-medium text-primary hover:underline">
+                  View calendar →
+                </Link>
+              </div>
+              <dl className="mt-4 grid grid-cols-3 gap-4">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Bookings today</dt>
+                  <dd className="mt-1 text-lg font-semibold text-foreground">{venue.bookingsToday}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Occupied hours</dt>
+                  <dd className="mt-1 text-lg font-semibold text-foreground">{venue.occupiedHours}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Available hours</dt>
+                  <dd className="mt-1 text-lg font-semibold text-foreground">{venue.availableHours}</dd>
+                </div>
+              </dl>
             </div>
-            <dl className="mt-4 grid grid-cols-3 gap-4">
-              <div>
-                <dt className="text-xs text-muted-foreground">Bookings today</dt>
-                <dd className="mt-1 text-lg font-semibold text-foreground">{venue.bookingsToday}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Occupied hours</dt>
-                <dd className="mt-1 text-lg font-semibold text-foreground">{venue.occupiedHours}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Available hours</dt>
-                <dd className="mt-1 text-lg font-semibold text-foreground">{venue.availableHours}</dd>
-              </div>
-            </dl>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );
