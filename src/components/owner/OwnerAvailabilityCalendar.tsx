@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, User, Ban, Wrench, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CourtBlockDialog } from "@/components/owner/CourtBlockDialog";
@@ -25,6 +26,23 @@ const STATUS_CELL_STYLES: Record<MergedSlot["status"], string> = {
   booked: "bg-primary/20 text-primary hover:bg-primary/30",
   blocked: "bg-warning/20 text-warning hover:bg-warning/30",
   closed: "bg-muted/70 text-muted-foreground/50",
+};
+
+// Mobile agenda uses full-width rows with a text badge (not a tiny
+// colored cell), since there's no room for a horizontally-scrolling
+// hour grid on a phone and no hover to reveal a tooltip on touch.
+const STATUS_BADGE_STYLES: Record<MergedSlot["status"], string> = {
+  available: "bg-success/15 text-success",
+  booked: "bg-primary/15 text-primary",
+  blocked: "bg-warning/15 text-warning",
+  closed: "bg-muted text-muted-foreground",
+};
+
+const STATUS_LABELS: Record<MergedSlot["status"], string> = {
+  available: "Available",
+  booked: "Booked",
+  blocked: "Blocked",
+  closed: "Closed",
 };
 
 const LEGEND: { status: MergedSlot["status"]; label: string; dotClassName: string }[] = [
@@ -225,6 +243,139 @@ function TimelineGrid({
   );
 }
 
+function CourtTabs({ courts, selectedId, onSelect }: { courts: Court[]; selectedId: string; onSelect: (courtId: string) => void }) {
+  if (courts.length <= 1) return null;
+
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {courts.map((court) => (
+        <button
+          key={court.id}
+          type="button"
+          onClick={() => onSelect(court.id)}
+          className={cn(
+            "shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors",
+            court.id === selectedId
+              ? "border-primary bg-primary/10 text-primary"
+              : "border-border text-muted-foreground hover:text-foreground"
+          )}
+        >
+          {court.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MobileSlotRow({ slot, onSelectBooking }: { slot: MergedSlot; onSelectBooking: (bookingId: string) => void }) {
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleRemoveBlock() {
+    if (!slot.blockId) return;
+    startTransition(async () => {
+      const result = await deleteCourtBlockAction(slot.blockId!);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Block removed");
+      router.refresh();
+    });
+  }
+
+  const isClickableBooking = slot.status === "booked" && !!slot.bookingId;
+
+  return (
+    <li className="flex items-center gap-3 border-b border-border/60 py-3 last:border-none">
+      <span className="w-[4.5rem] shrink-0 text-sm font-medium text-foreground">{formatSlotTime(slot.localTime)}</span>
+      <Badge className={cn("shrink-0 border-transparent", STATUS_BADGE_STYLES[slot.status])}>{STATUS_LABELS[slot.status]}</Badge>
+      <button
+        type="button"
+        disabled={!isClickableBooking}
+        onClick={() => isClickableBooking && onSelectBooking(slot.bookingId!)}
+        className={cn(
+          "flex-1 truncate text-left text-sm text-muted-foreground",
+          isClickableBooking && "underline-offset-2 hover:text-foreground hover:underline"
+        )}
+      >
+        {slot.status === "booked" && (
+          <span className="inline-flex items-center gap-1">
+            <User className="size-3.5 shrink-0" aria-hidden="true" />
+            {slot.customerName ?? "Customer"}
+          </span>
+        )}
+        {slot.status === "blocked" && (
+          <span className="inline-flex items-center gap-1">
+            <Wrench className="size-3.5 shrink-0" aria-hidden="true" />
+            {slot.blockReason || "Blocked"}
+          </span>
+        )}
+        {slot.status === "closed" && (
+          <span className="inline-flex items-center gap-1 text-muted-foreground/70">
+            <Lock className="size-3.5 shrink-0" aria-hidden="true" />
+            Outside hours
+          </span>
+        )}
+      </button>
+      {slot.status === "blocked" && slot.blockId && (
+        <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={handleRemoveBlock} className="shrink-0 gap-1 text-xs">
+          <Ban className="size-3.5" aria-hidden="true" />
+          Remove
+        </Button>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Phone-width layout: the hour-grid needs both horizontal scrolling and
+ * hover (for status text on available/closed cells) to work, neither of
+ * which holds up on a touch screen at 375px wide. This swaps to one
+ * court at a time (picked via pills, since courts already stack
+ * naturally) and a vertical list of full-width rows that always show
+ * their status as text, no hover required.
+ */
+function MobileAgenda({
+  courts,
+  schedulesByCourt,
+  date,
+  onSelectBooking,
+}: {
+  courts: Court[];
+  schedulesByCourt: Record<string, MergedSlot[]>;
+  date: string;
+  onSelectBooking: (bookingId: string) => void;
+}) {
+  const [selectedCourtId, setSelectedCourtId] = useState(courts[0]?.id ?? "");
+  const selectedCourt = courts.find((c) => c.id === selectedCourtId) ?? courts[0];
+  const slots = selectedCourt ? (schedulesByCourt[selectedCourt.id] ?? []) : [];
+  const isClosedAllDay = slots.length === 0 || slots.every((slot) => slot.status === "closed");
+
+  if (!selectedCourt) return null;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <CourtTabs courts={courts} selectedId={selectedCourt.id} onSelect={setSelectedCourtId} />
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-foreground">{selectedCourt.name}</h2>
+        <CourtBlockDialog courtId={selectedCourt.id} courtName={selectedCourt.name} defaultDate={date} />
+      </div>
+      {isClosedAllDay ? (
+        <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-6 text-center text-sm text-muted-foreground">
+          Closed all day — no operating hours set for this day of the week.
+        </p>
+      ) : (
+        <ul className="flex flex-col rounded-2xl border border-border bg-card px-4">
+          {slots.map((slot) => (
+            <MobileSlotRow key={slot.localTime} slot={slot} onSelectBooking={onSelectBooking} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function OwnerAvailabilityCalendar({
   venueId,
   date,
@@ -286,7 +437,14 @@ export function OwnerAvailabilityCalendar({
           Add a court first to see its availability here.
         </p>
       ) : (
-        <TimelineGrid courts={courts} schedulesByCourt={schedulesByCourt} date={date} onSelectBooking={handleSelectBooking} />
+        <>
+          <div className="sm:hidden">
+            <MobileAgenda courts={courts} schedulesByCourt={schedulesByCourt} date={date} onSelectBooking={handleSelectBooking} />
+          </div>
+          <div className="hidden sm:block">
+            <TimelineGrid courts={courts} schedulesByCourt={schedulesByCourt} date={date} onSelectBooking={handleSelectBooking} />
+          </div>
+        </>
       )}
 
       <BookingDetailDialog booking={selectedBooking} open={dialogOpen} onOpenChange={setDialogOpen} />

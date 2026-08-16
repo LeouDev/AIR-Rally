@@ -59,7 +59,7 @@ export default async function VenueAvailabilityPage({
   ) as Record<string, MergedSlot[]>;
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-6 px-4 py-12 sm:px-6 lg:px-8">
       <div>
         <Link
           href={`/list-your-court/${venueId}`}
@@ -69,7 +69,7 @@ export default async function VenueAvailabilityPage({
           Back to {venue.name}
         </Link>
         <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">Availability Calendar</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               See what&apos;s booked, blocked, or open across your courts, and block time for maintenance or private use.
