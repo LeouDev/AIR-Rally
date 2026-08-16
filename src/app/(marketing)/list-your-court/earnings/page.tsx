@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { requireSignedIn } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getOwnerAnalytics, type RevenuePeriod } from "@/lib/services/ownerAnalytics";
+import { getOwnerSettlementSummary, listOwnerSettlements } from "@/lib/services/settlements";
+import { SettlementPanel } from "@/components/owner/SettlementPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -43,16 +45,28 @@ function RevenueCard({ label, period, currency }: { label: string; period: Reven
 export default async function OwnerEarningsPage() {
   const user = await requireSignedIn("/list-your-court/earnings");
   const supabase = await createClient();
-  const analytics = await getOwnerAnalytics(supabase, user.id);
+  // Settlement reads carry no owner id: booking_settlements' RLS policy
+  // already scopes them to venues this caller owns. Passing an id would
+  // imply the filtering happened here rather than in the database.
+  const [analytics, settlementSummary, settlementRows] = await Promise.all([
+    getOwnerAnalytics(supabase, user.id),
+    getOwnerSettlementSummary(supabase),
+    listOwnerSettlements(supabase),
+  ]);
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Earnings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Revenue customers have paid, occupancy, and booking activity across your venues.
+          What you have earned and what you are owed, plus occupancy and booking activity across your venues.
         </p>
       </div>
+
+      {/* Settlements lead: "what am I owed" is the question an owner opens
+          this page to answer. The revenue/occupancy analytics below are
+          Phase 7.2 and stay exactly as they were. */}
+      <SettlementPanel summary={settlementSummary} rows={settlementRows} />
 
       <div className="flex flex-col gap-4">
         <h2 className="text-base font-semibold text-foreground">Revenue</h2>

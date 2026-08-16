@@ -303,6 +303,55 @@ export type UserCreditWallet = {
   updated_at: string;
 };
 
+/** How a booking's price was funded. Derived from the amounts, never asserted independently. */
+export type SettlementSource = "paymongo" | "credit" | "mixed";
+
+/**
+ * `settled` is reserved for a future payout step and currently has no
+ * writer anywhere in the codebase — see SETTLEMENT-LEDGER.md.
+ */
+export type SettlementStatus = "pending" | "payable" | "settled" | "reversed" | "on_hold";
+
+/**
+ * What a venue is owed for one booking, recorded independently of how the
+ * customer paid. Every row is written by database triggers; no client role
+ * has INSERT/UPDATE/DELETE. See
+ * supabase/migrations/20260810000039_settlement_ledger.sql.
+ */
+export type BookingSettlement = {
+  id: string;
+  booking_id: string;
+  venue_id: string;
+  currency: string;
+  /** The booking's full price — the customer's obligation, before funding. */
+  gross_booking_amount: number;
+  /** Cash actually collected through PayMongo. */
+  paymongo_amount: number;
+  /** Value settled from the wallet. Real entitlement, NOT cash received now. */
+  credit_amount: number;
+  platform_fee: number;
+  venue_amount: number;
+  fee_percent_applied: number;
+  settlement_source: SettlementSource;
+  settlement_status: SettlementStatus;
+  /** Generated: paymongo_amount - venue_amount. Negative = owed more cash than collected. */
+  cash_position: number;
+  payable_at: string | null;
+  settled_at: string | null;
+  reversed_at: string | null;
+  reversal_reason: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** One row per problem found by reconcile_settlements(); empty means sound. */
+export type SettlementIssue = {
+  issue: string;
+  booking_id: string;
+  detail: string;
+};
+
 export type ClubSkillLevel = "beginner" | "intermediate" | "advanced" | "mixed";
 export type ClubType = "social" | "competitive" | "training" | "casual";
 export type ClubVisibility = "public" | "approval_required" | "private";
@@ -721,6 +770,8 @@ export type Database = {
       >;
       user_credit_wallets: TableDef<UserCreditWallet, never, never>;
       credit_transactions: TableDef<CreditTransaction, never, never>;
+      /** Read-only to every client role — written only by triggers. */
+      booking_settlements: TableDef<BookingSettlement, never, never>;
       clubs: TableDef<
         Club,
         Pick<Club, "owner_id" | "name"> &
@@ -858,6 +909,16 @@ export type Database = {
           p_amount: number;
         };
         Returns: number;
+      };
+      /**
+       * Ledger integrity check. Returns one row per problem found and
+       * nothing when the ledger is sound. Read-only. Admin-visible through
+       * the admin reconciliation page; a payout run must pass it before
+       * moving money. See SETTLEMENT-LEDGER.md.
+       */
+      reconcile_settlements: {
+        Args: Record<string, never>;
+        Returns: SettlementIssue[];
       };
       /**
        * Confirms a booking whose credit covers its full price, with no

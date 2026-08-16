@@ -73,7 +73,8 @@ async function main() {
   const player = randomUUID();
   const owner = randomUUID();
   const stranger = randomUUID();
-  const userIds = [player, owner, stranger];
+  const admin = randomUUID();
+  const userIds = [player, owner, stranger, admin];
   let venueId = "";
   let courtId = "";
 
@@ -124,6 +125,7 @@ async function main() {
     );
     courtId = court.rows[0].id;
     await pg.query(`select public.issue_credit($1, 200000, 'admin_adjustment', null, 'test wallet')`, [player]);
+    await pg.query(`update public.profiles set role = 'admin' where id = $1`, [admin]);
     console.log(`Seeded users, venue, court, ₱2000 wallet (run ${run}).\n`);
 
     // --- 1. PayMongo-only ---------------------------------------------------
@@ -269,12 +271,16 @@ async function main() {
 
     // --- Reconciliation ------------------------------------------------------
     console.log("\n— Reconciliation —");
-    const issues = await pg.query(
-      `select issue, count(*)::int n from public.reconcile_settlements()
-       where booking_id in (select id from public.bookings where court_id = $1) group by issue`,
-      [courtId]
-    );
-    const byIssue = Object.fromEntries(issues.rows.map((r) => [r.issue, r.n]));
+    // reconcile_settlements() is admin-only since migration 040, so this
+    // must run under a real admin identity rather than the raw connection.
+    const byIssue = await asUser(pg, admin, async () => {
+      const issues = await pg.query(
+        `select issue, count(*)::int n from public.reconcile_settlements()
+         where booking_id in (select id from public.bookings where court_id = $1) group by issue`,
+        [courtId]
+      );
+      return Object.fromEntries(issues.rows.map((r) => [r.issue, r.n])) as Record<string, number>;
+    });
     check("no missing settlements", !byIssue.missing_settlement, `${byIssue.missing_settlement} found`);
     check("no funding mismatches", !byIssue.funding_mismatch, `${byIssue.funding_mismatch} found`);
     check("no live entitlement on cancelled bookings", !byIssue.live_settlement_on_cancelled_booking, `${byIssue.live_settlement_on_cancelled_booking} found`);

@@ -1,13 +1,14 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Building2, Users, ClipboardCheck, CreditCard, Share2 } from "lucide-react";
+import { Building2, Users, ClipboardCheck, CreditCard, Share2, Wallet } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
 import { getClubModerationCounts } from "@/lib/services/clubs";
 import { listVenuesForAdmin } from "@/lib/services/venues";
 import { listOwnerApplicationsForAdmin } from "@/lib/services/ownerApplications";
+import { getAdminSettlementSummary } from "@/lib/services/settlements";
 
 // Live counts across every moderation queue — never statically cached.
 export const dynamic = "force-dynamic";
@@ -22,11 +23,13 @@ export default async function AdminDashboardPage() {
   const adminCheck = await requireAdmin(supabase);
   if (!adminCheck.ok) notFound();
 
-  const [clubCounts, pendingVenues, pendingApplications] = await Promise.all([
+  const [clubCounts, pendingVenues, pendingApplications, settlementSummary] = await Promise.all([
     getClubModerationCounts(supabase),
     listVenuesForAdmin(supabase, "pending_review"),
     listOwnerApplicationsForAdmin(supabase, "pending"),
+    getAdminSettlementSummary(supabase),
   ]);
+  const onHoldSettlements = settlementSummary.onHoldCount;
 
   // Only the queues that actually need attention carry a count — a badge
   // on a zero is noise.
@@ -58,6 +61,14 @@ export default async function AdminDashboardPage() {
       title: "Payments",
       description: "Monitor bookings, payments, and refunds.",
       pending: 0,
+    },
+    {
+      href: "/admin/settlements",
+      icon: Wallet,
+      title: "Settlements",
+      description: "What venues are owed, and the platform's cash exposure.",
+      // On-hold settlements are the only ones needing a human decision.
+      pending: onHoldSettlements,
     },
     {
       href: "/admin/referrals",

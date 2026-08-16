@@ -1,0 +1,269 @@
+/**
+ * @jest-environment node
+ */
+import {
+  getOwnerSettlementSummary,
+  listOwnerSettlements,
+  getAdminSettlementSummary,
+  listAllSettlements,
+  getSettlementIssues,
+} from "../settlements";
+import { createMockSupabase, createRpcMockSupabase, postgrestError } from "../../test-helpers/mockSupabase";
+
+/**
+ * These cover the aggregation and shaping. The security boundary itself is
+ * RLS, which cannot be exercised by a mock — it is verified for real
+ * against staging in scripts/verify-staging-settlement-ui.ts.
+ */
+
+type Row = {
+  venue_amount: number;
+  cash_position?: number;
+  settlement_status: string;
+  currency: string;
+};
+
+/** A ₱500 booking under the 5% fee: ₱25 platform, ₱475 venue. */
+function row(overrides: Partial<Row> = {}): Row {
+  return { venue_amount: 47500, cash_position: 2500, settlement_status: "pending", currency: "PHP", ...overrides };
+}
+
+describe("getOwnerSettlementSummary", () => {
+  it("reports zeroes when the owner has no settlements", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await expect(getOwnerSettlementSummary(supabase)).resolves.toMatchObject({
+      pending: 0,
+      available: 0,
+      paid: 0,
+      currency: "PHP",
+    });
+  });
+
+  it("splits entitlement across pending and available", async () => {
+    const supabase = createMockSupabase({
+      data: [
+        row({ settlement_status: "pending" }),
+        row({ settlement_status: "pending" }),
+        row({ settlement_status: "payable" }),
+      ],
+      error: null,
+    });
+
+    await expect(getOwnerSettlementSummary(supabase)).resolves.toMatchObject({
+      pending: 95000,
+      pendingCount: 2,
+      available: 47500,
+      availableCount: 1,
+    });
+  });
+
+  // Payout automation doesn't exist, so this must stay empty rather than
+  // quietly borrowing from another status.
+  it("reports nothing as paid, because no payout writer exists", async () => {
+    const supabase = createMockSupabase({
+      data: [row({ settlement_status: "pending" }), row({ settlement_status: "payable" })],
+      error: null,
+    });
+    await expect(getOwnerSettlementSummary(supabase)).resolves.toMatchObject({ paid: 0, paidCount: 0 });
+  });
+
+  // Neither is money the owner should expect, so neither may inflate a card.
+  it("excludes reversed and on-hold settlements from every total", async () => {
+    const supabase = createMockSupabase({
+      data: [
+        row({ settlement_status: "reversed" }),
+        row({ settlement_status: "on_hold" }),
+        row({ settlement_status: "payable" }),
+      ],
+      error: null,
+    });
+
+    await expect(getOwnerSettlementSummary(supabase)).resolves.toMatchObject({
+      pending: 0,
+      available: 47500,
+      paid: 0,
+    });
+  });
+
+  it("propagates a query error rather than reporting zero earnings", async () => {
+    const supabase = createMockSupabase({ data: null, error: postgrestError("42501", "boom") });
+    // PostgREST errors are plain objects, not Error instances — the
+    // service rethrows them as-is, same as every other service here.
+    await expect(getOwnerSettlementSummary(supabase)).rejects.toMatchObject({ message: "boom", code: "42501" });
+  });
+});
+
+describe("listOwnerSettlements", () => {
+  it("does NOT filter by owner — RLS is the boundary", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await listOwnerSettlements(supabase);
+
+    const fromMock = supabase.from as jest.Mock;
+    const builder = fromMock.mock.results[0].value as { eq?: jest.Mock; order: jest.Mock };
+    // An .eq("owner_id", ...) here would imply the filtering happened in
+    // application code, which is exactly the impression to avoid.
+    expect(builder.eq).not.toHaveBeenCalled();
+    expect(builder.order).toHaveBeenCalledWith("created_at", { ascending: false });
+  });
+
+  it("maps a row to the display shape, surviving missing embeds", async () => {
+    const supabase = createMockSupabase({
+      data: [
+        {
+          id: "s1",
+          booking_id: "b1",
+          venue_id: "v1",
+          currency: "PHP",
+          gross_booking_amount: 50000,
+          paymongo_amount: 50000,
+          credit_amount: 0,
+          platform_fee: 2500,
+          venue_amount: 47500,
+          cash_position: 2500,
+          settlement_source: "paymongo",
+          settlement_status: "pending",
+          created_at: "2026-08-16T00:00:00Z",
+          venues: null,
+          bookings: null,
+        },
+      ],
+      error: null,
+    });
+
+    const [mapped] = await listOwnerSettlements(supabase);
+    expect(mapped).toMatchObject({
+      settlementId: "s1",
+      venueName: "Unknown venue",
+      courtName: null,
+      venueAmount: 47500,
+      settlementSource: "paymongo",
+    });
+  });
+});
+
+describe("getAdminSettlementSummary", () => {
+  it("totals liability as pending plus payable", async () => {
+    const supabase = createMockSupabase({
+      data: [row({ settlement_status: "pending" }), row({ settlement_status: "payable" })],
+      error: null,
+    });
+
+    await expect(getAdminSettlementSummary(supabase)).resolves.toMatchObject({
+      totalVenueLiability: 95000,
+      pendingAmount: 47500,
+      payableAmount: 47500,
+    });
+  });
+
+  // The number the whole ledger exists to surface.
+  it("reports credit-funded exposure as a positive obligation", async () => {
+    const supabase = createMockSupabase({
+      data: [
+        row({ settlement_status: "pending", cash_position: -47500 }),
+        row({ settlement_status: "payable", cash_position: -27500 }),
+        row({ settlement_status: "pending", cash_position: 2500 }),
+      ],
+      error: null,
+    });
+
+    await expect(getAdminSettlementSummary(supabase)).resolves.toMatchObject({ creditFundedExposure: 75000 });
+  });
+
+  // A reversed settlement is no longer owed, so its shortfall is not an
+  // obligation and must not inflate the exposure figure.
+  it("excludes reversed settlements from exposure", async () => {
+    const supabase = createMockSupabase({
+      data: [row({ settlement_status: "reversed", cash_position: -47500 })],
+      error: null,
+    });
+
+    await expect(getAdminSettlementSummary(supabase)).resolves.toMatchObject({
+      creditFundedExposure: 0,
+      reversedCount: 1,
+      totalVenueLiability: 0,
+    });
+  });
+
+  it("counts on-hold settlements so they can be surfaced for review", async () => {
+    const supabase = createMockSupabase({ data: [row({ settlement_status: "on_hold" })], error: null });
+    await expect(getAdminSettlementSummary(supabase)).resolves.toMatchObject({ onHoldCount: 1 });
+  });
+});
+
+describe("listAllSettlements", () => {
+  it("applies a status filter when given one", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await listAllSettlements(supabase, { status: "payable" });
+
+    const fromMock = supabase.from as jest.Mock;
+    const builder = fromMock.mock.results[0].value as { eq: jest.Mock };
+    expect(builder.eq).toHaveBeenCalledWith("settlement_status", "payable");
+  });
+
+  it("applies no status filter when none is given", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await listAllSettlements(supabase);
+
+    const fromMock = supabase.from as jest.Mock;
+    const builder = fromMock.mock.results[0].value as { eq: jest.Mock };
+    expect(builder.eq).not.toHaveBeenCalled();
+  });
+});
+
+describe("getSettlementIssues", () => {
+  it("separates real problems from expected credit exposure", async () => {
+    const supabase = createRpcMockSupabase({
+      data: [
+        { issue: "missing_settlement", booking_id: "b1", detail: "no row" },
+        { issue: "unfunded_entitlement", booking_id: "b2", detail: "owed 38000 collected 0" },
+        { issue: "funding_mismatch", booking_id: "b3", detail: "drifted" },
+      ],
+      error: null,
+    });
+
+    const groups = await getSettlementIssues(supabase);
+    expect(groups.errors.map((e) => e.issue)).toEqual(["missing_settlement", "funding_mismatch"]);
+    expect(groups.exposure).toHaveLength(1);
+  });
+
+  it("reports a clean ledger as no errors and no exposure", async () => {
+    const supabase = createRpcMockSupabase({ data: [], error: null });
+    await expect(getSettlementIssues(supabase)).resolves.toEqual({ errors: [], exposure: [] });
+  });
+
+  // A credit-only ledger is healthy, not broken — the page must be able to
+  // say "no issues" while still showing exposure.
+  it("treats a ledger of only credit exposure as error-free", async () => {
+    const supabase = createRpcMockSupabase({
+      data: [{ issue: "unfunded_entitlement", booking_id: "b1", detail: "owed 38000 collected 0" }],
+      error: null,
+    });
+
+    const groups = await getSettlementIssues(supabase);
+    expect(groups.errors).toHaveLength(0);
+    expect(groups.exposure).toHaveLength(1);
+  });
+});
+
+// The three funding shapes from the brief, asserted as the ledger's own
+// arithmetic rather than as anything this layer recomputes.
+describe("the three funding shapes", () => {
+  const CASES = [
+    { name: "PayMongo only", gross: 50000, paymongo: 50000, credit: 0, fee: 2500, venue: 47500, cash: 2500 },
+    { name: "Credit only", gross: 50000, paymongo: 0, credit: 50000, fee: 2500, venue: 47500, cash: -47500 },
+    { name: "Mixed", gross: 50000, paymongo: 20000, credit: 30000, fee: 2500, venue: 47500, cash: -27500 },
+  ];
+
+  it.each(CASES)("$name balances on both identities", ({ gross, paymongo, credit, fee, venue }) => {
+    expect(paymongo + credit).toBe(gross);
+    expect(fee + venue).toBe(gross);
+  });
+
+  it.each(CASES)("$name reports the expected cash position", ({ paymongo, venue, cash }) => {
+    expect(paymongo - venue).toBe(cash);
+  });
+
+  it("owes the venue the same amount regardless of how it was funded", () => {
+    expect(new Set(CASES.map((c) => c.venue)).size).toBe(1);
+  });
+});
