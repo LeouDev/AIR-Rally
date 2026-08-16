@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { uploadCourtImage, getPublicImageUrl } from "@/lib/services/images";
 import { deleteImageAction } from "@/lib/actions/image";
+import { PhotoLightbox } from "@/components/shared/PhotoLightbox";
 import type { CourtImage } from "@/lib/supabase/types";
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MiB — matches the bucket's own limit (defense-in-depth, see the migration)
@@ -38,9 +39,16 @@ export function ImageUploadManager({
   const [isUploading, setIsUploading] = useState(false);
   const [isDeletePending, startDeleteTransition] = useTransition();
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const supabase = createClient();
+
+  const lightboxImages = images.map((image) => ({
+    url: getPublicImageUrl(supabase, image.storage_path),
+    alt: image.alt_text ?? "",
+  }));
 
   function validateFile(file: File): string | null {
     if (!ACCEPTED_TYPES.includes(file.type)) {
@@ -111,15 +119,25 @@ export function ImageUploadManager({
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {images.map((image, index) => (
             <div key={image.id} className="group relative aspect-square overflow-hidden rounded-xl border border-border bg-muted">
-              <Image
-                src={getPublicImageUrl(supabase, image.storage_path)}
-                alt={image.alt_text ?? ""}
-                fill
-                sizes="(min-width: 1024px) 200px, 33vw"
-                className="object-cover"
-              />
+              <button
+                type="button"
+                aria-label={`View photo ${index + 1}`}
+                onClick={() => {
+                  setLightboxIndex(index);
+                  setLightboxOpen(true);
+                }}
+                className="absolute inset-0"
+              >
+                <Image
+                  src={getPublicImageUrl(supabase, image.storage_path)}
+                  alt={image.alt_text ?? ""}
+                  fill
+                  sizes="(min-width: 1024px) 200px, 33vw"
+                  className="object-cover"
+                />
+              </button>
               {index === 0 && (
-                <span className="absolute left-2 top-2 rounded-full bg-background/90 px-2 py-0.5 text-xs font-medium text-foreground">
+                <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-background/90 px-2 py-0.5 text-xs font-medium text-foreground">
                   Cover
                 </span>
               )}
@@ -127,7 +145,10 @@ export function ImageUploadManager({
                 type="button"
                 aria-label="Remove photo"
                 disabled={isDeletePending && deletingId === image.id}
-                onClick={() => handleDelete(image.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(image.id);
+                }}
                 className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-background/90 text-destructive opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-100"
               >
                 {isDeletePending && deletingId === image.id ? (
@@ -166,6 +187,15 @@ export function ImageUploadManager({
         </span>
         <span className="text-xs text-muted-foreground">JPEG, PNG, or WEBP — up to 5MB each</span>
       </label>
+
+      <PhotoLightbox
+        images={lightboxImages}
+        activeIndex={lightboxIndex}
+        onIndexChange={setLightboxIndex}
+        open={lightboxOpen}
+        onOpenChange={setLightboxOpen}
+        title="Venue photos"
+      />
     </div>
   );
 }
