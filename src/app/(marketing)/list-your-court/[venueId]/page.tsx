@@ -1,7 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, CalendarClock } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { VenueForm } from "@/components/owner/VenueForm";
 import { VenueAmenitiesEditor } from "@/components/owner/VenueAmenitiesEditor";
 import { VenueOperatingHoursEditor } from "@/components/owner/VenueOperatingHoursEditor";
@@ -86,10 +87,20 @@ export default async function ManageVenuePage({
           <ArrowLeft className="size-4" aria-hidden="true" />
           Back to your venues
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{venue.name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage your venue details, amenities, and courts.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{venue.name}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Manage your venue details, amenities, and courts.
+            </p>
+          </div>
+          <Button asChild variant="outline" className="gap-1.5">
+            <Link href={`/list-your-court/${venueId}/availability`}>
+              <CalendarClock className="size-4" />
+              Availability Calendar
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <VenueReadinessChecklist readiness={readiness} />
