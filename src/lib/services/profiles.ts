@@ -1,8 +1,33 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Profile } from "@/lib/supabase/types";
+import type { Database, Profile, PublicProfile } from "@/lib/supabase/types";
 import type { UpdateProfileValues } from "@/lib/validations/profile";
 
 type Client = SupabaseClient<Database>;
+
+/**
+ * Any registered user's public-safe profile (display_name/avatar_url
+ * only) — for rendering someone else's COURT/Side profile page, where
+ * `profiles`' own own-row-only RLS would return nothing.
+ */
+export async function getPublicProfile(supabase: Client, userId: string): Promise<PublicProfile | null> {
+  const { data, error } = await supabase.from("public_profiles").select("*").eq("id", userId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/** Backs COURT/Side's @mention autocomplete — real registered users only, matched by display name. */
+export async function searchPublicProfiles(supabase: Client, query: string, limit = 5): Promise<PublicProfile[]> {
+  const term = query.trim();
+  if (!term) return [];
+  const { data, error } = await supabase
+    .from("public_profiles")
+    .select("*")
+    .not("display_name", "is", null)
+    .ilike("display_name", `%${term}%`)
+    .limit(limit);
+  if (error) throw error;
+  return data;
+}
 
 export async function getProfile(supabase: Client, userId: string): Promise<Profile | null> {
   const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();

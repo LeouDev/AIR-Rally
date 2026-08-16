@@ -218,6 +218,119 @@ export type Referral = {
 };
 
 /**
+ * Phase 7.1: COURT/Side community backend (see
+ * supabase/migrations/20260810000027_court_side.sql). `like_count` /
+ * `comment_count` are trigger-maintained, same convention as
+ * venues.average_rating/review_count.
+ */
+export type Post = {
+  id: string;
+  user_id: string;
+  content: string;
+  image_url: string | null;
+  like_count: number;
+  comment_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PostLike = {
+  post_id: string;
+  user_id: string;
+  created_at: string;
+};
+
+export type PostComment = {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+};
+
+export type Follow = {
+  follower_id: string;
+  following_id: string;
+  created_at: string;
+};
+
+export type ClubSkillLevel = "beginner" | "intermediate" | "advanced" | "mixed";
+export type ClubType = "social" | "competitive" | "training" | "casual";
+export type ClubVisibility = "public" | "approval_required" | "private";
+export type ClubMemberRole = "owner" | "admin" | "member";
+export type ClubMemberStatus = "active" | "pending" | "blocked";
+
+export type Club = {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  image_url: string | null;
+  location: string | null;
+  skill_level: ClubSkillLevel;
+  club_type: ClubType;
+  visibility: ClubVisibility;
+  status: "active" | "suspended";
+  /** Denormalized, trigger-maintained (active members only) — never client-writable. */
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ClubMember = {
+  club_id: string;
+  user_id: string;
+  role: ClubMemberRole;
+  status: ClubMemberStatus;
+  created_at: string;
+};
+
+export type EventType = "open_play" | "club_meetup" | "training" | "tournament";
+export type EventStatus = "draft" | "published" | "cancelled" | "completed";
+export type EventAttendeeStatus = "joined" | "waitlisted" | "cancelled";
+
+export type CommunityEvent = {
+  id: string;
+  creator_id: string;
+  venue_id: string | null;
+  club_id: string | null;
+  court_id: string | null;
+  /**
+   * The single booking holding this event's court. Null when no court is
+   * reserved. An event can never give more than one player a booking on
+   * the same court/time — see bookings_no_overlap.
+   */
+  booking_id: string | null;
+  title: string;
+  description: string | null;
+  event_type: EventType;
+  skill_level: ClubSkillLevel | null;
+  start_time: string;
+  end_time: string | null;
+  /** Null means unlimited. */
+  max_players: number | null;
+  /**
+   * Integer minor units. DISPLAY ONLY as of Phase 7.8a — collected by the
+   * organizer at the venue, never charged online. Online per-seat payment
+   * is Phase 7.9.
+   */
+  price_amount: number;
+  currency: string;
+  status: EventStatus;
+  /** Denormalized, trigger-maintained (seated players only) — never client-writable. */
+  participant_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EventAttendee = {
+  event_id: string;
+  user_id: string;
+  status: EventAttendeeStatus;
+  created_at: string;
+};
+
+/**
  * Phase 4A: availability + booking engine foundation. No booking UI or
  * payments yet — see ARCHITECTURE.md's Phase 4A section for the full
  * model (timezone strategy, operating hours, blocked periods, the
@@ -524,6 +637,34 @@ export type Database = {
         Referral,
         Pick<Referral, "referral_code" | "referrer_user_id" | "referred_user_id"> &
           Partial<Omit<Referral, "id" | "referral_code" | "referrer_user_id" | "referred_user_id" | "created_at" | "updated_at">>
+      >;
+      posts: TableDef<
+        Post,
+        Pick<Post, "user_id" | "content"> & Partial<Omit<Post, "id" | "user_id" | "content" | "like_count" | "comment_count" | "created_at" | "updated_at">>
+      >;
+      post_likes: TableDef<PostLike, Pick<PostLike, "post_id" | "user_id">>;
+      post_comments: TableDef<
+        PostComment,
+        Pick<PostComment, "post_id" | "user_id" | "content"> & Partial<Omit<PostComment, "id" | "post_id" | "user_id" | "content" | "created_at">>
+      >;
+      follows: TableDef<Follow, Pick<Follow, "follower_id" | "following_id">>;
+      events: TableDef<
+        CommunityEvent,
+        Pick<CommunityEvent, "creator_id" | "title" | "start_time"> &
+          Partial<Omit<CommunityEvent, "id" | "creator_id" | "title" | "start_time" | "participant_count" | "created_at" | "updated_at">>
+      >;
+      event_attendees: TableDef<
+        EventAttendee,
+        Pick<EventAttendee, "event_id" | "user_id"> & Partial<Pick<EventAttendee, "status">>
+      >;
+      clubs: TableDef<
+        Club,
+        Pick<Club, "owner_id" | "name"> &
+          Partial<Omit<Club, "id" | "owner_id" | "name" | "member_count" | "created_at" | "updated_at">>
+      >;
+      club_members: TableDef<
+        ClubMember,
+        Pick<ClubMember, "club_id" | "user_id"> & Partial<Pick<ClubMember, "role" | "status">>
       >;
     };
     Views: Record<string, never>;

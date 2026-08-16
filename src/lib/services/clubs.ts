@@ -1,0 +1,208 @@
+import type { SupabaseClient, PostgrestError } from "@supabase/supabase-js";
+import type { Club, ClubMember, ClubMemberRole, Database, PublicProfile } from "@/lib/supabase/types";
+
+type Client = SupabaseClient<Database>;
+
+const UNIQUE_VIOLATION = "23505";
+const POSTGRES_INVALID_TEXT_REPRESENTATION = "22P02";
+
+function isUniqueViolation(error: PostgrestError): boolean {
+  return error.code === UNIQUE_VIOLATION;
+}
+
+export type ClubMemberWithProfile = ClubMember & { profile: PublicProfile | null };
+
+export type ClubWithViewerState = Club & {
+  /** The viewer's role in this club, or null if they aren't an active member. */
+  viewerRole: ClubMemberRole | null;
+  /** True when the viewer has a request awaiting approval. */
+  viewerPending: boolean;
+};
+
+/**
+ * Public/approval-required clubs, newest first. RLS already hides private
+ * clubs the caller isn't a member of, so no visibility filter is applied
+ * here — the database is the boundary, not this query.
+ */
+export async function listDiscoverableClubs(supabase: Client, limit = 24): Promise<Club[]> {
+  const { data, error } = await supabase
+    .from("clubs")
+    .select("*")
+    .eq("status", "active")
+    .order("member_count", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Every club the given user belongs to, whatever their role. */
+export async function listClubsForUser(supabase: Client, userId: string): Promise<Club[]> {
+  const { data: memberships, error: membershipsError } = await supabase
+    .from("club_members")
+    .select("club_id")
+    .eq("user_id", userId)
+    .eq("status", "active");
+  if (membershipsError) throw membershipsError;
+
+  const clubIds = (memberships ?? []).map((m) => m.club_id);
+  if (clubIds.length === 0) return [];
+
+  const { data, error } = await supabase.from("clubs").select("*").in("id", clubIds).order("name");
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * One club plus the viewer's own relationship to it. Returns null for a
+ * club that doesn't exist, is private to the viewer, or whose id isn't a
+ * valid UUID — all three look identical to the caller, same posture as
+ * getVenueDetail().
+ */
+export async function getClubForViewer(supabase: Client, clubId: string, viewerId: string | null): Promise<ClubWithViewerState | null> {
+  const { data: club, error } = await supabase.from("clubs").select("*").eq("id", clubId).maybeSingle();
+  if (error) {
+    if (error.code === POSTGRES_INVALID_TEXT_REPRESENTATION) return null;
+    throw error;
+  }
+  if (!club) return null;
+
+  if (!viewerId) return { ...club, viewerRole: null, viewerPending: false };
+
+  const { data: membership, error: membershipError } = await supabase
+    .from("club_members")
+    .select("role, status")
+    .eq("club_id", clubId)
+    .eq("user_id", viewerId)
+    .maybeSingle();
+  if (membershipError) throw membershipError;
+
+  return {
+    ...club,
+    viewerRole: membership?.status === "active" ? membership.role : null,
+    viewerPending: membership?.status === "pending",
+  };
+}
+
+/**
+ * A club's roster joined to display names via public_profiles — profiles'
+ * own RLS is own-row-only, so an embed through it would silently return
+ * null for every other member.
+ */
+export async function listClubMembers(supabase: Client, clubId: string): Promise<ClubMemberWithProfile[]> {
+  const { data: members, error } = await supabase
+    .from("club_members")
+    .select("*")
+    .eq("club_id", clubId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  if (!members || members.length === 0) return [];
+
+  const userIds = Array.from(new Set(members.map((m) => m.user_id)));
+  const { data: profiles, error: profilesError } = await supabase
+    .from("public_profiles")
+    .select("id, display_name, avatar_url")
+    .in("id", userIds);
+  if (profilesError) throw profilesError;
+
+  const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
+  return members.map((member) => ({ ...member, profile: profileById.get(member.user_id) ?? null }));
+}
+
+export type CreateClubInput = {
+  name: string;
+  description?: string | null;
+  location?: string | null;
+  imageUrl?: string | null;
+  skillLevel: Club["skill_level"];
+  clubType: Club["club_type"];
+  visibility: Club["visibility"];
+};
+
+/**
+ * Creates a club owned by the caller. Requires no platform role beyond a
+ * signed-in account — a `player` can own a club, and doing so grants no
+ * venue, court, availability, or payout access anywhere.
+ *
+ * The owner's own `club_members` row is inserted by the
+ * create_club_owner_membership() trigger, not here, so ownership can
+ * never be half-written.
+ */
+export async function createClub(supabase: Client, ownerId: string, values: CreateClubInput): Promise<Club> {
+  const { data, error } = await supabase
+    .from("clubs")
+    .insert({
+      owner_id: ownerId,
+      name: values.name,
+      description: values.description ?? null,
+      location: values.location ?? null,
+      image_url: values.imageUrl ?? null,
+      skill_level: values.skillLevel,
+      club_type: values.clubType,
+      visibility: values.visibility,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateClub(supabase: Client, clubId: string, values: Partial<CreateClubInput>): Promise<void> {
+  const { error } = await supabase
+    .from("clubs")
+    .update({
+      ...(values.name !== undefined ? { name: values.name } : {}),
+      ...(values.description !== undefined ? { description: values.description } : {}),
+      ...(values.location !== undefined ? { location: values.location } : {}),
+      ...(values.imageUrl !== undefined ? { image_url: values.imageUrl } : {}),
+      ...(values.skillLevel !== undefined ? { skill_level: values.skillLevel } : {}),
+      ...(values.clubType !== undefined ? { club_type: values.clubType } : {}),
+      ...(values.visibility !== undefined ? { visibility: values.visibility } : {}),
+    })
+    .eq("id", clubId);
+  if (error) throw error;
+}
+
+/**
+ * Requests membership. The resulting role and status are decided by the
+ * enforce_club_member_insert() trigger from the club's visibility — a
+ * public club admits immediately, an approval_required club creates a
+ * pending request, and a private club rejects outright. Nothing the
+ * caller passes can influence that.
+ *
+ * Idempotent: re-requesting an existing membership is a no-op.
+ */
+export async function requestClubMembership(supabase: Client, clubId: string, userId: string): Promise<void> {
+  const { error } = await supabase.from("club_members").insert({ club_id: clubId, user_id: userId });
+  if (error && !isUniqueViolation(error)) throw error;
+}
+
+export async function leaveClub(supabase: Client, clubId: string, userId: string): Promise<void> {
+  const { error } = await supabase.from("club_members").delete().eq("club_id", clubId).eq("user_id", userId);
+  if (error) throw error;
+}
+
+/** Approve a pending request. RLS restricts this to the club's owner/admins. */
+export async function approveClubMember(supabase: Client, clubId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("club_members")
+    .update({ status: "active" })
+    .eq("club_id", clubId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function removeClubMember(supabase: Client, clubId: string, userId: string): Promise<void> {
+  const { error } = await supabase.from("club_members").delete().eq("club_id", clubId).eq("user_id", userId);
+  if (error) throw error;
+}
+
+/**
+ * Promote/demote a member. Only the club's actual owner can grant
+ * 'admin' — enforce_club_member_update() silently reverts the role
+ * change otherwise, so a club admin cannot escalate themselves.
+ */
+export async function setClubMemberRole(supabase: Client, clubId: string, userId: string, role: ClubMemberRole): Promise<void> {
+  const { error } = await supabase.from("club_members").update({ role }).eq("club_id", clubId).eq("user_id", userId);
+  if (error) throw error;
+}

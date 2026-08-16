@@ -40,12 +40,13 @@ export type OwnerBookingWithDetails = {
   currency: string;
   paymentProvider: "stripe" | "paymongo";
   paidAt: string | null;
+  cancelledAt: string | null;
   confirmationCode: string;
   createdAt: string;
 };
 
 const BOOKING_COLUMNS =
-  "id, court_id, user_id, start_time, end_time, status, price_amount, currency, payment_provider, paid_at, confirmation_code, created_at";
+  "id, court_id, user_id, start_time, end_time, status, price_amount, currency, payment_provider, paid_at, cancelled_at, confirmation_code, created_at";
 
 type CourtRow = { id: string; name: string; venue_id: string };
 type VenueRow = { id: string; name: string; timezone: string };
@@ -63,7 +64,7 @@ type VenueRow = { id: string; name: string; timezone: string };
  * a permission pre-check, it's also where the venue name/timezone comes
  * from, and it lets a caller with zero venues get an early, cheap `[]`.
  */
-async function listOwnerCourtsWithVenue(
+export async function listOwnerCourtsWithVenue(
   supabase: Client,
   ownerId: string
 ): Promise<{ courts: CourtRow[]; venuesById: Map<string, VenueRow> }> {
@@ -144,6 +145,7 @@ export async function listBookingsForOwner(
       currency: b.currency,
       paymentProvider: b.payment_provider,
       paidAt: b.paid_at,
+      cancelledAt: b.cancelled_at,
       confirmationCode: b.confirmation_code,
       createdAt: b.created_at,
     };
@@ -204,6 +206,7 @@ export async function getBookingDetailForOwner(supabase: Client, bookingId: stri
     currency: booking.currency,
     paymentProvider: booking.payment_provider,
     paidAt: booking.paid_at,
+    cancelledAt: booking.cancelled_at,
     confirmationCode: booking.confirmation_code,
     createdAt: booking.created_at,
   };

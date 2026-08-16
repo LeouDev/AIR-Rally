@@ -6,6 +6,7 @@ import { User, MapPin, CreditCard, Hash } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { BookingStatus } from "@/lib/supabase/types";
 import type { OwnerBookingWithDetails } from "@/lib/services/ownerBookings";
+import { buildBookingTimeline } from "@/lib/services/bookingTimeline";
 
 const STATUS_STYLES: Record<BookingStatus, string> = {
   pending: "bg-warning/15 text-warning",
@@ -97,6 +98,27 @@ export function BookingDetailDialog({
               <div className="flex items-center gap-2">
                 <Hash className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="text-muted-foreground">Booked {formatDateTime(booking.createdAt, booking.venueTimezone)}</span>
+              </div>
+
+              <div className="border-t border-border pt-4">
+                <p className="mb-3 font-medium text-foreground">Timeline</p>
+                <ol className="flex flex-col gap-2.5">
+                  {buildBookingTimeline(booking).map((entry) => (
+                    <li key={`${entry.at}-${entry.label}`} className="flex items-start gap-2.5">
+                      <span
+                        className={cn(
+                          "mt-1.5 size-1.5 shrink-0 rounded-full",
+                          entry.upcoming ? "bg-muted-foreground/40" : "bg-primary"
+                        )}
+                        aria-hidden="true"
+                      />
+                      <div className={cn(entry.upcoming && "text-muted-foreground")}>
+                        <p className={cn("leading-tight", !entry.upcoming && "text-foreground")}>{entry.label}</p>
+                        <p className="text-xs text-muted-foreground">{formatDateTime(entry.at, booking.venueTimezone)}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
               </div>
             </div>
           </>

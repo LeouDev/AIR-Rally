@@ -50,6 +50,31 @@ describe("parseExploreFilters", () => {
   it("takes the first value when a param repeats as an array (e.g. ?q=a&q=b)", () => {
     expect(parseExploreFilters({ q: ["first", "second"] }).q).toBe("first");
   });
+
+  it("applies the distance filter only when lat, lng, AND radius are all present and in-range", () => {
+    const full = parseExploreFilters({ lat: "10.3", lng: "123.9", radius: "25" });
+    expect(full.lat).toBe(10.3);
+    expect(full.lng).toBe(123.9);
+    expect(full.radiusKm).toBe(25);
+
+    expect(parseExploreFilters({ lat: "10.3", radius: "25" }).radiusKm).toBeUndefined();
+    expect(parseExploreFilters({ lat: "95", lng: "123.9", radius: "25" }).lat).toBeUndefined();
+    expect(parseExploreFilters({ lat: "10.3", lng: "123.9", radius: "-5" }).radiusKm).toBeUndefined();
+  });
+
+  it("accepts only well-formed date/time availability params", () => {
+    const good = parseExploreFilters({ date: "2026-08-19", time: "18:00" });
+    expect(good.availableOn).toBe("2026-08-19");
+    expect(good.availableAt).toBe("18:00");
+
+    expect(parseExploreFilters({ date: "yesterday" }).availableOn).toBeUndefined();
+    expect(parseExploreFilters({ time: "6pm" }).availableAt).toBeUndefined();
+  });
+
+  it("passes the surface param through as surfaceType", () => {
+    expect(parseExploreFilters({ surface: "Concrete" }).surfaceType).toBe("Concrete");
+    expect(parseExploreFilters({ surface: "   " }).surfaceType).toBeUndefined();
+  });
 });
 
 describe("filtersToSearchParams", () => {
@@ -66,6 +91,12 @@ describe("filtersToSearchParams", () => {
       maxPrice: 800,
       minRating: 4,
       amenityIds: ["a1", "a2"],
+      surfaceType: "Concrete",
+      lat: 10.3157,
+      lng: 123.8854,
+      radiusKm: 25,
+      availableOn: "2026-08-19",
+      availableAt: "18:00",
       sort: "rating" as const,
       page: 2,
     };

@@ -20,6 +20,7 @@ const SAFE_BOOKING_KEYS = [
   "currency",
   "paymentProvider",
   "paidAt",
+  "cancelledAt",
   "confirmationCode",
   "createdAt",
 ].sort();
@@ -37,6 +38,7 @@ const bookingRow = {
   currency: "PHP",
   payment_provider: "paymongo",
   paid_at: "2026-08-19T00:00:00Z",
+  cancelled_at: null,
   confirmation_code: "ABC123",
   created_at: "2026-08-18T00:00:00Z",
   // Provider-secret columns that must never leave this module, even if
@@ -92,6 +94,7 @@ describe("listBookingsForOwner", () => {
         currency: "PHP",
         paymentProvider: "paymongo",
         paidAt: "2026-08-19T00:00:00Z",
+        cancelledAt: null,
         confirmationCode: "ABC123",
         createdAt: "2026-08-18T00:00:00Z",
       },

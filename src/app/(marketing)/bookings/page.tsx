@@ -7,6 +7,7 @@ import { CancelBookingButton } from "@/components/court/CancelBookingButton";
 import { BookingRefundStatus } from "@/components/court/BookingRefundStatus";
 import { RescheduleButton } from "@/components/court/RescheduleButton";
 import { ReviewForm } from "@/components/court/ReviewForm";
+import { BookingSections } from "@/components/court/BookingSections";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { listMyBookingsWithDetails, type BookingWithDetails } from "@/lib/services/bookings";
@@ -53,6 +54,35 @@ function isCancellable(booking: BookingWithDetails): boolean {
 }
 
 /**
+ * Buckets this viewer's bookings against a single "now", captured once
+ * here so every downstream comparison (which section a booking lands in,
+ * and its "starts in" countdown) agrees on the same instant.
+ */
+function partitionBookings(bookings: BookingWithDetails[]) {
+  const now = Date.now();
+  return {
+    now,
+    upcoming: bookings.filter((b) => b.status !== "cancelled" && new Date(b.start_time).getTime() > now),
+    completed: bookings.filter((b) => b.status !== "cancelled" && new Date(b.start_time).getTime() <= now),
+    cancelled: bookings.filter((b) => b.status === "cancelled"),
+  };
+}
+
+/**
+ * "Starts in ..." for an imminent booking — computed at render time, not
+ * a scheduled reminder (this codebase has no scheduler; see ROADMAP).
+ * Null beyond 48 hours out, where a countdown stops being useful.
+ */
+function startsInLabel(startTime: string, now: number): string | null {
+  const msUntil = new Date(startTime).getTime() - now;
+  if (msUntil <= 0 || msUntil > 48 * 60 * 60_000) return null;
+  const hours = Math.floor(msUntil / (60 * 60_000));
+  if (hours >= 1) return `Starts in ${hours} hour${hours === 1 ? "" : "s"}`;
+  const minutes = Math.max(1, Math.floor(msUntil / 60_000));
+  return `Starts in ${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+/**
  * A cheap client-visible pre-filter only — showing/hiding the button. The
  * real eligibility check (no succeeded refund, not itself a replacement,
  * no in-flight reschedule) runs server-side the moment the dialog opens
@@ -81,6 +111,72 @@ export default async function BookingsPage() {
     (user ? await listReviewableBookings(supabase, user.id) : []).map((r) => [r.bookingId, r.venueId])
   );
 
+  const { now, upcoming, completed, cancelled } = partitionBookings(bookings);
+
+  function renderBooking(booking: BookingWithDetails) {
+    const startsIn = startsInLabel(booking.start_time, now);
+    return (
+      <li key={booking.id} className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-medium text-foreground">{booking.venueName}</p>
+              <Badge className={cn("border-transparent", STATUS_STYLES[booking.status])}>{STATUS_LABELS[booking.status]}</Badge>
+              {startsIn && <Badge className="border-transparent bg-primary/15 text-primary">{startsIn}</Badge>}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {booking.courtName} · {formatWhen(booking)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {formatMoney(booking.price_amount, booking.currency)} · Confirmation {booking.confirmation_code}
+            </p>
+            {(() => {
+              const refunds = refundsByBooking.get(booking.id);
+              const latestRefund = refunds?.[0];
+              return latestRefund ? (
+                <div className="mt-1">
+                  <BookingRefundStatus status={latestRefund.status} amount={latestRefund.amount} currency={latestRefund.currency} />
+                </div>
+              ) : null;
+            })()}
+            {(() => {
+              const reschedules = reschedulesByBooking.get(booking.id) ?? [];
+              const completedReschedule = reschedules.find((r) => r.status === "completed");
+              return completedReschedule ? <p className="mt-1 text-xs text-muted-foreground">This booking was rescheduled.</p> : null;
+            })()}
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {isReschedulable(booking, (reschedulesByBooking.get(booking.id) ?? []).some((r) => r.status === "completed")) && (
+              <RescheduleButton bookingId={booking.id} />
+            )}
+            {isCancellable(booking) && (
+              <CancelBookingButton
+                bookingId={booking.id}
+                venueName={booking.venueName}
+                courtName={booking.courtName}
+                whenLabel={formatWhen(booking)}
+              />
+            )}
+          </div>
+        </div>
+
+        {reviewableVenueIdByBookingId.has(booking.id) && (
+          <div className="border-t border-border pt-3">
+            <p className="mb-2 text-sm font-medium text-foreground">How was your experience?</p>
+            <ReviewForm venueId={reviewableVenueIdByBookingId.get(booking.id)!} bookingId={booking.id} />
+          </div>
+        )}
+      </li>
+    );
+  }
+
+  function renderSection(items: BookingWithDetails[], emptyMessage: string) {
+    if (items.length === 0) {
+      return <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-6 text-center text-sm text-muted-foreground">{emptyMessage}</p>;
+    }
+    return <ul className="flex flex-col gap-3">{items.map(renderBooking)}</ul>;
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
       <h1 className="text-2xl font-semibold text-foreground">Your Bookings</h1>
@@ -100,60 +196,28 @@ export default async function BookingsPage() {
           />
         </div>
       ) : (
-        <ul className="mt-8 flex flex-col gap-3">
-          {bookings.map((booking) => (
-            <li key={booking.id} className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-col gap-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium text-foreground">{booking.venueName}</p>
-                    <Badge className={cn("border-transparent", STATUS_STYLES[booking.status])}>{STATUS_LABELS[booking.status]}</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {booking.courtName} · {formatWhen(booking)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatMoney(booking.price_amount, booking.currency)} · Confirmation {booking.confirmation_code}
-                  </p>
-                  {(() => {
-                    const refunds = refundsByBooking.get(booking.id);
-                    const latestRefund = refunds?.[0];
-                    return latestRefund ? (
-                      <div className="mt-1">
-                        <BookingRefundStatus status={latestRefund.status} amount={latestRefund.amount} currency={latestRefund.currency} />
-                      </div>
-                    ) : null;
-                  })()}
-                  {(() => {
-                    const reschedules = reschedulesByBooking.get(booking.id) ?? [];
-                    const completed = reschedules.find((r) => r.status === "completed");
-                    return completed ? <p className="mt-1 text-xs text-muted-foreground">This booking was rescheduled.</p> : null;
-                  })()}
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  {isReschedulable(booking, (reschedulesByBooking.get(booking.id) ?? []).some((r) => r.status === "completed")) && (
-                    <RescheduleButton bookingId={booking.id} />
-                  )}
-                  {isCancellable(booking) && (
-                    <CancelBookingButton
-                      bookingId={booking.id}
-                      venueName={booking.venueName}
-                      courtName={booking.courtName}
-                      whenLabel={formatWhen(booking)}
-                    />
-                  )}
-                </div>
-              </div>
-
-              {reviewableVenueIdByBookingId.has(booking.id) && (
-                <div className="border-t border-border pt-3">
-                  <p className="mb-2 text-sm font-medium text-foreground">How was your experience?</p>
-                  <ReviewForm venueId={reviewableVenueIdByBookingId.get(booking.id)!} bookingId={booking.id} />
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+        <BookingSections
+          sections={[
+            {
+              value: "upcoming",
+              label: "Upcoming",
+              count: upcoming.length,
+              content: renderSection(upcoming, "No upcoming bookings. Find a court to get back on the schedule."),
+            },
+            {
+              value: "completed",
+              label: "Completed",
+              count: completed.length,
+              content: renderSection(completed, "No completed sessions yet."),
+            },
+            {
+              value: "cancelled",
+              label: "Cancelled",
+              count: cancelled.length,
+              content: renderSection(cancelled, "No cancelled bookings."),
+            },
+          ]}
+        />
       )}
     </div>
   );

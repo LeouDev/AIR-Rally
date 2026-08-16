@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Settings, LayoutGrid, Play } from "lucide-react";
+import { Settings, LayoutGrid, Play, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProfileForm } from "@/components/profile/ProfileForm";
@@ -33,6 +33,10 @@ export function ProfileActionsMenu({ profile, email }: ProfileActionsMenuProps) 
         <Button type="button" variant="outline" className="gap-2" onClick={() => router.push("/court-side")}>
           <LayoutGrid className="size-4" aria-hidden="true" />
           COURT/Side
+        </Button>
+        <Button type="button" variant="outline" className="gap-2" onClick={() => router.push("/clubs")}>
+          <Users className="size-4" aria-hidden="true" />
+          Clubs
         </Button>
         <Button type="button" variant="outline" className="gap-2" onClick={() => router.push("/explore")}>
           <Play className="size-4" aria-hidden="true" />

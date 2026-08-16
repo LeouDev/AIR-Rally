@@ -1,4 +1,4 @@
-import { updateProfile, updateAvatar, getProfileStats } from "@/lib/services/profiles";
+import { updateProfile, updateAvatar, getProfileStats, searchPublicProfiles, getPublicProfile } from "@/lib/services/profiles";
 import { createMockSupabase, createTableMockSupabase } from "@/lib/test-helpers/mockSupabase";
 
 describe("profiles service", () => {
@@ -82,5 +82,32 @@ describe("profiles service", () => {
 
     expect(stats.tripCount).toBe(0);
     expect(stats.reviewCount).toBe(0);
+  });
+});
+
+describe("getPublicProfile", () => {
+  it("returns null for a user id that doesn't exist", async () => {
+    const supabase = createMockSupabase({ data: null, error: null });
+    await expect(getPublicProfile(supabase, "user-1")).resolves.toBeNull();
+  });
+
+  it("returns the matching public profile", async () => {
+    const profile = { id: "user-1", display_name: "Lea Santos", avatar_url: null };
+    const supabase = createMockSupabase({ data: profile, error: null });
+    await expect(getPublicProfile(supabase, "user-1")).resolves.toEqual(profile);
+  });
+});
+
+describe("searchPublicProfiles", () => {
+  it("returns an empty array without querying when the search term is blank", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await expect(searchPublicProfiles(supabase, "   ")).resolves.toEqual([]);
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it("returns matching public profiles for a real search term", async () => {
+    const matches = [{ id: "user-1", display_name: "Lea Santos", avatar_url: null }];
+    const supabase = createMockSupabase({ data: matches, error: null });
+    await expect(searchPublicProfiles(supabase, "lea")).resolves.toEqual(matches);
   });
 });

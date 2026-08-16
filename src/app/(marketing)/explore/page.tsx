@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
-import { searchMarketplaceVenues } from "@/lib/services/venues";
+import { searchMarketplaceVenues, listSurfaceTypes } from "@/lib/services/venues";
 import { listAmenities } from "@/lib/services/amenities";
 import { listFavoriteVenueIds } from "@/lib/services/favorites";
 import { toVenueCardData } from "@/lib/services/exploreCards";
@@ -32,9 +32,10 @@ export default async function ExplorePage({ searchParams }: ExplorePageProps) {
   const filters = parseExploreFilters(rawParams);
 
   const supabase = await createClient();
-  const [searchResult, amenities, user] = await Promise.all([
+  const [searchResult, amenities, surfaceTypes, user] = await Promise.all([
     searchMarketplaceVenues(supabase, filters),
     listAmenities(supabase),
+    listSurfaceTypes(supabase),
     getCurrentUser(),
   ]);
 
@@ -67,6 +68,7 @@ export default async function ExplorePage({ searchParams }: ExplorePageProps) {
       <div className="mt-6">
         <ExploreLayout
           amenities={amenities}
+          surfaceTypes={surfaceTypes}
           resultCount={searchResult.total}
           results={results}
           pagination={

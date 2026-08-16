@@ -4,18 +4,23 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui/button";
 import { CourtSideFeed } from "@/components/court-side/CourtSideFeed";
 import { getCurrentUserWithProfile } from "@/lib/supabase/auth";
+import { createClient } from "@/lib/supabase/server";
+import { listFeedPosts, listLikedPostIds } from "@/lib/services/posts";
+import { listUpcomingEvents, listAttendingEventIds } from "@/lib/services/events";
+import { listFollowingIds, getFollowCounts } from "@/lib/services/follows";
 
 export const metadata = { title: "COURT/Side" };
-// Renders per-user data (own profile via a cookie-scoped Supabase session)
-// — must never be cached/shared across visitors like a static page would be.
+// Renders per-user data (own profile, own like/follow/RSVP state via a
+// cookie-scoped Supabase session) — must never be cached/shared across
+// visitors like a static page would be.
 export const dynamic = "force-dynamic";
 
 export default async function CourtSidePage() {
   const session = await getCurrentUserWithProfile();
 
-  return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      {!session ? (
+  if (!session) {
+    return (
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
         <EmptyState
           icon={Users}
           title="Sign in to join COURT/Side"
@@ -31,12 +36,40 @@ export default async function CourtSidePage() {
             </div>
           }
         />
-      ) : (
-        <CourtSideFeed
-          displayName={session.profile?.display_name || session.user.email || "Player"}
-          avatarUrl={session.profile?.avatar_url ?? null}
-        />
-      )}
+      </div>
+    );
+  }
+
+  const supabase = await createClient();
+  const [{ posts, nextCursor }, events] = await Promise.all([listFeedPosts(supabase), listUpcomingEvents(supabase)]);
+
+  const postIds = posts.map((p) => p.id);
+  const eventIds = events.map((e) => e.id);
+  const authorIds = Array.from(new Set(posts.map((p) => p.user_id)));
+
+  const [likedPostIds, followingIds, attendingEventIds, followCounts] = await Promise.all([
+    listLikedPostIds(supabase, session.user.id, postIds),
+    listFollowingIds(supabase, session.user.id, authorIds),
+    listAttendingEventIds(supabase, session.user.id, eventIds),
+    getFollowCounts(supabase, session.user.id),
+  ]);
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+      <CourtSideFeed
+        currentUserId={session.user.id}
+        displayName={session.profile?.display_name || session.user.email || "Player"}
+        avatarUrl={session.profile?.avatar_url ?? null}
+        isAdmin={session.profile?.role === "admin"}
+        initialPosts={posts}
+        initialNextCursor={nextCursor}
+        initialLikedPostIds={likedPostIds}
+        initialFollowingIds={followingIds}
+        initialEvents={events}
+        initialAttendingEventIds={attendingEventIds}
+        initialFollowerCount={followCounts.followers}
+        initialFollowingCount={followCounts.following}
+      />
     </div>
   );
 }

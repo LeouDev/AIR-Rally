@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Home, Sun, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useExploreFilters } from "@/lib/hooks/useExploreFilters";
@@ -17,24 +19,27 @@ const COURT_TYPES: { value: "any" | "indoor" | "outdoor"; label: string; icon: t
 ];
 
 const RATINGS = [0, 4, 4.5];
+const RADII_KM = [5, 10, 25, 50];
 const PRICE_DEBOUNCE_MS = 500;
+const ANY_OPTION = "any";
 
 type FilterBarProps = {
   amenities: Amenity[];
+  surfaceTypes: string[];
   className?: string;
 };
 
-export function FilterBar({ amenities, className }: FilterBarProps) {
+export function FilterBar({ amenities, surfaceTypes, className }: FilterBarProps) {
   const { searchParams } = useExploreFilters();
   // Remounting on URL change (Reset, browser back/forward) resets the
   // local price-input state to match the new filters — same effect as the
   // sync-effect this replaces, without a synchronous setState-in-effect.
   // Only re-keys when the URL itself changes, not on every `filters`
   // recompute, so it doesn't fight the debounce below.
-  return <FilterBarFields key={searchParams.toString()} amenities={amenities} className={className} />;
+  return <FilterBarFields key={searchParams.toString()} amenities={amenities} surfaceTypes={surfaceTypes} className={className} />;
 }
 
-function FilterBarFields({ amenities, className }: FilterBarProps) {
+function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps) {
   const { filters, applyFilters } = useExploreFilters();
 
   const [minPriceInput, setMinPriceInput] = useState(filters.minPrice?.toString() ?? "");
@@ -59,12 +64,36 @@ function FilterBarFields({ amenities, className }: FilterBarProps) {
     applyFilters({ amenityIds: Array.from(set) });
   }
 
+  function applyRadius(value: string) {
+    if (value === ANY_OPTION) {
+      applyFilters({ lat: undefined, lng: undefined, radiusKm: undefined });
+      return;
+    }
+    const radiusKm = Number(value);
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      toast.error("Your browser doesn't support location access.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        applyFilters({ lat: position.coords.latitude, lng: position.coords.longitude, radiusKm });
+      },
+      () => {
+        toast.error("We couldn't get your location. Allow location access to filter by distance.");
+      }
+    );
+  }
+
   const hasActiveFilters = Boolean(
     filters.indoorOutdoor ||
       filters.minPrice !== undefined ||
       filters.maxPrice !== undefined ||
       filters.minRating ||
-      (filters.amenityIds && filters.amenityIds.length > 0)
+      (filters.amenityIds && filters.amenityIds.length > 0) ||
+      filters.surfaceType ||
+      filters.radiusKm !== undefined ||
+      filters.availableOn ||
+      filters.availableAt
   );
 
   return (
@@ -82,6 +111,12 @@ function FilterBarFields({ amenities, className }: FilterBarProps) {
                 maxPrice: undefined,
                 minRating: undefined,
                 amenityIds: undefined,
+                surfaceType: undefined,
+                lat: undefined,
+                lng: undefined,
+                radiusKm: undefined,
+                availableOn: undefined,
+                availableAt: undefined,
               })
             }
           >
@@ -167,6 +202,75 @@ function FilterBarFields({ amenities, className }: FilterBarProps) {
             </button>
           ))}
         </div>
+      </div>
+
+      <Separator />
+
+      <div className="flex flex-col gap-2.5">
+        <Label className="text-xs font-medium text-muted-foreground uppercase">Surface</Label>
+        {surfaceTypes.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No surface types to filter by yet.</p>
+        ) : (
+          <Select
+            value={filters.surfaceType ?? ANY_OPTION}
+            onValueChange={(value) => applyFilters({ surfaceType: value === ANY_OPTION ? undefined : value })}
+          >
+            <SelectTrigger className="w-full" aria-label="Surface type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ANY_OPTION}>Any surface</SelectItem>
+              {surfaceTypes.map((surface) => (
+                <SelectItem key={surface} value={surface}>
+                  {surface}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+
+      <Separator />
+
+      <div className="flex flex-col gap-2.5">
+        <Label className="text-xs font-medium text-muted-foreground uppercase">Distance from me</Label>
+        <Select value={filters.radiusKm !== undefined ? String(filters.radiusKm) : ANY_OPTION} onValueChange={applyRadius}>
+          <SelectTrigger className="w-full" aria-label="Distance from your location">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ANY_OPTION}>Any distance</SelectItem>
+            {RADII_KM.map((km) => (
+              <SelectItem key={km} value={String(km)}>
+                Within {km} km
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <Separator />
+
+      <div className="flex flex-col gap-2.5">
+        <Label className="text-xs font-medium text-muted-foreground uppercase">Open on</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            type="date"
+            aria-label="Open on date"
+            value={filters.availableOn ?? ""}
+            onChange={(e) => applyFilters({ availableOn: e.target.value || undefined, availableAt: e.target.value ? filters.availableAt : undefined })}
+          />
+          <Input
+            type="time"
+            aria-label="Open at time"
+            disabled={!filters.availableOn}
+            value={filters.availableAt ?? ""}
+            onChange={(e) => applyFilters({ availableAt: e.target.value || undefined })}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Shows venues open then — check the court page for live availability.
+        </p>
       </div>
 
       <Separator />

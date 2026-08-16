@@ -16,12 +16,13 @@ import type { Amenity } from "@/lib/supabase/types";
 
 type ExploreLayoutProps = {
   amenities: Amenity[];
+  surfaceTypes: string[];
   resultCount: number;
   results: ReactNode;
   pagination: ReactNode;
 };
 
-export function ExploreLayout({ amenities, resultCount, results, pagination }: ExploreLayoutProps) {
+export function ExploreLayout({ amenities, surfaceTypes, resultCount, results, pagination }: ExploreLayoutProps) {
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -50,7 +51,7 @@ export function ExploreLayout({ amenities, resultCount, results, pagination }: E
                   <div className="sm:hidden">
                     <SortSelect />
                   </div>
-                  <FilterBar amenities={amenities} />
+                  <FilterBar amenities={amenities} surfaceTypes={surfaceTypes} />
                 </div>
               </SheetContent>
             </Sheet>
@@ -61,7 +62,7 @@ export function ExploreLayout({ amenities, resultCount, results, pagination }: E
       <div className="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-[240px_1fr]">
         <aside className="hidden lg:block">
           <div className="sticky top-24">
-            <FilterBar amenities={amenities} />
+            <FilterBar amenities={amenities} surfaceTypes={surfaceTypes} />
           </div>
         </aside>
 

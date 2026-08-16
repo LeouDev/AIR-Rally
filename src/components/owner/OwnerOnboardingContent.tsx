@@ -14,11 +14,17 @@ type OwnerOnboardingContentProps = {
   hasSubmittedApplication: boolean;
 };
 
+// Wording constraint: never imply funds automatically reach an owner's
+// bank account. Checkout genuinely works, so "customers pay securely
+// online" is true; settlement/payout mechanics are not live yet, so
+// "get paid", "payout", and "money in your account" are all off-limits
+// here (see lib/services/venueEarnings.ts's doc comment).
 const BENEFITS = [
-  { emoji: "🏸", title: "Fill your empty court hours", description: "Players discover your facility and book available times." },
-  { emoji: "💰", title: "Get paid upfront", description: "Customers pay before playing. No chasing payments. No manual collection." },
-  { emoji: "📅", title: "Manage everything easily", description: "Control your availability, court schedule, blocked times, and bookings." },
-  { emoji: "📸", title: "Showcase your facility", description: "Upload court photos, venue photos, amenities, and location." },
+  { emoji: "🏸", title: "Get discovered by more customers", description: "Players search, compare, and find your facility on the AIR/Rally marketplace." },
+  { emoji: "💳", title: "Secure online payments", description: "Customers pay securely online when they book — no chasing payments, no manual collection." },
+  { emoji: "📅", title: "A digital calendar that runs itself", description: "Manage availability, court schedules, and blocked times in one place." },
+  { emoji: "🗂️", title: "Less admin work", description: "Bookings, cancellations, and reschedules are handled for you instead of over chat." },
+  { emoji: "📸", title: "Better visibility for your venue", description: "Showcase court photos, venue photos, amenities, and your exact location." },
   { emoji: "⭐", title: "Build your reputation", description: "Receive reviews, ratings, and repeat customers." },
 ];
 

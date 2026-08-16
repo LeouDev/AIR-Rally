@@ -214,6 +214,22 @@ export type MarketplaceFilters = {
   maxPrice?: number;
   minRating?: number;
   amenityIds?: string[];
+  /** Case-insensitive match against courts.surface_type (free text — see listSurfaceTypes for the live value set). */
+  surfaceType?: string;
+  /** Distance filter — only applied when lat, lng, AND radiusKm are all present. */
+  lat?: number;
+  lng?: number;
+  radiusKm?: number;
+  /**
+   * Operating-hours availability approximation (a "YYYY-MM-DD" date and
+   * optional "HH:MM" time): keeps venues whose venue_operating_hours
+   * cover that day (and time, when given). NOT a live per-court slot
+   * check — a venue open at that hour may still be fully booked. Court
+   * Details' get_available_slots remains the real booking-time source
+   * of truth.
+   */
+  availableOn?: string;
+  availableAt?: string;
   sort?: VenueSortOption;
   page?: number;
   pageSize?: number;
@@ -296,6 +312,44 @@ export async function searchMarketplaceVenues(
     query = query.gte("average_rating", filters.minRating);
   }
 
+  if (filters.surfaceType) {
+    const surfaceTerm = sanitizeSearchTerm(filters.surfaceType);
+    // Courts' public RLS already scopes this to active courts of active
+    // venues, so an inactive court's surface can't match a search.
+    const { data: surfaceCourts, error: surfaceError } = await supabase
+      .from("courts")
+      .select("venue_id")
+      .ilike("surface_type", surfaceTerm);
+    if (surfaceError) throw surfaceError;
+    const surfaceVenueIds = Array.from(new Set((surfaceCourts ?? []).map((row) => row.venue_id)));
+    query = query.in("id", surfaceVenueIds);
+  }
+
+  if (filters.availableOn) {
+    const date = new Date(`${filters.availableOn}T00:00:00Z`);
+    if (!Number.isNaN(date.getTime())) {
+      const dayOfWeek = date.getUTCDay();
+      const { data: hoursRows, error: hoursError } = await supabase
+        .from("venue_operating_hours")
+        .select("venue_id, start_time, end_time")
+        .eq("day_of_week", dayOfWeek);
+      if (hoursError) throw hoursError;
+
+      let matching = hoursRows ?? [];
+      if (filters.availableAt && /^\d{2}:\d{2}$/.test(filters.availableAt)) {
+        const [h, m] = filters.availableAt.split(":").map(Number);
+        const minutes = h * 60 + m;
+        const toMinutes = (hms: string) => {
+          const [hh, mm] = hms.split(":").map(Number);
+          return hh * 60 + mm;
+        };
+        matching = matching.filter((row) => toMinutes(row.start_time) <= minutes && minutes < toMinutes(row.end_time));
+      }
+      const openVenueIds = Array.from(new Set(matching.map((row) => row.venue_id)));
+      query = query.in("id", openVenueIds);
+    }
+  }
+
   const amenityIds = (filters.amenityIds ?? []).filter((id) => UUID_RE.test(id));
   if (amenityIds.length > 0) {
     const { data: amenityRows, error: amenityError } = await supabase
@@ -333,10 +387,36 @@ export async function searchMarketplaceVenues(
       query = query.order("average_rating", { ascending: false }).order("review_count", { ascending: false });
   }
 
-  const { data, error, count } = await query.range(from, to);
+  const geoActive =
+    filters.lat !== undefined && filters.lng !== undefined && filters.radiusKm !== undefined && filters.radiusKm > 0;
+
+  if (!geoActive) {
+    const { data, error, count } = await query.range(from, to);
+    if (error) throw error;
+    return { venues: data ?? [], total: count ?? 0, page, pageSize };
+  }
+
+  // Distance path: fetch every row the DB-side filters allow, then
+  // radius-cut and paginate in JS — the same no-PostGIS trade-off
+  // listNearbyVenues documents. A DB-side .range() here would paginate
+  // BEFORE the radius cut and silently drop in-radius venues from later
+  // pages. Venues without coordinates are excluded outright, same as
+  // listNearbyVenues. Sorted by distance only under the default
+  // "recommended" sort; an explicit price/rating sort keeps its DB order.
+  const { data, error } = await query;
   if (error) throw error;
 
-  return { venues: data ?? [], total: count ?? 0, page, pageSize };
+  const withDistance = (data ?? [])
+    .filter((v): v is VenueMarketplaceRow & { latitude: number; longitude: number } => v.latitude !== null && v.longitude !== null)
+    .map((venue) => ({ venue, distanceKm: haversineDistanceKm(filters.lat!, filters.lng!, venue.latitude, venue.longitude) }))
+    .filter((entry) => entry.distanceKm <= filters.radiusKm!);
+
+  if (!filters.sort || filters.sort === "recommended") {
+    withDistance.sort((a, b) => a.distanceKm - b.distanceKm);
+  }
+
+  const venues = withDistance.slice(from, from + pageSize).map((entry) => entry.venue);
+  return { venues, total: withDistance.length, page, pageSize };
 }
 
 /** A user's favorited venues, active-only (the same visibility rule as
@@ -375,7 +455,7 @@ export async function listFeaturedVenues(supabase: Client, limit = 6): Promise<V
  * calculation, so a spherical approximation (not a geodesic ellipsoid
  * model) is perfectly adequate here.
  */
-function haversineDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+export function haversineDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
   const earthRadiusKm = 6371;
   const dLat = toRad(lat2 - lat1);
@@ -405,6 +485,25 @@ export async function listNearbyVenues(supabase: Client, lat: number, lng: numbe
     .sort((a, b) => a.distanceKm - b.distanceKm)
     .slice(0, limit)
     .map((entry) => entry.venue);
+}
+
+/**
+ * Distinct surface types across active courts, for the search filter —
+ * derived from the live data (same precedent as listActiveCities) since
+ * courts.surface_type is free text with no CHECK constraint. Dedupes
+ * case-insensitively, keeping the first-seen casing.
+ */
+export async function listSurfaceTypes(supabase: Client): Promise<string[]> {
+  const { data, error } = await supabase.from("courts").select("surface_type").not("surface_type", "is", null);
+  if (error) throw error;
+  const byLowercase = new Map<string, string>();
+  for (const row of data ?? []) {
+    const value = (row.surface_type ?? "").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (!byLowercase.has(key)) byLowercase.set(key, value);
+  }
+  return Array.from(byLowercase.values()).sort();
 }
 
 /** Distinct cities among active venues, for the search location dropdown. */

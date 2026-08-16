@@ -1,5 +1,7 @@
 import {
   searchMarketplaceVenues,
+  haversineDistanceKm,
+  listSurfaceTypes,
   getVenueDetail,
   listFavoritedVenues,
   getVenueForOwner,
@@ -140,6 +142,103 @@ describe("searchMarketplaceVenues", () => {
     await searchMarketplaceVenues(supabase, { city: "Lahug" });
 
     expect(orSpy).toHaveBeenCalledWith("city.ilike.%Lahug%,address.ilike.%Lahug%");
+  });
+
+  it("restricts to venues with a matching court surface type via a courts lookup", async () => {
+    const supabase = createTableMockSupabase({
+      courts: { data: [{ venue_id: "venue-1" }, { venue_id: "venue-1" }], error: null },
+      venue_marketplace: { data: [marketplaceRow], error: null, count: 1 },
+    });
+
+    let inSpy: jest.Mock | undefined;
+    const originalFrom = (supabase as unknown as { from: jest.Mock }).from;
+    (supabase as unknown as { from: jest.Mock }).from = jest.fn((table: string) => {
+      const b = originalFrom(table);
+      if (table === "venue_marketplace") inSpy = b.in as jest.Mock;
+      return b;
+    });
+
+    await searchMarketplaceVenues(supabase, { surfaceType: "Concrete" });
+    expect(inSpy).toHaveBeenCalledWith("id", ["venue-1"]);
+  });
+
+  it("restricts to venues whose operating hours cover the requested day AND time", async () => {
+    // 2026-08-19 is a Wednesday (UTC day 3). venue-1 is open 08:00–20:00
+    // that day; venue-2 only 06:00–08:00, so an 18:00 request excludes it.
+    const supabase = createTableMockSupabase({
+      venue_operating_hours: {
+        data: [
+          { venue_id: "venue-1", start_time: "08:00:00", end_time: "20:00:00" },
+          { venue_id: "venue-2", start_time: "06:00:00", end_time: "08:00:00" },
+        ],
+        error: null,
+      },
+      venue_marketplace: { data: [marketplaceRow], error: null, count: 1 },
+    });
+
+    let inSpy: jest.Mock | undefined;
+    const originalFrom = (supabase as unknown as { from: jest.Mock }).from;
+    (supabase as unknown as { from: jest.Mock }).from = jest.fn((table: string) => {
+      const b = originalFrom(table);
+      if (table === "venue_marketplace") inSpy = b.in as jest.Mock;
+      return b;
+    });
+
+    await searchMarketplaceVenues(supabase, { availableOn: "2026-08-19", availableAt: "18:00" });
+    expect(inSpy).toHaveBeenCalledWith("id", ["venue-1"]);
+  });
+
+  it("radius-filters in JS after the DB query, excluding out-of-radius and coordinate-less venues", async () => {
+    // Cebu City center ≈ (10.3157, 123.8854). nearVenue ~1km away,
+    // farVenue ~570km away (Manila), noCoords excluded outright.
+    const nearVenue = { ...marketplaceRow, id: "venue-near", latitude: 10.3200, longitude: 123.8900 };
+    const farVenue = { ...marketplaceRow, id: "venue-far", latitude: 14.5995, longitude: 120.9842 };
+    const noCoords = { ...marketplaceRow, id: "venue-nocoords", latitude: null, longitude: null };
+
+    const supabase = createMockSupabase({ data: [farVenue, noCoords, nearVenue], error: null, count: 3 });
+    const result = await searchMarketplaceVenues(supabase, { lat: 10.3157, lng: 123.8854, radiusKm: 10 });
+
+    expect(result.venues.map((v) => v.id)).toEqual(["venue-near"]);
+    expect(result.total).toBe(1);
+  });
+
+  it("sorts by distance under the default sort, but preserves DB order for an explicit sort", async () => {
+    const nearVenue = { ...marketplaceRow, id: "venue-near", latitude: 10.3200, longitude: 123.8900 };
+    const fartherVenue = { ...marketplaceRow, id: "venue-farther", latitude: 10.4000, longitude: 123.9500 };
+
+    const defaultSort = await searchMarketplaceVenues(
+      createMockSupabase({ data: [fartherVenue, nearVenue], error: null, count: 2 }),
+      { lat: 10.3157, lng: 123.8854, radiusKm: 50 }
+    );
+    expect(defaultSort.venues.map((v) => v.id)).toEqual(["venue-near", "venue-farther"]);
+
+    const priceSort = await searchMarketplaceVenues(
+      createMockSupabase({ data: [fartherVenue, nearVenue], error: null, count: 2 }),
+      { lat: 10.3157, lng: 123.8854, radiusKm: 50, sort: "price_asc" }
+    );
+    expect(priceSort.venues.map((v) => v.id)).toEqual(["venue-farther", "venue-near"]);
+  });
+});
+
+describe("haversineDistanceKm", () => {
+  it("computes known distances within tolerance", () => {
+    // Cebu City to Manila ≈ 570 km great-circle.
+    expect(haversineDistanceKm(10.3157, 123.8854, 14.5995, 120.9842)).toBeCloseTo(571, -1);
+    expect(haversineDistanceKm(10, 120, 10, 120)).toBe(0);
+  });
+});
+
+describe("listSurfaceTypes", () => {
+  it("dedupes case-insensitively, keeping first-seen casing, sorted", () => {
+    const rows = [
+      { surface_type: "Concrete" },
+      { surface_type: "concrete" },
+      { surface_type: "Acrylic" },
+      { surface_type: "  " },
+      { surface_type: null },
+    ];
+    const supabase = createMockSupabase({ data: rows, error: null });
+    return expect(listSurfaceTypes(supabase)).resolves.toEqual(["Acrylic", "Concrete"]);
   });
 });
 
