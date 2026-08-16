@@ -199,7 +199,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           </section>
         </div>
 
-        <div id="book-a-court" className="scroll-mt-24 lg:col-span-1">
+        <div className="hidden lg:col-span-1 lg:block">
           <div className="lg:sticky lg:top-24">
             <BookingWidget
               venueName={venue.name}
@@ -213,7 +213,17 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
         </div>
       </div>
 
-      {venue.courts.length > 0 && <MobileBookingBar startingPrice={venue.starting_price} targetId="book-a-court" />}
+      {venue.courts.length > 0 && (
+        <MobileBookingBar
+          startingPrice={venue.starting_price}
+          venueName={venue.name}
+          venueTimezone={venue.timezone}
+          courts={venue.courts}
+          phone={venue.phone}
+          email={venue.email}
+          isAuthenticated={user !== null}
+        />
+      )}
     </div>
   );
 }
