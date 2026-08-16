@@ -6,7 +6,6 @@ import { Image as ImageIcon, AtSign, Smile, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PostCard, initialsFrom } from "@/components/court-side/PostCard";
 import { FollowListDialog } from "@/components/court-side/FollowListDialog";
@@ -14,6 +13,8 @@ import { ShareDialog } from "@/components/court-side/ShareDialog";
 import { createClient } from "@/lib/supabase/client";
 import { listFeedPosts, listLikedPostIds, type PostWithAuthor } from "@/lib/services/posts";
 import { searchPublicProfiles } from "@/lib/services/profiles";
+import { searchClubs, clubMentionHandle } from "@/lib/services/clubs";
+import { CourtSideSearch } from "@/components/court-side/CourtSideSearch";
 import { createPostAction, deletePostAction, toggleLikeAction } from "@/lib/actions/posts";
 import { toggleFollowAction } from "@/lib/actions/follows";
 import { listFollowerProfiles, listFollowingProfiles } from "@/lib/services/follows";
@@ -31,6 +32,14 @@ function formatEventDate(iso: string) {
     time: date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
   };
 }
+
+/**
+ * One row in the "@" picker. People and clubs are mentioned the same way
+ * in post text, so they share a list rather than two competing dropdowns.
+ */
+type MentionSuggestion =
+  | { kind: "person"; id: string; name: string; avatarUrl: string | null }
+  | { kind: "club"; id: string; name: string; memberCount: number };
 
 type CourtSideFeedProps = {
   currentUserId: string;
@@ -77,7 +86,7 @@ export function CourtSideFeed({
   const [draft, setDraft] = useState("");
   const [isPosting, setIsPosting] = useState(false);
   const [tagQuery, setTagQuery] = useState<string | null>(null);
-  const [tagResults, setTagResults] = useState<PublicProfile[]>([]);
+  const [tagResults, setTagResults] = useState<MentionSuggestion[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
 
   const [events, setEvents] = useState<EventWithDetails[]>(initialEvents);
@@ -126,25 +135,45 @@ export function CourtSideFeed({
     if (!match) setTagResults([]);
   }
 
-  function insertMention(profile: PublicProfile) {
-    const handle = (profile.display_name ?? "player").trim().split(/\s+/)[0].replace(/[^a-zA-Z0-9_]/g, "");
+  function insertMention(suggestion: MentionSuggestion) {
+    // A person's handle is their first name; a club's is its whole name
+    // with spaces removed, since the feed highlighter only matches "@"
+    // plus alphanumerics and would otherwise light up just the first word.
+    const handle =
+      suggestion.kind === "club"
+        ? clubMentionHandle(suggestion.name)
+        : suggestion.name.trim().split(/\s+/)[0].replace(/[^a-zA-Z0-9_]/g, "");
     setDraft((current) => current.replace(/@[a-zA-Z0-9_]*$/, `@${handle} `));
     setTagQuery(null);
     setTagResults([]);
   }
 
-  // Debounced real search against actual registered users — replaces the
-  // old hardcoded placeholder handle list. Clearing tagResults for an
-  // empty tagQuery happens in handleDraftChange itself, not here, so
-  // this effect never calls setState synchronously in its own body.
+  // Debounced real search across both registered users and clubs, so an
+  // "@" can tag either. Clearing tagResults for an empty tagQuery happens
+  // in handleDraftChange itself, not here, so this effect never calls
+  // setState synchronously in its own body.
   useEffect(() => {
     if (!tagQuery) return;
     let cancelled = false;
     const handle = setTimeout(() => {
       const supabase = createClient();
-      searchPublicProfiles(supabase, tagQuery)
-        .then((results) => {
-          if (!cancelled) setTagResults(results);
+      Promise.all([searchPublicProfiles(supabase, tagQuery), searchClubs(supabase, tagQuery)])
+        .then(([profiles, clubs]) => {
+          if (cancelled) return;
+          setTagResults([
+            ...profiles.map((profile) => ({
+              kind: "person" as const,
+              id: profile.id,
+              name: profile.display_name ?? "Player",
+              avatarUrl: profile.avatar_url,
+            })),
+            ...clubs.map((club) => ({
+              kind: "club" as const,
+              id: club.id,
+              name: club.name,
+              memberCount: club.member_count,
+            })),
+          ]);
         })
         .catch(() => {
           if (!cancelled) setTagResults([]);
@@ -358,22 +387,33 @@ export function CourtSideFeed({
             {tagQuery !== null && (
               <div className="flex flex-col gap-1 pb-1">
                 {tagQuery && tagResults.length === 0 ? (
-                  <p className="px-1 py-1 text-xs text-muted-foreground">No players found.</p>
+                  <p className="px-1 py-1 text-xs text-muted-foreground">No players or clubs found.</p>
                 ) : (
-                  tagResults.map((profile) => (
+                  tagResults.map((suggestion) => (
                     <button
-                      key={profile.id}
+                      key={`${suggestion.kind}-${suggestion.id}`}
                       type="button"
-                      onClick={() => insertMention(profile)}
+                      onClick={() => insertMention(suggestion)}
                       className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-left hover:bg-muted"
                     >
-                      <Avatar size="sm">
-                        {profile.avatar_url && <AvatarImage src={profile.avatar_url} alt="" />}
-                        <AvatarFallback className="bg-secondary text-[10px] font-semibold text-secondary-foreground">
-                          {initialsFrom(profile.display_name || "Player")}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="text-xs font-medium text-foreground">{profile.display_name}</span>
+                      {suggestion.kind === "person" ? (
+                        <Avatar size="sm">
+                          {suggestion.avatarUrl && <AvatarImage src={suggestion.avatarUrl} alt="" />}
+                          <AvatarFallback className="bg-secondary text-[10px] font-semibold text-secondary-foreground">
+                            {initialsFrom(suggestion.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                      ) : (
+                        <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
+                          <Users className="size-3" aria-hidden="true" />
+                        </span>
+                      )}
+                      <span className="text-xs font-medium text-foreground">{suggestion.name}</span>
+                      {suggestion.kind === "club" && (
+                        <span className="text-[10px] text-muted-foreground">
+                          Club · {suggestion.memberCount} {suggestion.memberCount === 1 ? "member" : "members"}
+                        </span>
+                      )}
                     </button>
                   ))
                 )}
@@ -465,9 +505,7 @@ export function CourtSideFeed({
 
       {/* Right rail */}
       <aside className="flex flex-col gap-4">
-        <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5">
-          <Input placeholder="Search rallies, players, clubs" className="h-6 border-0 p-0 shadow-none focus-visible:ring-0" />
-        </div>
+        <CourtSideSearch />
 
         {events.length > 0 && (
           <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">

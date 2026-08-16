@@ -36,6 +36,42 @@ export async function listDiscoverableClubs(supabase: Client, limit = 24): Promi
   return data ?? [];
 }
 
+/**
+ * Name search for the COURT/Side search box and the `@` mention picker.
+ *
+ * Returns an empty array without querying for a blank term. Private
+ * clubs the caller isn't a member of are filtered by RLS, not here — a
+ * search must never become a way to discover the existence of a club you
+ * can't see. The `%` and `_` LIKE wildcards are escaped so a user typing
+ * them searches for the literal characters instead of matching everything.
+ */
+export async function searchClubs(supabase: Client, query: string, limit = 5): Promise<Club[]> {
+  const term = query.trim();
+  if (!term) return [];
+
+  const escaped = term.replace(/([%_\\])/g, "\\$1");
+  const { data, error } = await supabase
+    .from("clubs")
+    .select("*")
+    .eq("status", "active")
+    .ilike("name", `%${escaped}%`)
+    .order("member_count", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * The mention token for a club: the whole name with non-alphanumerics
+ * stripped, so a multi-word name survives as ONE token. The feed's
+ * highlighter matches `@` followed by alphanumerics only, so
+ * "Cebu Weekend Picklers" has to become "@CebuWeekendPicklers" —
+ * inserting it with its spaces intact would highlight only "@Cebu".
+ */
+export function clubMentionHandle(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_]/g, "");
+}
+
 /** Every club the given user belongs to, whatever their role. */
 export async function listClubsForUser(supabase: Client, userId: string): Promise<Club[]> {
   const { data: memberships, error: membershipsError } = await supabase

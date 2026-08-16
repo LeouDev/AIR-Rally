@@ -10,6 +10,8 @@ import {
   requestClubMembership,
   approveClubMember,
   setClubMemberRole,
+  searchClubs,
+  clubMentionHandle,
 } from "../clubs";
 import { createMockSupabase, createTableMockSupabase, postgrestError } from "../../test-helpers/mockSupabase";
 import type { Club, PublicProfile } from "@/lib/supabase/types";
@@ -40,6 +42,52 @@ describe("listDiscoverableClubs", () => {
     const fromMock = supabase.from as jest.Mock;
     const builder = fromMock.mock.results[0].value as { eq: jest.Mock };
     expect(builder.eq).toHaveBeenCalledWith("status", "active");
+  });
+});
+
+describe("searchClubs", () => {
+  it("returns an empty array without querying for a blank term", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await expect(searchClubs(supabase, "   ")).resolves.toEqual([]);
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+
+  it("matches club names case-insensitively, scoped to active clubs", async () => {
+    const supabase = createMockSupabase({ data: [CLUB], error: null });
+    await expect(searchClubs(supabase, "weekend")).resolves.toEqual([CLUB]);
+
+    const fromMock = supabase.from as jest.Mock;
+    const builder = fromMock.mock.results[0].value as { ilike: jest.Mock; eq: jest.Mock };
+    expect(builder.ilike).toHaveBeenCalledWith("name", "%weekend%");
+    expect(builder.eq).toHaveBeenCalledWith("status", "active");
+  });
+
+  // Without escaping, typing "%" would match every club rather than
+  // searching for a literal percent sign.
+  it("escapes LIKE wildcards so they are searched literally", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await searchClubs(supabase, "50%_off");
+
+    const fromMock = supabase.from as jest.Mock;
+    const builder = fromMock.mock.results[0].value as { ilike: jest.Mock };
+    expect(builder.ilike).toHaveBeenCalledWith("name", "%50\\%\\_off%");
+  });
+});
+
+describe("clubMentionHandle", () => {
+  // The feed highlighter matches "@" plus alphanumerics only, so a
+  // multi-word club name has to collapse into a single token or only its
+  // first word would be highlighted.
+  it("collapses a multi-word club name into one mention token", () => {
+    expect(clubMentionHandle("Cebu Weekend Picklers")).toBe("CebuWeekendPicklers");
+  });
+
+  it("strips punctuation and accents that the highlighter would break on", () => {
+    expect(clubMentionHandle("Rally & Co. — Cebú")).toBe("RallyCoCeb");
+  });
+
+  it("preserves underscores and digits", () => {
+    expect(clubMentionHandle("Court_9 Crew")).toBe("Court_9Crew");
   });
 });
 
