@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Apple, Play } from "lucide-react";
+import type { ReactNode } from "react";
+import { Apple } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 
 const PRODUCT_LINKS = [
@@ -27,14 +28,14 @@ export function Footer() {
           <FooterColumn title="Product" links={PRODUCT_LINKS} />
           <FooterColumn title="Account" links={ACCOUNT_LINKS} />
 
-          <div className="flex flex-col gap-3">
+          <div className="col-span-2 flex flex-col gap-3 sm:col-span-1">
             <h3 className="text-sm font-semibold text-foreground">Get the app</h3>
             <p className="text-sm text-muted-foreground">
               Native apps are on the way. For now, Air/Rally installs straight from your browser.
             </p>
-            <div className="flex flex-col gap-2">
-              <StoreBadge icon={Apple} storeLabel="Download on the" storeName="App Store" />
-              <StoreBadge icon={Play} storeLabel="Get it on" storeName="Google Play" />
+            <div className="flex flex-wrap gap-2">
+              <AppStoreBadge />
+              <GooglePlayBadge />
             </div>
           </div>
         </div>
@@ -49,34 +50,50 @@ export function Footer() {
 }
 
 /**
- * Not a real download link yet — no native app has shipped. Rendered
- * disabled with a "Coming soon" tag rather than as a functional badge,
- * so it can't be mistaken for a working App Store / Play Store link.
+ * Neither badge is a real download link yet — no native app has
+ * shipped. Kept non-interactive (a div, not a link/button) and
+ * slightly dimmed, relying on the "Native apps are on the way" copy
+ * right above for context rather than a ribbon overlaid on the
+ * artwork, which clipped into the App Store badge's top line.
  */
-function StoreBadge({
-  icon: Icon,
-  storeLabel,
-  storeName,
-}: {
-  icon: typeof Apple;
-  storeLabel: string;
-  storeName: string;
-}) {
+function StoreBadgeShell({ children }: { children: ReactNode }) {
   return (
     <div
       aria-disabled="true"
       title="Coming soon"
-      className="flex w-fit cursor-not-allowed items-center gap-2.5 rounded-lg border border-border bg-foreground/90 px-3 py-1.5 text-background opacity-70"
+      className="flex h-10 w-fit cursor-not-allowed items-center gap-2 rounded-lg border border-white/15 bg-black px-2.5 opacity-80"
     >
-      <Icon className="size-5 shrink-0" aria-hidden="true" />
-      <span className="flex flex-col leading-none">
-        <span className="text-[10px] uppercase tracking-wide text-background/70">{storeLabel}</span>
-        <span className="text-sm font-semibold">{storeName}</span>
-      </span>
-      <span className="ml-1 rounded-full bg-background/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide">
-        Soon
-      </span>
+      {children}
     </div>
+  );
+}
+
+function AppStoreBadge() {
+  return (
+    <StoreBadgeShell>
+      <Apple className="size-6 shrink-0 text-white" aria-hidden="true" />
+      <span className="flex flex-col leading-tight whitespace-nowrap text-white">
+        <span className="text-[9px]">Download on the</span>
+        <span className="-mt-0.5 text-base font-semibold tracking-tight">App Store</span>
+      </span>
+    </StoreBadgeShell>
+  );
+}
+
+function GooglePlayBadge() {
+  return (
+    <StoreBadgeShell>
+      <svg viewBox="0 0 24 24" className="size-6 shrink-0" aria-hidden="true">
+        <path fill="#00d2ff" d="M5 3.6c-.3.3-.5.7-.5 1.2v14.4c0 .5.2.9.5 1.2l.1.1L13.4 12v-.2L5.1 3.5z" />
+        <path fill="#ffcc00" d="M16.2 14.8 13.4 12v-.2l2.8-2.8.1.1 3.3 1.9c.9.5.9 1.4 0 2l-3.4 1.8z" />
+        <path fill="#ff3b30" d="M16.3 14.7 13.4 11.8 5 20.4c.3.3.9.4 1.5.1z" />
+        <path fill="#00e676" d="M16.3 9.1 6.5 3.5c-.6-.3-1.2-.3-1.5.1l8.4 8.4z" />
+      </svg>
+      <span className="flex flex-col leading-tight whitespace-nowrap text-white">
+        <span className="text-[9px]">GET IT ON</span>
+        <span className="-mt-0.5 text-base font-semibold tracking-tight">Google Play</span>
+      </span>
+    </StoreBadgeShell>
   );
 }
 
