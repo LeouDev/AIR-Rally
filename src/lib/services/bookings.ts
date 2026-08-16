@@ -8,7 +8,6 @@ import {
   MAX_BOOKING_WINDOW_DAYS,
   DEFAULT_CURRENCY,
 } from "@/lib/booking-config";
-import { retrieveCheckoutSession } from "@/lib/services/payments";
 import { retrievePayMongoCheckoutSession } from "@/lib/services/paymongo";
 import { logServerError } from "@/lib/errors";
 
@@ -316,88 +315,7 @@ export async function listMyBookingsWithDetails(supabase: Client, userId: string
   });
 }
 
-/**
- * Attaches a freshly-created Stripe Checkout Session to the caller's own
- * pending booking. Ordinary self-service update under the existing
- * "own booking" UPDATE policy — bookings_prevent_tampering deliberately
- * does not guard this column (see supabase/migrations/20260810000007_booking_payments.sql).
- */
-export async function attachCheckoutSession(supabase: Client, bookingId: string, stripeCheckoutSessionId: string): Promise<void> {
-  const { error } = await supabase
-    .from("bookings")
-    .update({ stripe_checkout_session_id: stripeCheckoutSessionId })
-    .eq("id", bookingId);
-  if (error) throw error;
-}
-
-/**
- * Thin wrapper around the confirm_booking_payment() RPC (see
- * supabase/migrations/20260810000007_booking_payments.sql) — the only
- * thing that can transition a booking from pending to confirmed. Callable
- * with the plain anon key; no session/service-role needed, since the
- * function is SECURITY DEFINER and verifies the session id + amount/
- * currency itself. Returns whether it actually made the transition
- * (false = already confirmed/cancelled, or a mismatch — safe either way,
- * see decision #5 in the Phase 4B plan).
- */
-export async function confirmBookingPayment(
-  supabase: Client,
-  params: {
-    bookingId: string;
-    stripeCheckoutSessionId: string;
-    stripePaymentIntentId: string;
-    expectedAmount: number;
-    expectedCurrency: string;
-  }
-): Promise<boolean> {
-  const { data, error } = await supabase.rpc("confirm_booking_payment", {
-    p_booking_id: params.bookingId,
-    p_stripe_checkout_session_id: params.stripeCheckoutSessionId,
-    p_stripe_payment_intent_id: params.stripePaymentIntentId,
-    p_expected_amount: params.expectedAmount,
-    p_expected_currency: params.expectedCurrency,
-  });
-  if (error) throw error;
-  return data ?? false;
-}
-
-/**
- * The "redirect arrives before webhook" fallback: called by the
- * confirmation page when it sees a still-pending booking with a
- * ?session_id= in the URL. Checks Stripe directly (real API call, not
- * trusting the browser's mere presence at this URL as proof of anything)
- * and, if Stripe reports the session as paid, runs it through the exact
- * same confirm_booking_payment() the webhook uses — so whichever path
- * gets there first, the transition is made through the one guarded,
- * idempotent mechanism, never a shortcut specific to this code path.
- */
-export async function reconcilePendingBooking(supabase: Client, bookingId: string, stripeCheckoutSessionId: string): Promise<Booking> {
-  const booking = await getBookingById(supabase, bookingId);
-  if (!booking) {
-    throw new BookingError("booking_not_found", "We couldn't find that booking.");
-  }
-  if (booking.status !== "pending" || booking.stripe_checkout_session_id !== stripeCheckoutSessionId) {
-    return booking;
-  }
-
-  const session = await retrieveCheckoutSession(stripeCheckoutSessionId);
-  if (session.payment_status !== "paid" || typeof session.payment_intent !== "string" || session.amount_total == null) {
-    return booking;
-  }
-
-  await confirmBookingPayment(supabase, {
-    bookingId,
-    stripeCheckoutSessionId,
-    stripePaymentIntentId: session.payment_intent,
-    expectedAmount: session.amount_total,
-    expectedCurrency: (session.currency ?? DEFAULT_CURRENCY.toLowerCase()).toUpperCase(),
-  });
-
-  const refreshed = await getBookingById(supabase, bookingId);
-  return refreshed ?? booking;
-}
-
-// --- PayMongo (experimental second provider — see ARCHITECTURE.md) -----
+// --- PayMongo (the platform's only payment provider since 20260810000035) ---
 //
 // Deliberately parallel, not merged into the Stripe functions above: every
 // function in this section is a structural twin of its Stripe equivalent,

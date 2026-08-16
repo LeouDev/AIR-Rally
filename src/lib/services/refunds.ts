@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import Stripe from "stripe";
 import type { Database, Booking, BookingRefund, RefundBasis } from "@/lib/supabase/types";
 import { getSecretKey as getPaymongoSecretKey, PayMongoError, describePayMongoErrorDetail, retrievePayMongoPayment } from "@/lib/services/paymongo";
 import { isPaymongoRefundExecutionEnabled } from "@/lib/paymongoLaunchGates";
@@ -40,21 +39,6 @@ export class RefundError extends Error {
   }
 }
 
-// A separate, lazily-constructed Stripe client — deliberately not
-// imported from lib/services/payments.ts (which is not exported there,
-// and must not be modified at all — see ARCHITECTURE.md). Same
-// provider-isolation-via-duplication posture already used for PayMongo
-// throughout this project: a second file touching Stripe's API is not a
-// modification to the existing, already-verified checkout/webhook code.
-let stripeClient: Stripe | null = null;
-function getStripeClient(): Stripe {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  if (!secretKey) {
-    throw new RefundError("provider_call_failed", "Stripe isn't configured — add STRIPE_SECRET_KEY to .env.local.");
-  }
-  stripeClient ??= new Stripe(secretKey);
-  return stripeClient;
-}
 
 /**
  * The booking's own stored price minus every refund already marked
@@ -155,8 +139,7 @@ export async function requestRefund(supabase: Client, params: RequestRefundParam
     throw new RefundError("booking_not_paid", "This booking was never paid, so there's nothing to refund.");
   }
 
-  const provider = booking.payment_provider;
-  const providerPaymentId = provider === "stripe" ? booking.stripe_payment_intent_id : booking.paymongo_payment_intent_id;
+  const providerPaymentId = booking.paymongo_payment_intent_id;
   if (!providerPaymentId) {
     throw new RefundError("booking_not_paid", "This booking has no recorded payment to refund.");
   }
@@ -169,7 +152,7 @@ export async function requestRefund(supabase: Client, params: RequestRefundParam
     );
   }
 
-  if (provider === "paymongo" && !isPaymongoRefundExecutionEnabled()) {
+  if (!isPaymongoRefundExecutionEnabled()) {
     throw new RefundError(
       "paymongo_refund_not_enabled",
       "PayMongo refund execution is disabled — the two-party split-refund accounting is unverified. See ARCHITECTURE.md / the PayMongo Final Verification Report."
@@ -180,7 +163,7 @@ export async function requestRefund(supabase: Client, params: RequestRefundParam
     .from("booking_refunds")
     .insert({
       booking_id: booking.id,
-      payment_provider: provider,
+      payment_provider: "paymongo",
       provider_payment_id: providerPaymentId,
       amount,
       currency: booking.currency,
@@ -204,15 +187,16 @@ export async function requestRefund(supabase: Client, params: RequestRefundParam
     throw insertError;
   }
 
-  // PayMongo has confirmed certain payment methods can never be refunded
-  // through its API at all (QR Ph, confirmed live — see the module-level
-  // doc comment). Checked here, after the pending row already exists (so
-  // the attempt is still durably recorded) but before ever calling the
-  // refund endpoint — this is a known, permanent limitation, not a
-  // transient provider failure, so it gets its own terminal status
-  // rather than "failed". No money moves, no PayMongo refund call is
-  // ever made for this branch.
-  if (provider === "paymongo") {
+  try {
+    // PayMongo has confirmed certain payment methods can never be
+    // refunded through its API at all (QR Ph, confirmed live — see the
+    // module-level doc comment). Checked after the pending row exists
+    // (so the attempt is durably recorded) but before the refund
+    // endpoint — a permanent limitation, so it gets its own terminal
+    // status rather than "failed". Inside this try deliberately: a
+    // TRANSIENT failure of the detection call itself must also land the
+    // row in "failed" rather than escaping as a raw throw with the
+    // pending row left dangling.
     const paymentDetail = await retrievePayMongoPayment(providerPaymentId);
     const sourceType = paymentDetail.attributes.source?.type;
     if (sourceType && REFUND_UNSUPPORTED_SOURCE_TYPES.includes(sourceType)) {
@@ -228,10 +212,8 @@ export async function requestRefund(supabase: Client, params: RequestRefundParam
       if (updateError) throw updateError;
       return unavailable;
     }
-  }
 
-  try {
-    const result = provider === "stripe" ? await executeStripeRefund(providerPaymentId, amount) : await executePaymongoRefund(providerPaymentId, amount);
+    const result = await executePaymongoRefund(providerPaymentId, amount);
 
     const { data: succeeded, error: updateError } = await supabase
       .from("booking_refunds")
@@ -275,11 +257,6 @@ type RefundExecutionResult = {
   providerAvailableAt: string | null;
 };
 
-async function executeStripeRefund(paymentIntentId: string, amount: number): Promise<RefundExecutionResult> {
-  const stripe = getStripeClient();
-  const refund = await stripe.refunds.create({ payment_intent: paymentIntentId, amount });
-  return { providerRefundId: refund.id, platformRefundAmount: null, venueRefundAmount: null, providerAvailableAt: null };
-}
 
 type PayMongoRefundResponse = {
   data?: {

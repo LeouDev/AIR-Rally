@@ -1,9 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import Stripe from "stripe";
 import type { Database, Booking, BookingReschedule, Court } from "@/lib/supabase/types";
 import { RESCHEDULE_CUTOFF_HOURS } from "@/lib/booking-config";
-import { createBooking, cancelBooking, getBookingById, attachCheckoutSession, attachPaymongoCheckoutSession, BookingError } from "@/lib/services/bookings";
-import { retrieveCheckoutSession } from "@/lib/services/payments";
+import { createBooking, cancelBooking, getBookingById, attachPaymongoCheckoutSession, BookingError } from "@/lib/services/bookings";
 import { createPayMongoCheckoutSession, retrievePayMongoCheckoutSession } from "@/lib/services/paymongo";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
 import { getVenueDetail } from "@/lib/services/venues";
@@ -243,85 +241,9 @@ async function recordRescheduleRefundSuccess(rescheduleId: string, refundId: str
 
 // --- Price-increase difference checkout -----------------------------
 //
-// A separate, duplicated Stripe client/call (never importing from
-// lib/services/payments.ts, which must not be modified — see
-// ARCHITECTURE.md) — same provider-isolation-via-duplication posture
-// lib/services/refunds.ts already established for Stripe. PayMongo has no
-// such constraint, so its difference checkout reuses
-// createPayMongoCheckoutSession() directly via chargeAmountOverride,
-// guaranteeing the exact same payment_method_types/split machinery a
-// normal booking checkout uses (see V1 rule: never hard-code a reduced
-// payment-method list).
-
-let rescheduleStripeClient: Stripe | null = null;
-function getRescheduleStripeClient(): Stripe {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  if (!secretKey) {
-    throw new RescheduleError("checkout_session_creation_failed", "Payments aren't set up yet.");
-  }
-  rescheduleStripeClient ??= new Stripe(secretKey);
-  return rescheduleStripeClient;
-}
-
-/**
- * Best-effort supersession of a stale difference-checkout attempt (see
- * resumeRescheduleCheckout() and the production-readiness audit's
- * finding B4) — a real, documented Stripe API
- * (stripe.checkout.sessions.expire), never invented. Never throws: a
- * session that's already paid/expired/not found is not something this
- * caller should ever fail over, and the REAL protection against a stale
- * session's webhook completing the reschedule is the stored-session-id
- * match in maybeCompleteReschedule(), not this call.
- */
-async function expireStripeCheckoutSession(sessionId: string): Promise<void> {
-  try {
-    const stripe = getRescheduleStripeClient();
-    await stripe.checkout.sessions.expire(sessionId);
-  } catch (error) {
-    logServerError(`reschedules.expireStripeCheckoutSession session=${sessionId}`, error);
-  }
-}
-
-async function createStripeRescheduleDifferenceCheckout(params: {
-  replacementBookingId: string;
-  userId: string;
-  amount: number;
-  currency: string;
-  venueName: string;
-  courtName: string;
-  successUrl: string;
-  cancelUrl: string;
-  customerEmail?: string;
-}): Promise<Stripe.Checkout.Session> {
-  const stripe = getRescheduleStripeClient();
-  try {
-    return await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: params.currency.toLowerCase(),
-            unit_amount: params.amount,
-            product_data: { name: `${params.venueName} — ${params.courtName} (reschedule price difference)` },
-          },
-        },
-      ],
-      metadata: { booking_id: params.replacementBookingId, user_id: params.userId },
-      customer_email: params.customerEmail,
-      success_url: params.successUrl,
-      cancel_url: params.cancelUrl,
-    });
-  } catch (error) {
-    logServerError("reschedules.createStripeDifferenceCheckout", error);
-    throw new RescheduleError("checkout_session_creation_failed", "We couldn't start checkout for the price difference — please try again.");
-  }
-}
-
 async function createDifferenceCheckout(
   supabase: Client,
   params: {
-    provider: Booking["payment_provider"];
     replacement: Booking;
     newCourtId: string;
     amount: number;
@@ -334,52 +256,35 @@ async function createDifferenceCheckout(
   const venueName = display?.venueName ?? "Air/Rally venue";
   const courtName = display?.courtName ?? "Court";
 
-  if (params.provider === "paymongo") {
-    const marketplaceSplit =
-      isPaymongoMarketplaceSplitEnabled() && display?.venuePaymongoActivationStatus === "activated" && display.venuePaymongoAccountId
-        ? { ...calculateMarketplaceSplit(params.amount), venuePaymongoAccountId: display.venuePaymongoAccountId }
-        : undefined;
+  const marketplaceSplit =
+    isPaymongoMarketplaceSplitEnabled() && display?.venuePaymongoActivationStatus === "activated" && display.venuePaymongoAccountId
+      ? { ...calculateMarketplaceSplit(params.amount), venuePaymongoAccountId: display.venuePaymongoAccountId }
+      : undefined;
 
-    const session = await createPayMongoCheckoutSession({
-      booking: params.replacement,
-      venueName,
-      courtName,
-      successUrl: params.successUrl,
-      cancelUrl: params.cancelUrl,
-      chargeAmountOverride: params.amount,
-      marketplaceSplit: marketplaceSplit && {
-        platformFeeAmount: marketplaceSplit.platformFeeAmount,
-        venuePaymongoAccountId: marketplaceSplit.venuePaymongoAccountId,
-      },
-    });
-    await attachPaymongoCheckoutSession(
-      supabase,
-      params.replacement.id,
-      session.id,
-      marketplaceSplit && {
-        platformFeeAmount: marketplaceSplit.platformFeeAmount,
-        venueAmount: marketplaceSplit.venueAmount,
-        paymongoVenueAccountId: marketplaceSplit.venuePaymongoAccountId,
-      }
-    );
-    return session.url;
-  }
-
-  const session = await createStripeRescheduleDifferenceCheckout({
-    replacementBookingId: params.replacement.id,
-    userId: params.replacement.user_id,
-    amount: params.amount,
-    currency: params.replacement.currency,
+  const session = await createPayMongoCheckoutSession({
+    booking: params.replacement,
     venueName,
     courtName,
     successUrl: params.successUrl,
     cancelUrl: params.cancelUrl,
-    customerEmail: params.customerEmail,
+    chargeAmountOverride: params.amount,
+    marketplaceSplit: marketplaceSplit && {
+      platformFeeAmount: marketplaceSplit.platformFeeAmount,
+      venuePaymongoAccountId: marketplaceSplit.venuePaymongoAccountId,
+    },
   });
-  if (!session.url) {
-    throw new RescheduleError("checkout_session_creation_failed", "We couldn't start checkout for the price difference — please try again.");
-  }
-  await attachCheckoutSession(supabase, params.replacement.id, session.id);
+
+  await attachPaymongoCheckoutSession(
+    supabase,
+    params.replacement.id,
+    session.id,
+    marketplaceSplit && {
+      platformFeeAmount: marketplaceSplit.platformFeeAmount,
+      venueAmount: marketplaceSplit.venueAmount,
+      paymongoVenueAccountId: marketplaceSplit.venuePaymongoAccountId,
+    }
+  );
+
   return session.url;
 }
 
@@ -506,7 +411,6 @@ export async function createReschedule(supabase: Client, userId: string, input: 
     // (never active), satisfying "additional payment failure: the
     // customer can retry later" without losing the reservation attempt.
     const checkoutUrl = await createDifferenceCheckout(supabase, {
-      provider: original.payment_provider,
       replacement,
       newCourtId: input.newCourtId,
       amount: priceDifference,
@@ -652,12 +556,8 @@ export async function resumeRescheduleCheckout(
   // matches the CURRENTLY stored one — see that function). No equivalent
   // PayMongo session-expiration endpoint has been verified in this
   // project, so this is Stripe-only; never invented for PayMongo.
-  if (original.payment_provider === "stripe" && replacement.stripe_checkout_session_id) {
-    await expireStripeCheckoutSession(replacement.stripe_checkout_session_id);
-  }
 
   return createDifferenceCheckout(supabase, {
-    provider: original.payment_provider,
     replacement,
     newCourtId: replacement.court_id,
     amount: reschedule.price_difference,
@@ -778,15 +678,11 @@ export async function maybeCompleteRescheduleFromProvider(supabase: Client, book
 
   let paidAmount: number | null = null;
   let paidCurrency: string | null = null;
-  if (replacement.payment_provider === "paymongo" && replacement.paymongo_checkout_session_id) {
+  if (replacement.paymongo_checkout_session_id) {
     const session = await retrievePayMongoCheckoutSession(replacement.paymongo_checkout_session_id);
     const paidPayment = session.attributes.payment_intent?.attributes.payments.find((p) => p.attributes.status === "paid");
     paidAmount = paidPayment?.attributes.amount ?? null;
     paidCurrency = paidPayment?.attributes.currency ?? null;
-  } else if (replacement.stripe_checkout_session_id) {
-    const session = await retrieveCheckoutSession(replacement.stripe_checkout_session_id);
-    paidAmount = session.payment_status === "paid" ? session.amount_total : null;
-    paidCurrency = session.currency;
   }
 
   if (paidAmount == null || paidAmount !== reschedule.price_difference) return false;

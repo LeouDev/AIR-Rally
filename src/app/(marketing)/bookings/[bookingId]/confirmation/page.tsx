@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
-import { getBookingById, reconcilePendingBooking, reconcilePaymongoPendingBooking } from "@/lib/services/bookings";
+import { getBookingById, reconcilePaymongoPendingBooking } from "@/lib/services/bookings";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
 import { maybeCompleteRescheduleFromProvider, listReschedulesForBooking } from "@/lib/services/reschedules";
 import { logServerError } from "@/lib/errors";
@@ -49,16 +49,11 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
   // Redirect arrives before webhook: reconcile with the real payment
   // provider directly rather than showing a false "still pending" state
   // the user would have to guess needs a manual refresh for no reason.
-  // Branches on the booking's own stored provider (see ARCHITECTURE.md's
-  // PayMongo TEST MODE section) — the PayMongo path needs no ?session_id=
-  // from the URL, since that id is already on the booking row itself.
+  // PayMongo is the only provider, and it needs no ?session_id= from the
+  // URL — that id is already on the booking row itself.
   if (booking.status === "pending") {
     try {
-      if (booking.payment_provider === "paymongo") {
-        booking = await reconcilePaymongoPendingBooking(supabase, bookingId);
-      } else if (sessionId) {
-        booking = await reconcilePendingBooking(supabase, bookingId, sessionId);
-      }
+      booking = await reconcilePaymongoPendingBooking(supabase, bookingId);
     } catch (error) {
       logServerError("bookings.confirmation.reconcile", error);
       // Reconciliation failing doesn't change what we show — the page

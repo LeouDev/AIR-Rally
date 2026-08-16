@@ -158,18 +158,18 @@ describe("requestRefund", () => {
   });
 
   it("rejects an amount exceeding the refundable amount, without ever calling the provider", async () => {
+    mockPaymongoRefundEnabled.mockReturnValue(true);
     const supabase = fakeSupabase([{ amount: 45000 }], {}, {}); // only 5000 left refundable
     await expect(
-      requestRefund(supabase, { booking: CONFIRMED_STRIPE_BOOKING, amount: 10000, reason: null, initiatedBy: "admin-1" })
+      requestRefund(supabase, { booking: CONFIRMED_PAYMONGO_BOOKING, amount: 10000, reason: null, initiatedBy: "admin-1" })
     ).rejects.toMatchObject({ reason: "amount_exceeds_refundable" });
   });
 
   it("refuses a PayMongo refund when the kill switch is off — the exact production-safety property this module exists for", async () => {
     mockPaymongoRefundEnabled.mockReturnValue(false);
     const supabase = fakeSupabase([], {}, {});
-    const paymongoBooking = { ...CONFIRMED_STRIPE_BOOKING, payment_provider: "paymongo" as const, paymongo_payment_intent_id: "pi_pm_1", stripe_payment_intent_id: null };
     await expect(
-      requestRefund(supabase, { booking: paymongoBooking, amount: 100, reason: null, initiatedBy: "admin-1" })
+      requestRefund(supabase, { booking: CONFIRMED_PAYMONGO_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" })
     ).rejects.toMatchObject({ reason: "paymongo_refund_not_enabled" });
     // No refund execution of any kind occurs while the flag is off — not
     // even the read-only QR Ph detection call, and no row is ever written.
@@ -178,24 +178,25 @@ describe("requestRefund", () => {
   });
 
   it("writes a pending audit row before ever calling the provider, then marks it failed (with a captured reason) rather than throwing silently when the provider call fails", async () => {
-    delete process.env.STRIPE_SECRET_KEY; // guarantees the real Stripe call throws immediately
+    mockPaymongoRefundEnabled.mockReturnValue(true);
+    mockRetrievePayMongoPayment.mockRejectedValue(new Error("PayMongo unavailable"));
     const supabase = fakeSupabase(
       [],
       { id: "refund-1", status: "pending" },
-      { id: "refund-1", status: "failed", failure_reason: "Stripe isn't configured — add STRIPE_SECRET_KEY to .env.local." }
+      { id: "refund-1", status: "failed", failure_reason: "PayMongo unavailable" }
     );
 
     const result = await requestRefund(supabase, {
-      booking: CONFIRMED_STRIPE_BOOKING,
+      booking: CONFIRMED_PAYMONGO_BOOKING,
       amount: 20000,
       reason: "Customer requested",
       initiatedBy: "admin-1",
     });
 
     expect((supabase as unknown as { _insertedRow: () => unknown })._insertedRow()).toMatchObject({
-      booking_id: "booking-1",
-      payment_provider: "stripe",
-      provider_payment_id: "pi_test_456",
+      booking_id: "booking-2",
+      payment_provider: "paymongo",
+      provider_payment_id: "pi_pm_1",
       amount: 20000,
       status: "pending",
     });
@@ -306,10 +307,11 @@ describe("requestRefund", () => {
   });
 
   it("passes refund_basis through verbatim when supplied, and leaves it null when omitted — never inferring a default", async () => {
+    mockPaymongoRefundEnabled.mockReturnValue(true);
+    mockRetrievePayMongoPayment.mockRejectedValue(new Error("PayMongo unavailable"));
     const supabaseWithBasis = fakeSupabase([], { id: "refund-1", status: "pending" }, { id: "refund-1", status: "failed" });
-    delete process.env.STRIPE_SECRET_KEY;
     await requestRefund(supabaseWithBasis, {
-      booking: CONFIRMED_STRIPE_BOOKING,
+      booking: CONFIRMED_PAYMONGO_BOOKING,
       amount: 100,
       reason: null,
       initiatedBy: "admin-1",
@@ -318,21 +320,23 @@ describe("requestRefund", () => {
     expect((supabaseWithBasis as unknown as { _insertedRow: () => unknown })._insertedRow()).toMatchObject({ refund_basis: "gross_only" });
 
     const supabaseWithoutBasis = fakeSupabase([], { id: "refund-2", status: "pending" }, { id: "refund-2", status: "failed" });
-    await requestRefund(supabaseWithoutBasis, { booking: CONFIRMED_STRIPE_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" });
+    await requestRefund(supabaseWithoutBasis, { booking: CONFIRMED_PAYMONGO_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" });
     expect((supabaseWithoutBasis as unknown as { _insertedRow: () => unknown })._insertedRow()).toMatchObject({ refund_basis: null });
   });
 
   it("a 23505 unique-constraint violation on the pending-refund index becomes a clean, typed error — never the raw database error", async () => {
+    mockPaymongoRefundEnabled.mockReturnValue(true);
     const supabase = fakeSupabase([], {}, {}, { code: "23505", message: 'duplicate key value violates unique constraint "booking_refunds_one_pending_per_booking"' });
     await expect(
-      requestRefund(supabase, { booking: CONFIRMED_STRIPE_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" })
+      requestRefund(supabase, { booking: CONFIRMED_PAYMONGO_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" })
     ).rejects.toMatchObject({ reason: "refund_already_in_progress", message: "A refund is already in progress for this booking." });
   });
 
   it("a non-23505 insert error is rethrown as-is (not silently swallowed or reclassified)", async () => {
+    mockPaymongoRefundEnabled.mockReturnValue(true);
     const supabase = fakeSupabase([], {}, {}, { code: "42501", message: "permission denied" });
     await expect(
-      requestRefund(supabase, { booking: CONFIRMED_STRIPE_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" })
+      requestRefund(supabase, { booking: CONFIRMED_PAYMONGO_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" })
     ).rejects.toMatchObject({ code: "42501" });
   });
 });

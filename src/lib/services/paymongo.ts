@@ -175,7 +175,14 @@ export async function createPayMongoCheckoutSession(input: CreatePayMongoCheckou
           quantity: 1,
         },
       ],
-      payment_method_types: ["card", "gcash", "paymaya", "qrph"],
+      // QR Ph only, per product decision (launch scope). Widening this
+      // list later is a one-line change, but carries a refund
+      // consequence in BOTH directions: QR Ph payments cannot be
+      // refunded through PayMongo's API at all (confirmed live — see
+      // REFUND_UNSUPPORTED_SOURCE_TYPES in lib/services/refunds.ts), so
+      // while this list is QR Ph-only, every refund is a manual
+      // outside-PayMongo transfer regardless of the refund gate.
+      payment_method_types: ["qrph"],
       metadata: { booking_id: booking.id, user_id: booking.user_id },
       success_url: successUrl,
       cancel_url: cancelUrl,

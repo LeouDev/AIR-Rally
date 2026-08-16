@@ -2,9 +2,6 @@ import {
   createBooking,
   cancelBooking,
   getBookingById,
-  attachCheckoutSession,
-  confirmBookingPayment,
-  reconcilePendingBooking,
   attachPaymongoCheckoutSession,
   confirmPaymongoBookingPayment,
   reconcilePaymongoPendingBooking,
@@ -14,9 +11,6 @@ import { createTableMockSupabase, postgrestError } from "@/lib/test-helpers/mock
 import type { Booking } from "@/lib/supabase/types";
 
 // Relative paths — see MEMORY.md (air-rally-jest-mock-colon-path-bug).
-jest.mock("../payments", () => ({ retrieveCheckoutSession: jest.fn() }));
-import { retrieveCheckoutSession } from "../payments";
-const mockRetrieveCheckoutSession = retrieveCheckoutSession as jest.MockedFunction<typeof retrieveCheckoutSession>;
 
 jest.mock("../paymongo", () => ({ retrievePayMongoCheckoutSession: jest.fn() }));
 import { retrievePayMongoCheckoutSession } from "../paymongo";
@@ -62,7 +56,6 @@ const BOOKING_ROW: Booking = {
 beforeEach(() => {
   jest.useFakeTimers();
   jest.setSystemTime(NOW);
-  mockRetrieveCheckoutSession.mockReset();
   mockRetrievePayMongoCheckoutSession.mockReset();
 });
 
@@ -314,154 +307,6 @@ describe("getBookingById", () => {
   it("rethrows a genuine, unrelated fetch error", async () => {
     const supabase = createTableMockSupabase({ bookings: { data: null, error: postgrestError("53400", "unexpected") } });
     await expect(getBookingById(supabase, "booking-1")).rejects.toBeTruthy();
-  });
-});
-
-describe("attachCheckoutSession", () => {
-  it("updates only stripe_checkout_session_id on the given booking", async () => {
-    let updatedPayload: unknown;
-    let updatedId: unknown;
-    const supabase = createTableMockSupabase({});
-    (supabase as unknown as { from: jest.Mock }).from = jest.fn((table: string) => {
-      if (table !== "bookings") throw new Error(`unexpected table ${table}`);
-      return {
-        update: jest.fn((payload: unknown) => {
-          updatedPayload = payload;
-          return { eq: jest.fn((_col: string, id: unknown) => { updatedId = id; return Promise.resolve({ error: null }); }) };
-        }),
-      };
-    });
-
-    await attachCheckoutSession(supabase, "booking-1", "cs_test_123");
-
-    expect(updatedPayload).toEqual({ stripe_checkout_session_id: "cs_test_123" });
-    expect(updatedId).toBe("booking-1");
-  });
-
-  it("throws on a database error", async () => {
-    const supabase = createTableMockSupabase({});
-    (supabase as unknown as { from: jest.Mock }).from = jest.fn(() => ({
-      update: jest.fn(() => ({ eq: jest.fn().mockResolvedValue({ error: postgrestError("53400", "unexpected") }) })),
-    }));
-
-    await expect(attachCheckoutSession(supabase, "booking-1", "cs_test_123")).rejects.toBeTruthy();
-  });
-});
-
-describe("confirmBookingPayment", () => {
-  it("calls the confirm_booking_payment RPC with the exact params it was given, mapped to snake_case", async () => {
-    const supabase = createTableMockSupabase({}, { confirm_booking_payment: { data: true, error: null } });
-
-    const result = await confirmBookingPayment(supabase, {
-      bookingId: "booking-1",
-      stripeCheckoutSessionId: "cs_test_123",
-      stripePaymentIntentId: "pi_test_456",
-      expectedAmount: 50000,
-      expectedCurrency: "PHP",
-    });
-
-    expect(result).toBe(true);
-    expect((supabase as unknown as { rpc: jest.Mock }).rpc).toHaveBeenCalledWith("confirm_booking_payment", {
-      p_booking_id: "booking-1",
-      p_stripe_checkout_session_id: "cs_test_123",
-      p_stripe_payment_intent_id: "pi_test_456",
-      p_expected_amount: 50000,
-      p_expected_currency: "PHP",
-    });
-  });
-
-  it("returns false (no-op) rather than throwing when the RPC reports no matching row — e.g. a duplicate webhook delivery", async () => {
-    const supabase = createTableMockSupabase({}, { confirm_booking_payment: { data: false, error: null } });
-    await expect(
-      confirmBookingPayment(supabase, {
-        bookingId: "booking-1",
-        stripeCheckoutSessionId: "cs_test_123",
-        stripePaymentIntentId: "pi_test_456",
-        expectedAmount: 50000,
-        expectedCurrency: "PHP",
-      })
-    ).resolves.toBe(false);
-  });
-
-  it("throws on a genuine RPC error", async () => {
-    const supabase = createTableMockSupabase({}, { confirm_booking_payment: { data: null, error: postgrestError("53400", "unexpected") } });
-    await expect(
-      confirmBookingPayment(supabase, {
-        bookingId: "booking-1",
-        stripeCheckoutSessionId: "cs_test_123",
-        stripePaymentIntentId: "pi_test_456",
-        expectedAmount: 50000,
-        expectedCurrency: "PHP",
-      })
-    ).rejects.toBeTruthy();
-  });
-});
-
-describe("reconcilePendingBooking — the 'confirmation page loads before the webhook' fallback", () => {
-  const PENDING_BOOKING: Booking = {
-    ...BOOKING_ROW,
-    status: "pending",
-    stripe_checkout_session_id: "cs_test_123",
-  };
-
-  it("throws booking_not_found when the booking doesn't exist (or isn't visible to this caller)", async () => {
-    const supabase = createTableMockSupabase({ bookings: { data: null, error: null } });
-    await expect(reconcilePendingBooking(supabase, "booking-1", "cs_test_123")).rejects.toMatchObject({
-      reason: "booking_not_found",
-    });
-    expect(mockRetrieveCheckoutSession).not.toHaveBeenCalled();
-  });
-
-  it("returns the booking unchanged, without calling Stripe, when it's already confirmed", async () => {
-    const supabase = createTableMockSupabase({ bookings: { data: { ...PENDING_BOOKING, status: "confirmed" }, error: null } });
-    const result = await reconcilePendingBooking(supabase, "booking-1", "cs_test_123");
-    expect(result.status).toBe("confirmed");
-    expect(mockRetrieveCheckoutSession).not.toHaveBeenCalled();
-  });
-
-  it("returns the booking unchanged, without calling Stripe, when the given session id doesn't match the one stored on it", async () => {
-    const supabase = createTableMockSupabase({ bookings: { data: PENDING_BOOKING, error: null } });
-    const result = await reconcilePendingBooking(supabase, "booking-1", "cs_some_other_session");
-    expect(result).toEqual(PENDING_BOOKING);
-    expect(mockRetrieveCheckoutSession).not.toHaveBeenCalled();
-  });
-
-  it("checks Stripe directly but leaves the booking pending when Stripe reports the session isn't paid yet", async () => {
-    const supabase = createTableMockSupabase({ bookings: { data: PENDING_BOOKING, error: null } });
-    mockRetrieveCheckoutSession.mockResolvedValue({ payment_status: "unpaid" } as never);
-
-    const result = await reconcilePendingBooking(supabase, "booking-1", "cs_test_123");
-
-    expect(result).toEqual(PENDING_BOOKING);
-    expect(mockRetrieveCheckoutSession).toHaveBeenCalledWith("cs_test_123");
-    // confirm_booking_payment must never be reached for an unpaid session —
-    // createTableMockSupabase throws if .rpc() is called without a
-    // configured result, which is exactly the assertion we want here.
-  });
-
-  it("confirms the booking through the same guarded RPC the webhook itself uses, once Stripe reports the session paid", async () => {
-    const CONFIRMED_BOOKING: Booking = { ...PENDING_BOOKING, status: "confirmed", stripe_payment_intent_id: "pi_test_456" };
-    const supabase = createTableMockSupabase(
-      { bookings: [{ data: PENDING_BOOKING, error: null }, { data: CONFIRMED_BOOKING, error: null }] },
-      { confirm_booking_payment: { data: true, error: null } }
-    );
-    mockRetrieveCheckoutSession.mockResolvedValue({
-      payment_status: "paid",
-      payment_intent: "pi_test_456",
-      amount_total: 50000,
-      currency: "php",
-    } as never);
-
-    const result = await reconcilePendingBooking(supabase, "booking-1", "cs_test_123");
-
-    expect((supabase as unknown as { rpc: jest.Mock }).rpc).toHaveBeenCalledWith("confirm_booking_payment", {
-      p_booking_id: "booking-1",
-      p_stripe_checkout_session_id: "cs_test_123",
-      p_stripe_payment_intent_id: "pi_test_456",
-      p_expected_amount: 50000,
-      p_expected_currency: "PHP",
-    });
-    expect(result).toEqual(CONFIRMED_BOOKING);
   });
 });
 

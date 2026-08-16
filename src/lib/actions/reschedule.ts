@@ -11,7 +11,6 @@ import {
   type RescheduleOptions,
 } from "@/lib/services/reschedules";
 import { BookingError } from "@/lib/services/bookings";
-import { PaymentError } from "@/lib/services/payments";
 import { PayMongoError } from "@/lib/services/paymongo";
 import { RefundError } from "@/lib/services/refunds";
 import { createRescheduleSchema, resumeRescheduleSchema, type CreateRescheduleValues } from "@/lib/validations/reschedule";
@@ -19,7 +18,7 @@ import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import { getSiteUrl } from "@/lib/site";
 import { getServerClient, type ActionResult } from "@/lib/actions/auth";
 
-const DOMAIN_ERRORS = [RescheduleError, BookingError, PaymentError, PayMongoError, RefundError];
+const DOMAIN_ERRORS = [RescheduleError, BookingError, PayMongoError, RefundError];
 
 function isDomainError(error: unknown): error is InstanceType<(typeof DOMAIN_ERRORS)[number]> {
   return DOMAIN_ERRORS.some((ErrorClass) => error instanceof ErrorClass);

@@ -20,7 +20,6 @@ jest.mock("../bookings", () => ({
   createBooking: jest.fn(),
   cancelBooking: jest.fn(),
   getBookingById: jest.fn(),
-  attachCheckoutSession: jest.fn(),
   attachPaymongoCheckoutSession: jest.fn(),
   BookingError: class BookingError extends Error {
     reason: string;
@@ -31,12 +30,11 @@ jest.mock("../bookings", () => ({
     }
   },
 }));
-import { createBooking, cancelBooking, getBookingById, attachCheckoutSession, attachPaymongoCheckoutSession, BookingError } from "../bookings";
+import { createBooking, cancelBooking, getBookingById, attachPaymongoCheckoutSession, BookingError } from "../bookings";
 const mockCreateBooking = createBooking as jest.MockedFunction<typeof createBooking>;
 const mockCancelBooking = cancelBooking as jest.MockedFunction<typeof cancelBooking>;
 const mockGetBookingById = getBookingById as jest.MockedFunction<typeof getBookingById>;
 const mockAttachPaymongoCheckoutSession = attachPaymongoCheckoutSession as jest.MockedFunction<typeof attachPaymongoCheckoutSession>;
-void attachCheckoutSession;
 
 jest.mock("../refunds", () => ({
   requestRefund: jest.fn(),
@@ -60,9 +58,6 @@ import { createPayMongoCheckoutSession, retrievePayMongoCheckoutSession } from "
 const mockCreatePayMongoCheckoutSession = createPayMongoCheckoutSession as jest.MockedFunction<typeof createPayMongoCheckoutSession>;
 const mockRetrievePayMongoCheckoutSession = retrievePayMongoCheckoutSession as jest.MockedFunction<typeof retrievePayMongoCheckoutSession>;
 
-jest.mock("../payments", () => ({ retrieveCheckoutSession: jest.fn() }));
-import { retrieveCheckoutSession } from "../payments";
-const mockRetrieveCheckoutSession = retrieveCheckoutSession as jest.MockedFunction<typeof retrieveCheckoutSession>;
 
 jest.mock("../courts", () => ({ getCourtDisplayInfo: jest.fn() }));
 import { getCourtDisplayInfo } from "../courts";
@@ -90,14 +85,6 @@ jest.mock("../../supabase/serviceRole", () => ({
 
 // A real, minimal fake of the Stripe SDK shape reschedules.ts actually
 // calls (checkout.sessions.create/expire) — never a live network call.
-const mockStripeSessionsCreate = jest.fn();
-const mockStripeSessionsExpire = jest.fn();
-jest.mock("stripe", () => {
-  return jest.fn().mockImplementation(() => ({
-    checkout: { sessions: { create: mockStripeSessionsCreate, expire: mockStripeSessionsExpire } },
-  }));
-});
-
 const NOW = new Date("2026-08-10T00:00:00Z");
 // ≥24h out from NOW — satisfies the reschedule cutoff.
 const FAR_FUTURE_START = "2026-08-13T00:00:00Z";
@@ -196,14 +183,10 @@ beforeEach(() => {
   mockRequestRefund.mockReset();
   mockCreatePayMongoCheckoutSession.mockReset();
   mockRetrievePayMongoCheckoutSession.mockReset();
-  mockRetrieveCheckoutSession.mockReset();
   mockGetCourtDisplayInfo.mockReset();
   mockMarketplaceSplitEnabled.mockReset();
   mockMarketplaceSplitEnabled.mockReturnValue(false);
   mockServiceRoleRpc.mockReset();
-  mockStripeSessionsCreate.mockReset();
-  mockStripeSessionsExpire.mockReset();
-  mockStripeSessionsExpire.mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -579,34 +562,31 @@ describe("createReschedule — price increase", () => {
     expect(mockCreatePayMongoCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ marketplaceSplit: { platformFeeAmount: 1000, venuePaymongoAccountId: "acc_venue_1" } }));
   });
 
-  it("leaves the reschedule row pending_payment (retryable) when Stripe difference-checkout creation fails", async () => {
-    const originalStripeKey = process.env.STRIPE_SECRET_KEY;
-    delete process.env.STRIPE_SECRET_KEY;
-    try {
-      const higherPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 70000 };
-      mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
-      mockCreateBooking.mockResolvedValue(higherPriceReplacement);
-      mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
-      const supabase = createTableMockSupabase({
-        booking_refunds: NOT_FOUND,
-        booking_reschedules: [NOT_FOUND, NOT_FOUND, NOT_FOUND, { data: RESCHEDULE_ROW, error: null }],
-        courts: [COURT_ROW("venue-1"), COURT_ROW("venue-1")],
-      });
+  it("leaves the reschedule row pending_payment (retryable) when difference-checkout creation fails", async () => {
+    const higherPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 70000 };
+    mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
+    mockCreateBooking.mockResolvedValue(higherPriceReplacement);
+    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
+    mockCreatePayMongoCheckoutSession.mockRejectedValue(new Error("paymongo unavailable"));
+    const supabase = createTableMockSupabase({
+      booking_refunds: NOT_FOUND,
+      booking_reschedules: [NOT_FOUND, NOT_FOUND, NOT_FOUND, { data: RESCHEDULE_ROW, error: null }],
+      courts: [COURT_ROW("venue-1"), COURT_ROW("venue-1")],
+    });
 
-      await expect(
-        createReschedule(supabase, "user-1", {
-          bookingId: ORIGINAL_BOOKING.id,
-          newCourtId: "court-2",
-          newStartTime: FAR_FUTURE_START,
-          newEndTime: FAR_FUTURE_END,
-          siteUrl: "https://air-rally.app",
-        })
-      ).rejects.toMatchObject({ reason: "checkout_session_creation_failed" });
-      expect(mockCancelBooking).not.toHaveBeenCalled();
-    } finally {
-      if (originalStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
-      else process.env.STRIPE_SECRET_KEY = originalStripeKey;
-    }
+    await expect(
+      createReschedule(supabase, "user-1", {
+        bookingId: ORIGINAL_BOOKING.id,
+        newCourtId: "court-2",
+        newStartTime: FAR_FUTURE_START,
+        newEndTime: FAR_FUTURE_END,
+        siteUrl: "https://air-rally.app",
+      })
+    ).rejects.toBeTruthy();
+
+    // The replacement booking must survive so the customer can retry
+    // paying the difference — cancelling it would lose the reservation.
+    expect(mockCancelBooking).not.toHaveBeenCalled();
   });
 });
 
@@ -860,47 +840,9 @@ describe("resumeRescheduleCheckout", () => {
 
     expect(mockCreatePayMongoCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ chargeAmountOverride: 20000 }));
     expect(url).toBe("https://checkout.paymongo.com/resume");
-    expect(mockStripeSessionsExpire).not.toHaveBeenCalled();
   });
 
-  it("for Stripe, best-effort expires the PREVIOUS checkout session before creating a new one", async () => {
-    const originalStripeKey = process.env.STRIPE_SECRET_KEY;
-    process.env.STRIPE_SECRET_KEY = "sk_test_fake"; // safe — the Stripe SDK itself is jest.mock()'d above, no real network call
-    try {
-      mockGetBookingById.mockImplementation((_supabase, id) =>
-        Promise.resolve(id === ORIGINAL_BOOKING.id ? ORIGINAL_BOOKING : { ...REPLACEMENT_BOOKING, stripe_checkout_session_id: "cs_test_old_attempt" })
-      );
-      mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
-      mockStripeSessionsCreate.mockResolvedValue({ id: "cs_test_new_attempt", url: "https://checkout.stripe.com/new" });
-      const supabase = createTableMockSupabase({ booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_payment", price_difference: 20000 }, error: null } });
 
-      await resumeRescheduleCheckout(supabase, "user-1", "reschedule-1", { siteUrl: "https://air-rally.app" });
-
-      expect(mockStripeSessionsExpire).toHaveBeenCalledWith("cs_test_old_attempt");
-    } finally {
-      if (originalStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
-      else process.env.STRIPE_SECRET_KEY = originalStripeKey;
-    }
-  });
-
-  it("a failure expiring the old Stripe session never blocks creating the new one", async () => {
-    const originalStripeKey = process.env.STRIPE_SECRET_KEY;
-    process.env.STRIPE_SECRET_KEY = "sk_test_fake";
-    try {
-      mockGetBookingById.mockImplementation((_supabase, id) =>
-        Promise.resolve(id === ORIGINAL_BOOKING.id ? ORIGINAL_BOOKING : { ...REPLACEMENT_BOOKING, stripe_checkout_session_id: "cs_test_old_attempt" })
-      );
-      mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
-      mockStripeSessionsExpire.mockRejectedValue(new Error("already expired"));
-      mockStripeSessionsCreate.mockResolvedValue({ id: "cs_test_new_attempt", url: "https://checkout.stripe.com/new" });
-      const supabase = createTableMockSupabase({ booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_payment", price_difference: 20000 }, error: null } });
-
-      await expect(resumeRescheduleCheckout(supabase, "user-1", "reschedule-1", { siteUrl: "https://air-rally.app" })).resolves.toBe("https://checkout.stripe.com/new");
-    } finally {
-      if (originalStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
-      else process.env.STRIPE_SECRET_KEY = originalStripeKey;
-    }
-  });
 });
 
 // ---------------------------------------------------------------------
@@ -964,23 +906,10 @@ describe("maybeCompleteRescheduleFromProvider — currency validation added", ()
   it("is a safe no-op for a booking that isn't any reschedule's replacement", async () => {
     const supabase = createTableMockSupabase({ booking_reschedules: NOT_FOUND });
     await expect(maybeCompleteRescheduleFromProvider(supabase, "some-other-booking")).resolves.toBe(false);
-    expect(mockRetrieveCheckoutSession).not.toHaveBeenCalled();
+    expect(mockRetrievePayMongoCheckoutSession).not.toHaveBeenCalled();
   });
 
-  it("Stripe: rejects when the paid session's currency doesn't match the booking's own currency, even if the amount matches", async () => {
-    mockGetBookingById.mockResolvedValue({ ...REPLACEMENT_BOOKING, currency: "PHP", stripe_checkout_session_id: "cs_test_diff" });
-    mockRetrieveCheckoutSession.mockResolvedValue({ payment_status: "paid", amount_total: 20000, currency: "usd" } as never);
-    const supabase = createTableMockSupabase({ booking_reschedules: { data: { ...RESCHEDULE_ROW, price_difference: 20000 }, error: null } });
-    await expect(maybeCompleteRescheduleFromProvider(supabase, REPLACEMENT_BOOKING.id)).resolves.toBe(false);
-  });
 
-  it("Stripe: completes once amount and currency both match", async () => {
-    mockGetBookingById.mockResolvedValue({ ...REPLACEMENT_BOOKING, currency: "PHP", stripe_checkout_session_id: "cs_test_diff" });
-    mockRetrieveCheckoutSession.mockResolvedValue({ payment_status: "paid", amount_total: 20000, currency: "php" } as never);
-    mockServiceRoleRpcResults({ complete_reschedule: { data: true, error: null } });
-    const supabase = createTableMockSupabase({ booking_reschedules: { data: { ...RESCHEDULE_ROW, price_difference: 20000 }, error: null } });
-    await expect(maybeCompleteRescheduleFromProvider(supabase, REPLACEMENT_BOOKING.id)).resolves.toBe(true);
-  });
 
   it("PayMongo: rejects a currency mismatch", async () => {
     mockGetBookingById.mockResolvedValue({ ...REPLACEMENT_BOOKING, payment_provider: "paymongo", currency: "PHP", paymongo_checkout_session_id: "cs_pm_diff" });
@@ -1007,6 +936,6 @@ describe("maybeCompleteRescheduleFromProvider — currency validation added", ()
     mockGetBookingById.mockResolvedValue({ ...REPLACEMENT_BOOKING, status: "confirmed" });
     const supabase = createTableMockSupabase({ booking_reschedules: { data: { ...RESCHEDULE_ROW, price_difference: 20000 }, error: null } });
     await expect(maybeCompleteRescheduleFromProvider(supabase, REPLACEMENT_BOOKING.id)).resolves.toBe(false);
-    expect(mockRetrieveCheckoutSession).not.toHaveBeenCalled();
+    expect(mockRetrievePayMongoCheckoutSession).not.toHaveBeenCalled();
   });
 });
