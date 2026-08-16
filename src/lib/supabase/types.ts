@@ -493,6 +493,25 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
       };
+      /** Owner-only per-court day schedule (every candidate slot labeled available/booked/blocked) — see lib/services/ownerAvailability.ts. Returns nothing for a court the caller doesn't own. */
+      get_owner_court_schedule: {
+        Args: {
+          p_court_id: string;
+          p_local_date: string;
+          p_duration_minutes?: number;
+          p_increment_minutes?: number;
+        };
+        Returns: {
+          slot_start: string;
+          slot_end: string;
+          status: "booked" | "blocked" | "available";
+          booking_id: string | null;
+          booking_status: string | null;
+          customer_name: string | null;
+          block_id: string | null;
+          block_reason: string | null;
+        }[];
+      };
       /** Atomically confirms the replacement booking (if not already) + cancels the original + marks the reschedule completed. See lib/services/reschedules.ts. */
       complete_reschedule: {
         Args: {
