@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { CalendarCheck, Heart, LogOut, User as UserIcon } from "lucide-react";
+import { CalendarCheck, Heart, LogOut, Shield, Store, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -15,11 +15,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { createClient } from "@/lib/supabase/client";
+import type { UserRole } from "@/lib/supabase/types";
 
 type UserMenuProps = {
   displayName: string;
   email: string;
   avatarUrl: string | null;
+  /**
+   * UI-only visibility, not a security boundary — every owner/admin
+   * route and action re-checks server-side (RLS + is_admin()/role
+   * checks), same posture as every other role-gated surface in this
+   * codebase. Hiding this link just avoids showing a dead end to an
+   * account it doesn't apply to.
+   */
+  role: UserRole;
 };
 
 function initialsFrom(name: string) {
@@ -30,7 +39,7 @@ function initialsFrom(name: string) {
     .join("");
 }
 
-export function UserMenu({ displayName, email, avatarUrl }: UserMenuProps) {
+export function UserMenu({ displayName, email, avatarUrl, role }: UserMenuProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -96,6 +105,25 @@ export function UserMenu({ displayName, email, avatarUrl }: UserMenuProps) {
             Favorites
           </Link>
         </DropdownMenuItem>
+        {(role === "venue_owner" || role === "admin") && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/list-your-court">
+                <Store />
+                My Venues
+              </Link>
+            </DropdownMenuItem>
+          </>
+        )}
+        {role === "admin" && (
+          <DropdownMenuItem asChild>
+            <Link href="/admin/payments">
+              <Shield />
+              Admin
+            </Link>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" disabled={isPending} onSelect={handleLogout}>
           <LogOut />

@@ -23,8 +23,11 @@ const mockUpdateVenue = updateVenue as jest.MockedFunction<typeof updateVenue>;
 const mockSetVenueAmenities = setVenueAmenities as jest.MockedFunction<typeof setVenueAmenities>;
 const mockSetOperatingHours = setOperatingHours as jest.MockedFunction<typeof setOperatingHours>;
 
-function fakeClient(user: { id: string } | null) {
-  return { auth: { getUser: jest.fn().mockResolvedValue({ data: { user } }) } } as never;
+function fakeClient(user: { id: string } | null, rpcResult: { error: unknown } = { error: null }) {
+  return {
+    auth: { getUser: jest.fn().mockResolvedValue({ data: { user } }) },
+    rpc: jest.fn().mockResolvedValue(rpcResult),
+  } as never;
 }
 
 const validDraft: CreateVenueDraftValues = {
@@ -75,6 +78,32 @@ describe("createVenueDraftAction", () => {
     expect(mockCreateDraftVenue).toHaveBeenCalledWith(expect.anything(), "user-1", expect.objectContaining({
       name: validDraft.name,
     }));
+  });
+
+  // P0 role-gating: venues' own INSERT RLS policy now requires
+  // role in ('venue_owner','admin') — see
+  // supabase/migrations/20260810000016_role_gating.sql. This action must
+  // call request_venue_owner_role() first so a still-'player' account's
+  // very first "List Your Court" click doesn't fail RLS.
+  it("requests the venue_owner role before creating the draft", async () => {
+    const client = fakeClient({ id: "user-1" });
+    mockGetServerClient.mockResolvedValue({ ok: true, client });
+    mockCreateDraftVenue.mockResolvedValue({ id: "venue-1", name: validDraft.name } as never);
+
+    await createVenueDraftAction(validDraft);
+
+    expect((client as unknown as { rpc: jest.Mock }).rpc).toHaveBeenCalledWith("request_venue_owner_role");
+    expect(mockCreateDraftVenue).toHaveBeenCalled();
+  });
+
+  it("never attempts to create the draft if the role grant itself errors", async () => {
+    const client = fakeClient({ id: "user-1" }, { error: { message: "unexpected db error" } });
+    mockGetServerClient.mockResolvedValue({ ok: true, client });
+
+    const result = await createVenueDraftAction(validDraft);
+
+    expect(result.success).toBe(false);
+    expect(mockCreateDraftVenue).not.toHaveBeenCalled();
   });
 });
 

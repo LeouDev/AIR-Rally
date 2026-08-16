@@ -488,6 +488,11 @@ export type Database = {
         };
         Returns: void;
       };
+      /** One-directional 'player' -> 'venue_owner' self-service role grant — see lib/actions/venue.ts and the role/permission audit. Never reaches 'admin', idempotent. */
+      request_venue_owner_role: {
+        Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
       /** Atomically confirms the replacement booking (if not already) + cancels the original + marks the reschedule completed. See lib/services/reschedules.ts. */
       complete_reschedule: {
         Args: {

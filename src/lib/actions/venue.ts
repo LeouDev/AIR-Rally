@@ -35,6 +35,15 @@ export async function createVenueDraftAction(values: CreateVenueDraftValues): Pr
   }
 
   try {
+    // Grants 'venue_owner' the first time a 'player' reaches this step —
+    // a safe no-op for an account that's already venue_owner/admin (see
+    // request_venue_owner_role() and the role/permission audit). This is
+    // what venues' own INSERT policy now actually checks; without this
+    // call, createDraftVenue() below would fail RLS for a still-'player'
+    // account.
+    const { error: roleError } = await supabase.rpc("request_venue_owner_role");
+    if (roleError) throw roleError;
+
     const venue = await createDraftVenue(supabase, user.id, parsed.data);
     revalidatePath("/list-your-court");
     return { success: true, data: venue };

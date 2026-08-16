@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { createClient } from "@/lib/supabase/client";
 import { getProfile } from "@/lib/services/profiles";
+import type { UserRole } from "@/lib/supabase/types";
 
 type AuthState =
   | { status: "loading" }
   | { status: "signed-out" }
-  | { status: "signed-in"; email: string; displayName: string; avatarUrl: string | null };
+  | { status: "signed-in"; email: string; displayName: string; avatarUrl: string | null; role: UserRole };
 
 /**
  * Client-side by design. The Navbar renders on every marketing page, and
@@ -63,6 +64,7 @@ export function AuthNavSection() {
         email: user.email ?? "",
         displayName: profile?.display_name || user.email || "Your account",
         avatarUrl: profile?.avatar_url ?? null,
+        role: profile?.role ?? "player",
       });
     }
 
@@ -90,7 +92,7 @@ export function AuthNavSection() {
 
   if (state.status === "signed-in") {
     return (
-      <UserMenu displayName={state.displayName} email={state.email} avatarUrl={state.avatarUrl} />
+      <UserMenu displayName={state.displayName} email={state.email} avatarUrl={state.avatarUrl} role={state.role} />
     );
   }
 
