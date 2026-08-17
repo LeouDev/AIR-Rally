@@ -16,7 +16,11 @@ import { cn } from "@/lib/utils";
 
 const WHEN_OPTIONS = ["Today", "Tomorrow", "This Weekend", "Next Week"];
 const PLAYER_OPTIONS = [2, 4, 6, 8];
-const LOCATION_PLACEHOLDER = "City, municipality, or barangay";
+// Short enough to fit the compact variant's field without clipping — measured
+// at 210px against 188px available, which is why the longer
+// "City, municipality, or barangay" was being cut mid-word. The "WHERE?" label
+// above it already supplies the context the extra words were carrying.
+export const LOCATION_PLACEHOLDER = "City or barangay";
 
 type SearchBarProps = {
   className?: string;
@@ -69,11 +73,7 @@ export function SearchBar({ className, variant = "hero" }: SearchBarProps) {
         className
       )}
     >
-      <Field
-        icon={MapPin}
-        label="Where?"
-        className="sm:flex-1"
-      >
+      <Field icon={MapPin} label="Where?" className="sm:flex-[1.4]">
         <input
           type="text"
           value={location}
@@ -103,7 +103,7 @@ export function SearchBar({ className, variant = "hero" }: SearchBarProps) {
 
       <Divider />
 
-      <Field icon={Users} label="Players?" className="sm:flex-1">
+      <Field icon={Users} label="Players?" className="sm:flex-[0.8]">
         <Select value={String(players)} onValueChange={(v) => setPlayers(Number(v))}>
           <SelectTrigger className="h-auto w-full border-none bg-transparent p-0 shadow-none focus-visible:ring-0 [&>svg]:hidden">
             <SelectValue />
@@ -142,7 +142,7 @@ function Field({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-2.5 px-3 py-2.5", className)}>
+    <div className={cn("flex min-w-0 items-center gap-2.5 px-3 py-2.5", className)}>
       <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="text-[0.6875rem]/[0.875rem] font-semibold tracking-[0.1em] text-muted-foreground uppercase">

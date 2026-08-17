@@ -102,6 +102,16 @@ export function AuthNavSection() {
   if (state.status === "signed-in") {
     return (
       <div className="flex items-center gap-1">
+        {/* Signed-in counterpart to the signed-out "List Your Court" link:
+            a primary destination that only makes sense once you have an
+            account. It is also in UserMenu, but a booking someone is looking
+            for should not require opening a menu to find. */}
+        <Link
+          href="/bookings"
+          className="hidden rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 md:inline-flex"
+        >
+          My bookings
+        </Link>
         <NotificationBell userId={state.userId} />
         <UserMenu displayName={state.displayName} email={state.email} avatarUrl={state.avatarUrl} role={state.role} />
       </div>

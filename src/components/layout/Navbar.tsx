@@ -8,9 +8,21 @@ import { AuthNavSection } from "@/components/layout/AuthNavSection";
 // it post-login (Phase 6, Part 1); a signed-in owner/admin already has
 // their own entry point via UserMenu's role-branched items. Putting it
 // here would show it unconditionally to everyone, signed in or not.
+// Public destinations only. Each renders something sensible signed out —
+// COURT/Side and Clubs show their own sign-in prompt rather than bouncing to
+// /login — so none of these is a dead end for an anonymous visitor.
+//
+// "My bookings" is deliberately NOT here: it is meaningless signed out, and
+// listing it unconditionally would send anonymous visitors to a login
+// redirect from the primary nav. It lives in AuthNavSection's signed-in
+// branch instead, for the same reason "List Your Court" lives in its
+// signed-out one.
 const NAV_LINKS = [
   { href: "/explore", label: "Explore" },
-  { href: "/#how-it-works", label: "How It Works" },
+  { href: "/events", label: "Open Play" },
+  { href: "/court-side", label: "COURT/Side" },
+  { href: "/clubs", label: "Clubs" },
+  { href: "/how-it-works", label: "How It Works" },
 ];
 
 export function Navbar() {

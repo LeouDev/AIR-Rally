@@ -7,7 +7,7 @@ import { getCurrentUser } from "@/lib/supabase/auth";
 const PRODUCT_LINKS = [
   { href: "/explore", label: "Explore Courts" },
   { href: "/list-your-court", label: "List Your Court" },
-  { href: "/#how-it-works", label: "How It Works" },
+  { href: "/how-it-works", label: "How It Works" },
 ];
 
 /**
