@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { PostComments } from "@/components/court-side/PostComments";
 import { AdminDeletePostButton } from "@/components/admin/AdminDeletePostButton";
+import { ReportButton } from "@/components/trust/ReportButton";
 import type { PostWithAuthor } from "@/lib/services/posts";
 import type { ClubMentionMap } from "@/lib/services/clubs";
 import { createClient } from "@/lib/supabase/client";
@@ -140,6 +141,9 @@ export function PostCard({
           </button>
         )}
         {!isOwnPost && isAdmin && <AdminDeletePostButton postId={post.id} />}
+        {/* Only on other people's posts — reporting your own is noise in
+            the moderation queue, and deleting it is right there instead. */}
+        {!isOwnPost && <ReportButton targetType="post" targetId={post.id} targetLabel="post" />}
       </div>
 
       <p className="mt-3 text-sm leading-relaxed text-foreground">{highlightMentions(post.content, clubMentions)}</p>

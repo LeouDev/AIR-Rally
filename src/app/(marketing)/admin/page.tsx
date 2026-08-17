@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Building2, Users, ClipboardCheck, CreditCard, Share2, Wallet, Landmark, BadgeCheck, ArrowLeftRight } from "lucide-react";
+import { Building2, Users, ClipboardCheck, CreditCard, Share2, Wallet, Landmark, BadgeCheck, ArrowLeftRight, Flag, LifeBuoy } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
@@ -9,6 +9,7 @@ import { getClubModerationCounts } from "@/lib/services/clubs";
 import { listVenuesForAdmin } from "@/lib/services/venues";
 import { listOwnerApplicationsForAdmin } from "@/lib/services/ownerApplications";
 import { getAdminSettlementSummary } from "@/lib/services/settlements";
+import { countOpenReports, listSupportRequests } from "@/lib/services/reports";
 
 // Live counts across every moderation queue — never statically cached.
 export const dynamic = "force-dynamic";
@@ -23,17 +24,35 @@ export default async function AdminDashboardPage() {
   const adminCheck = await requireAdmin(supabase);
   if (!adminCheck.ok) notFound();
 
-  const [clubCounts, pendingVenues, pendingApplications, settlementSummary] = await Promise.all([
+  const [clubCounts, pendingVenues, pendingApplications, settlementSummary, openReports, openSupport] = await Promise.all([
     getClubModerationCounts(supabase),
     listVenuesForAdmin(supabase, "pending_review"),
     listOwnerApplicationsForAdmin(supabase, "pending"),
     getAdminSettlementSummary(supabase),
+    countOpenReports(supabase),
+    listSupportRequests(supabase, "open"),
   ]);
   const onHoldSettlements = settlementSummary.onHoldCount;
 
   // Only the queues that actually need attention carry a count — a badge
   // on a zero is noise.
   const cards = [
+    // Reports lead the list: everything else is a business queue, this one
+    // is someone telling us a person is being harmed.
+    {
+      href: "/admin/reports",
+      icon: Flag,
+      title: "Reports",
+      description: "What players have flagged across posts, clubs and accounts.",
+      pending: openReports,
+    },
+    {
+      href: "/admin/support",
+      icon: LifeBuoy,
+      title: "Support",
+      description: "Messages from players and owners asking for help.",
+      pending: openSupport.length,
+    },
     {
       href: "/admin/venues",
       icon: Building2,
@@ -100,7 +119,8 @@ export default async function AdminDashboardPage() {
     },
   ];
 
-  const totalPending = pendingVenues.length + clubCounts.pending_review + pendingApplications.length;
+  const totalPending =
+    pendingVenues.length + clubCounts.pending_review + pendingApplications.length + openReports + openSupport.length;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">

@@ -53,6 +53,9 @@ export function Footer() {
             <Link href="/privacy" className="hover:text-foreground">
               Privacy
             </Link>
+            <Link href="/support" className="hover:text-foreground">
+              Support
+            </Link>
           </div>
         </div>
       </div>

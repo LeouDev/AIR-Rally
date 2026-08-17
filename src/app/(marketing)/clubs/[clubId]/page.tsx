@@ -8,6 +8,7 @@ import { getClubForViewer, listClubMembers } from "@/lib/services/clubs";
 import { listEventsForClub } from "@/lib/services/events";
 import type { Club, CommunityEvent } from "@/lib/supabase/types";
 import { BackLink } from "@/components/shared/BackLink";
+import { ReportButton } from "@/components/trust/ReportButton";
 
 // Per-viewer: RLS decides whether this club is even visible, and the
 // viewer's own role drives what renders.
@@ -107,6 +108,14 @@ export default async function ClubDetailPage({ params }: PageProps) {
             ))}
           </ul>
         </section>
+      )}
+
+      {/* Not offered to the owner: reporting your own club is noise in the
+          queue, and they can edit or delete it directly instead. */}
+      {user && user.id !== club.owner_id && (
+        <div className="mt-6">
+          <ReportButton targetType="club" targetId={club.id} targetLabel="club" variant="button" />
+        </div>
       )}
 
       <div className="mt-8">

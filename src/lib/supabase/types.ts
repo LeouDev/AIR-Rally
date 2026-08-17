@@ -480,6 +480,55 @@ export type ClubMember = {
   created_at: string;
 };
 
+export type ReportTargetType = "post" | "comment" | "club" | "event" | "user";
+export type ReportReason =
+  | "spam"
+  | "harassment"
+  | "hate_speech"
+  | "sexual_content"
+  | "violence"
+  | "misinformation"
+  | "impersonation"
+  | "other";
+export type ReportStatus = "open" | "reviewed" | "dismissed";
+
+export type Report = {
+  id: string;
+  reporter_id: string;
+  target_type: ReportTargetType;
+  /**
+   * Points at one of five tables depending on `target_type`, so it carries
+   * no foreign key. That is deliberate: a report has to survive the
+   * deletion of what it describes, or removing an abusive post would erase
+   * the moderation record along with it.
+   */
+  target_id: string;
+  reason: ReportReason;
+  details: string | null;
+  status: ReportStatus;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  resolution_note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SupportCategory = "booking" | "payment" | "account" | "venue" | "safety" | "bug" | "other";
+export type SupportStatus = "open" | "in_progress" | "resolved" | "closed";
+
+export type SupportRequest = {
+  id: string;
+  user_id: string;
+  category: SupportCategory;
+  subject: string;
+  message: string;
+  status: SupportStatus;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type EventType = "open_play" | "club_meetup" | "training" | "tournament";
 export type EventStatus = "draft" | "published" | "cancelled" | "completed";
 export type EventAttendeeStatus = "joined" | "waitlisted" | "cancelled";
@@ -880,6 +929,19 @@ export type Database = {
       club_members: TableDef<
         ClubMember,
         Pick<ClubMember, "club_id" | "user_id"> & Partial<Pick<ClubMember, "role" | "status">>
+      >;
+      reports: TableDef<
+        Report,
+        Pick<Report, "reporter_id" | "target_type" | "target_id" | "reason"> & Partial<Pick<Report, "details">>,
+        // Only the resolution fields are updatable, and only by an admin
+        // (the reports UPDATE policy requires is_admin()). Nothing else
+        // about a filed report should ever change.
+        Partial<Pick<Report, "status" | "resolved_by" | "resolved_at" | "resolution_note">>
+      >;
+      support_requests: TableDef<
+        SupportRequest,
+        Pick<SupportRequest, "user_id" | "category" | "subject" | "message">,
+        Partial<Pick<SupportRequest, "status" | "resolved_by" | "resolved_at">>
       >;
     };
     Views: Record<string, never>;
