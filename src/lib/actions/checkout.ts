@@ -1,11 +1,12 @@
 "use server";
 
-import { createBooking, cancelBooking, attachPaymongoCheckoutSession, BookingError } from "@/lib/services/bookings";
+import { createBooking, cancelBooking, attachPaymongoCheckoutSession, setBookingProcessingFee, BookingError } from "@/lib/services/bookings";
 import { createPayMongoCheckoutSession, PayMongoError } from "@/lib/services/paymongo";
 import { getUserCreditBalance, splitBookingPayment, applyCreditToBooking, confirmCreditOnlyBooking } from "@/lib/services/credits";
 import { calculateMarketplaceSplit } from "@/lib/services/commission";
+import { calculateBookingCharge } from "@/lib/services/bookingFee";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
-import { isPaymongoMarketplaceSplitEnabled } from "@/lib/paymongoLaunchGates";
+import { isPaymongoMarketplaceSplitEnabled, isPaymongoPassOnFeesEnabled } from "@/lib/paymongoLaunchGates";
 import { createBookingSchema, type CreateBookingValues } from "@/lib/validations/booking";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import { getSiteUrl } from "@/lib/site";
@@ -104,6 +105,35 @@ export async function createCheckoutSessionAction(
       return { success: true, data: { url: confirmationUrl, bookingId: booking.id, creditApplied, amountDue: 0 } };
     }
 
+    // What PayMongo will add on top, and what the webhook must therefore
+    // expect. Grossed up from amountDue — the POST-credit figure — because
+    // PayMongo's rate applies to what it actually collects. Grossing up
+    // from price_amount would over-charge anyone paying partly in credit
+    // (a ₱400 booking with ₱100 of credit is collected on ₱300, so its fee
+    // is ₱300's, not ₱400's).
+    //
+    // Stored BEFORE the Checkout Session exists. The moment a session is
+    // live the customer can pay it, and confirm_paymongo_booking_payment()
+    // reads this column to build its expectation — a fee written after the
+    // session would leave a window where a real payment cannot confirm.
+    //
+    // When the gate is off, PayMongo adds nothing and this stays 0, which
+    // is the pre-existing behaviour exactly.
+    const passOnFees = isPaymongoPassOnFeesEnabled();
+    const processingFeeAmount = passOnFees ? calculateBookingCharge(amountDue).processingFeeAmount : 0;
+
+    if (processingFeeAmount > 0) {
+      const feeRecorded = await setBookingProcessingFee(booking.id, processingFeeAmount);
+      if (!feeRecorded) {
+        // The RPC refuses anything but a pending booking within its price
+        // bound. Failing the checkout here is the safe direction: the
+        // alternative is charging a grossed-up total the webhook would
+        // reject, which is the stuck-on-pending outage this feature was
+        // built to end.
+        throw new BookingError("processing_fee_not_recorded", "We couldn't start checkout. Please try again.");
+      }
+    }
+
     // Marketplace split only applies when (a) the platform-wide kill
     // switch is explicitly enabled — see lib/paymongoLaunchGates.ts — AND
     // (b) the venue has a fully activated PayMongo Platforms account.
@@ -134,6 +164,10 @@ export async function createCheckoutSessionAction(
       // figure (price_amount - credit_amount_applied), so the two agree by
       // construction rather than by coincidence.
       chargeAmountOverride: amountDue,
+      // PayMongo adds the fee to this line item itself; processing_fee_amount
+      // above is our prediction of what it will add, which is what makes the
+      // webhook's amount check match.
+      passOnFees,
       marketplaceSplit: marketplaceSplit && {
         platformFeeAmount: marketplaceSplit.platformFeeAmount,
         venuePaymongoAccountId: marketplaceSplit.venuePaymongoAccountId,

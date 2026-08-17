@@ -3,7 +3,7 @@
  */
 import { createCheckoutSessionAction } from "../checkout";
 import { getServerClient } from "../auth";
-import { createBooking, cancelBooking, attachPaymongoCheckoutSession } from "../../services/bookings";
+import { createBooking, cancelBooking, attachPaymongoCheckoutSession, setBookingProcessingFee } from "../../services/bookings";
 import { createPayMongoCheckoutSession } from "../../services/paymongo";
 import { getUserCreditBalance, applyCreditToBooking, confirmCreditOnlyBooking } from "../../services/credits";
 import { getCourtDisplayInfo } from "../../services/courts";
@@ -18,6 +18,7 @@ jest.mock("../../services/bookings", () => {
     createBooking: jest.fn(),
     cancelBooking: jest.fn(),
     attachPaymongoCheckoutSession: jest.fn(),
+    setBookingProcessingFee: jest.fn(),
   };
 });
 jest.mock("../../services/paymongo", () => {
@@ -40,6 +41,7 @@ const mockGetServerClient = getServerClient as jest.MockedFunction<typeof getSer
 const mockCreateBooking = createBooking as jest.MockedFunction<typeof createBooking>;
 const mockCancelBooking = cancelBooking as jest.MockedFunction<typeof cancelBooking>;
 const mockAttachSession = attachPaymongoCheckoutSession as jest.MockedFunction<typeof attachPaymongoCheckoutSession>;
+const mockSetProcessingFee = setBookingProcessingFee as jest.MockedFunction<typeof setBookingProcessingFee>;
 const mockCreateSession = createPayMongoCheckoutSession as jest.MockedFunction<typeof createPayMongoCheckoutSession>;
 const mockGetBalance = getUserCreditBalance as jest.MockedFunction<typeof getUserCreditBalance>;
 const mockApplyCredit = applyCreditToBooking as jest.MockedFunction<typeof applyCreditToBooking>;
@@ -64,6 +66,7 @@ const BOOKING: Booking = {
   paid_at: null,
   payment_provider: "paymongo",
   credit_amount_applied: 0,
+  processing_fee_amount: 0,
   paymongo_checkout_session_id: null,
   paymongo_payment_intent_id: null,
   platform_fee_amount: null,
@@ -94,6 +97,7 @@ beforeEach(() => {
   } as never);
   mockCreateSession.mockResolvedValue({ id: "cs_test_1", url: "https://paymongo.test/cs_test_1" } as never);
   mockApplyCredit.mockResolvedValue(0);
+  mockSetProcessingFee.mockResolvedValue(true);
   mockConfirmCreditOnly.mockResolvedValue(true);
 });
 
@@ -248,5 +252,100 @@ describe("createCheckoutSessionAction — credits", () => {
     expect(result).toEqual({ success: false, error: "Sign in to book a court." });
     expect(mockCreateBooking).not.toHaveBeenCalled();
     expect(mockGetBalance).not.toHaveBeenCalled();
+  });
+});
+
+describe("createCheckoutSessionAction — passed-on processing fee", () => {
+  const ORIGINAL_GATE = process.env.PAYMONGO_PASS_ON_FEES_ENABLED;
+
+  afterEach(() => {
+    if (ORIGINAL_GATE === undefined) delete process.env.PAYMONGO_PASS_ON_FEES_ENABLED;
+    else process.env.PAYMONGO_PASS_ON_FEES_ENABLED = ORIGINAL_GATE;
+  });
+
+  /** Whether this call asked PayMongo to add its fee to the charge. */
+  function passedOnFees(): boolean | undefined {
+    return mockCreateSession.mock.calls[0][0].passOnFees;
+  }
+
+  it("records no fee and does not pass fees on while the gate is off", async () => {
+    delete process.env.PAYMONGO_PASS_ON_FEES_ENABLED;
+    mockGetBalance.mockResolvedValue({ balance: 0 });
+
+    const result = await createCheckoutSessionAction(VALUES);
+
+    expect(result.success).toBe(true);
+    expect(mockSetProcessingFee).not.toHaveBeenCalled();
+    expect(passedOnFees()).toBe(false);
+    // Unchanged from the pre-fee behaviour: the bare court price.
+    expect(chargedAmount()).toBe(50000);
+  });
+
+  it("records the grossed-up fee and passes fees on when the gate is on", async () => {
+    process.env.PAYMONGO_PASS_ON_FEES_ENABLED = "true";
+    mockGetBalance.mockResolvedValue({ balance: 0 });
+
+    const result = await createCheckoutSessionAction(VALUES);
+
+    expect(result.success).toBe(true);
+    // ₱500 grossed up at 1.5% -> ₱507.61 total, so a ₱7.61 fee.
+    expect(mockSetProcessingFee).toHaveBeenCalledWith("booking-1", 761);
+    expect(passedOnFees()).toBe(true);
+    // The line item stays the court price — PayMongo adds the fee itself.
+    expect(chargedAmount()).toBe(50000);
+  });
+
+  it("grosses up the POST-credit amount, never the full price", async () => {
+    process.env.PAYMONGO_PASS_ON_FEES_ENABLED = "true";
+    mockGetBalance.mockResolvedValue({ balance: 30000 });
+
+    const result = await createCheckoutSessionAction(VALUES);
+
+    expect(result.success).toBe(true);
+    // PayMongo only collects ₱200 here, so its fee is ₱200's (₱3.05), not
+    // ₱500's (₱7.61). Grossing up the full price would overcharge every
+    // customer paying partly in credit.
+    expect(mockSetProcessingFee).toHaveBeenCalledWith("booking-1", 305);
+  });
+
+  it("charges no fee at all when credit covers the whole booking", async () => {
+    process.env.PAYMONGO_PASS_ON_FEES_ENABLED = "true";
+    mockGetBalance.mockResolvedValue({ balance: 50000 });
+
+    const result = await createCheckoutSessionAction(VALUES);
+
+    expect(result.success).toBe(true);
+    // No PayMongo session exists, so there is no fee to pass on — which is
+    // exactly what the confirm dialog's "Book with AIR/Rally Credits and
+    // this fee doesn't apply" promises.
+    expect(mockSetProcessingFee).not.toHaveBeenCalled();
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("records the fee BEFORE the checkout session can be paid", async () => {
+    process.env.PAYMONGO_PASS_ON_FEES_ENABLED = "true";
+    mockGetBalance.mockResolvedValue({ balance: 0 });
+
+    await createCheckoutSessionAction(VALUES);
+
+    // Ordering is the safety property: the moment a session exists the
+    // customer can pay it, and confirm_paymongo_booking_payment() reads
+    // processing_fee_amount to build its expectation.
+    expect(mockSetProcessingFee.mock.invocationCallOrder[0]).toBeLessThan(mockCreateSession.mock.invocationCallOrder[0]);
+  });
+
+  it("abandons checkout and releases the booking when the fee cannot be recorded", async () => {
+    process.env.PAYMONGO_PASS_ON_FEES_ENABLED = "true";
+    mockGetBalance.mockResolvedValue({ balance: 0 });
+    mockSetProcessingFee.mockResolvedValue(false);
+
+    const result = await createCheckoutSessionAction(VALUES);
+
+    expect(result.success).toBe(false);
+    // Never create a session whose grossed-up total the webhook would then
+    // reject — that is the stuck-on-pending outage this feature exists to
+    // end, not a state to ship into.
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockCancelBooking).toHaveBeenCalledWith(expect.anything(), "user-1", "booking-1");
   });
 });

@@ -100,9 +100,12 @@ begin
 
   if new.status is distinct from old.status then
     if old.status in ('pending', 'confirmed') and new.status = 'cancelled' then
-      null;
+      new.cancelled_at := now();
+      new.cancelled_by := auth.uid();
     else
       new.status := old.status;
+      new.cancelled_at := old.cancelled_at;
+      new.cancelled_by := old.cancelled_by;
     end if;
   end if;
 

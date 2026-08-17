@@ -17,6 +17,7 @@ import { BackButton } from "@/components/shared/BackButton";
 import { deterministicSurfaceColor } from "@/components/court/CourtSurface";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
+import { isPaymongoPassOnFeesEnabled } from "@/lib/paymongoLaunchGates";
 import { getVenueDetail, listOperatingHours } from "@/lib/services/venues";
 import { listReviewsByVenue, getReviewEligibility } from "@/lib/services/reviews";
 import { isFavorite } from "@/lib/services/favorites";
@@ -74,6 +75,11 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
   ]);
   const favorited = user ? await isFavorite(supabase, user.id, id) : false;
   const reviewEligibility = user ? await getReviewEligibility(supabase, user.id, id) : { eligible: false, bookingId: null };
+
+  // Read here, on the server, and handed to the booking UI as a plain
+  // boolean — PAYMONGO_PASS_ON_FEES_ENABLED is deliberately not a
+  // NEXT_PUBLIC_ var, so the client never reads the kill switch itself.
+  const passOnFees = isPaymongoPassOnFeesEnabled();
 
   const TypeIcon = COURT_TYPE_ICON[venue.indoor_outdoor];
   const galleryImages = venue.images.map((image) => ({
@@ -219,6 +225,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
               phone={venue.phone}
               email={venue.email}
               isAuthenticated={user !== null}
+              passOnFees={passOnFees}
             />
           </div>
         </div>
@@ -233,6 +240,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           phone={venue.phone}
           email={venue.email}
           isAuthenticated={user !== null}
+          passOnFees={passOnFees}
         />
       )}
     </div>

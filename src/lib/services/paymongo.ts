@@ -136,6 +136,29 @@ export type CreatePayMongoCheckoutSessionInput = {
    * before this field existed.
    */
   chargeAmountOverride?: number;
+  /**
+   * Opts this session in to PayMongo's `pass_on_fees`, which adds the
+   * processing fee to what the customer is charged.
+   *
+   * Opt-IN per caller, not a global read of the env gate, and that is a
+   * correctness requirement rather than a style choice. Whatever PayMongo
+   * adds here has to be predicted and stored so the paying path's own
+   * amount check still matches. lib/actions/checkout.ts does that (it
+   * stores bookings.processing_fee_amount, which
+   * confirm_paymongo_booking_payment() adds to its expectation).
+   * reschedules.ts does NOT: a price-increase reschedule confirms through
+   * maybeCompleteReschedule(), which compares the paid amount against
+   * booking_reschedules.price_difference — a column with no fee term in
+   * it. Passing fees on there would make every price-increase reschedule
+   * fail that comparison and strand the customer on 'pending_payment'
+   * after paying, which is the same outage this whole feature exists to
+   * fix. So reschedules keep absorbing the fee until their own check can
+   * account for it.
+   *
+   * Still gated by isPaymongoPassOnFeesEnabled() as well — both must be
+   * true. The env gate stays the kill switch.
+   */
+  passOnFees?: boolean;
 };
 
 type PayMongoCheckoutSessionResponse = {
@@ -176,7 +199,7 @@ type PayMongoCheckoutSessionResponse = {
  * verification (see ARCHITECTURE.md) rather than assumed.
  */
 export async function createPayMongoCheckoutSession(input: CreatePayMongoCheckoutSessionInput): Promise<PayMongoCheckoutSession> {
-  const { booking, venueName, courtName, successUrl, cancelUrl, marketplaceSplit, chargeAmountOverride } = input;
+  const { booking, venueName, courtName, successUrl, cancelUrl, marketplaceSplit, chargeAmountOverride, passOnFees } = input;
 
   try {
     const attributes: Record<string, unknown> = {
@@ -204,17 +227,19 @@ export async function createPayMongoCheckoutSession(input: CreatePayMongoCheckou
     };
 
     // Charges PayMongo's processing fee to the customer rather than
-    // absorbing it. Gated and off by default — see
-    // isPaymongoPassOnFeesEnabled() for the specific unverified
-    // behaviour (Payment vs Payment Intent amount) that must be observed
-    // in a preview deployment before this is set in production.
+    // absorbing it. Two conditions, both required: the caller opts in
+    // (see `passOnFees` above — only the paying-for-a-booking path can,
+    // because only it stores the matching processing_fee_amount) and the
+    // env kill switch is on.
     //
     // The fee is deliberately NOT computed here. PayMongo recalculates it
     // from the payment method the customer actually picks at checkout
     // (QR Ph 1.34%, GCash 2.23%, cards 3.125% + ₱13.39), which we cannot
-    // know when the session is created — so any amount we grossed up
-    // ourselves would be wrong the moment a second method is enabled.
-    if (isPaymongoPassOnFeesEnabled()) {
+    // know when the session is created. calculateBookingCharge() predicts
+    // it for the QR Ph-only launch scope so the amount check can match;
+    // widening payment_method_types above means revisiting that
+    // prediction, not just this flag.
+    if (passOnFees && isPaymongoPassOnFeesEnabled()) {
       attributes.pass_on_fees = true;
     }
 

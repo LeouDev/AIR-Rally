@@ -56,6 +56,7 @@ const CONFIRMED_STRIPE_BOOKING: Booking = {
   paid_at: "2026-08-10T00:00:00Z",
   payment_provider: "stripe",
   credit_amount_applied: 0,
+  processing_fee_amount: 0,
   paymongo_checkout_session_id: null,
   paymongo_payment_intent_id: null,
   platform_fee_amount: null,

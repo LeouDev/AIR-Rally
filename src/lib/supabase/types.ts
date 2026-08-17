@@ -659,6 +659,16 @@ export type Booking = {
   payment_provider: "stripe" | "paymongo" | "air_rally_credit";
   /** AIR/Rally Credits applied to this booking, in integer minor units. */
   credit_amount_applied: number;
+  /**
+   * PayMongo's processing fee, passed on to the customer on top of
+   * price_amount, in integer minor units. Computed server-side at checkout
+   * by lib/services/bookingFee.ts from the POST-credit amount and written
+   * only through set_booking_processing_fee(); never client-supplied.
+   * confirm_paymongo_booking_payment() adds this to the amount it expects,
+   * so it is guarded by prevent_booking_tampering(). 0 for every booking
+   * made before the fee was passed on, and whenever the gate is off.
+   */
+  processing_fee_amount: number;
   /** Set by the booking's own owner while attaching a freshly-created PayMongo Checkout Session — same posture as stripe_checkout_session_id. */
   paymongo_checkout_session_id: string | null;
   /** Set only by confirm_paymongo_booking_payment() (SECURITY DEFINER) once PayMongo payment is verified — never client-writable. */
@@ -1021,6 +1031,19 @@ export type Database = {
           p_paymongo_payment_intent_id: string;
           p_expected_amount: number;
           p_expected_currency: string;
+        };
+        Returns: boolean;
+      };
+      /**
+       * Records the PayMongo processing fee passed on to the customer.
+       * service_role only — confirm_paymongo_booking_payment() trusts
+       * processing_fee_amount, so this cannot be client-reachable. Returns
+       * false if the booking isn't pending or the fee exceeds its price.
+       */
+      set_booking_processing_fee: {
+        Args: {
+          p_booking_id: string;
+          p_amount: number;
         };
         Returns: boolean;
       };

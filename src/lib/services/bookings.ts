@@ -9,9 +9,17 @@ import {
   DEFAULT_CURRENCY,
 } from "@/lib/booking-config";
 import { retrievePayMongoCheckoutSession } from "@/lib/services/paymongo";
+import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { logServerError } from "@/lib/errors";
 
 type Client = SupabaseClient<Database>;
+
+/** Reused across calls, same lazy pattern credits.ts and reschedules.ts use. */
+let bookingsServiceRoleClient: ReturnType<typeof createServiceRoleClient> | undefined;
+function getBookingsServiceRoleClient() {
+  bookingsServiceRoleClient ??= createServiceRoleClient();
+  return bookingsServiceRoleClient;
+}
 
 /** Postgres error code for an exclusion-constraint violation — the actual, database-level double-booking guarantee (bookings_no_overlap). */
 const POSTGRES_EXCLUSION_VIOLATION = "23P01";
@@ -34,7 +42,13 @@ export type BookingErrorReason =
   | "already_cancelled"
   | "cancellation_window_passed"
   /** A fully credit-covered booking could not be confirmed — see lib/actions/checkout.ts. */
-  | "credit_confirmation_failed";
+  | "credit_confirmation_failed"
+  /**
+   * The passed-on PayMongo fee could not be recorded on the booking, so
+   * checkout was abandoned rather than charging a total the webhook's
+   * amount check would reject — see lib/actions/checkout.ts.
+   */
+  | "processing_fee_not_recorded";
 
 /**
  * Typed domain error for every booking-creation/cancellation failure mode
@@ -354,6 +368,37 @@ export async function attachPaymongoCheckoutSession(
     })
     .eq("id", bookingId);
   if (error) throw error;
+}
+
+/**
+ * Records what PayMongo will add to this booking's charge as its
+ * processing fee. SERVER ONLY.
+ *
+ * Goes through the service_role-only RPC rather than an ordinary update,
+ * and that is not optional. processing_fee_amount is guarded by
+ * prevent_booking_tampering() — because confirm_paymongo_booking_payment()
+ * trusts it — and that guard applies to service_role too: its escape hatch
+ * is is_admin() or the bypass GUC, and is_admin() resolves auth.uid(),
+ * which is null for a service-role call. A plain update here returns NO
+ * error and silently leaves the column at 0 (verified against staging),
+ * which would then fail the amount check on every booking. The RPC sets
+ * the bypass GUC; see supabase/migrations/20260810000055.
+ *
+ * Returns false when the booking is no longer pending or the fee exceeds
+ * its price — the caller must treat that as a failed checkout rather than
+ * charging a customer against an amount the webhook won't accept.
+ */
+export async function setBookingProcessingFee(bookingId: string, amount: number): Promise<boolean> {
+  if (!Number.isInteger(amount) || amount < 0) {
+    throw new Error("Processing fee must be a non-negative whole number of centavos.");
+  }
+
+  const { data, error } = await getBookingsServiceRoleClient().rpc("set_booking_processing_fee", {
+    p_booking_id: bookingId,
+    p_amount: amount,
+  });
+  if (error) throw error;
+  return data ?? false;
 }
 
 /** Twin of confirmBookingPayment() — calls confirm_paymongo_booking_payment() instead. */
