@@ -1,4 +1,4 @@
-import { calculateBookingCharge } from "../bookingFee";
+import { calculateBookingCharge, calculateAmountPaid } from "../bookingFee";
 import { PROCESSING_FEE_PERCENT } from "@/lib/booking-config";
 
 describe("calculateBookingCharge", () => {
@@ -65,5 +65,34 @@ describe("calculateBookingCharge", () => {
     expect(calculateBookingCharge(12000).totalChargedAmount).toBe(12183);
     expect(calculateBookingCharge(15000).totalChargedAmount).toBe(15228);
     expect(calculateBookingCharge(20000).totalChargedAmount).toBe(20305);
+  });
+});
+
+describe("calculateAmountPaid", () => {
+  it("adds the passed-on fee to the court price", () => {
+    // The live case this fixes: booking 9F50AD9F was charged ₱812.18 and
+    // its confirmation page read ₱800.00.
+    expect(calculateAmountPaid({ price_amount: 80000, processing_fee_amount: 1218 })).toBe(81218);
+  });
+
+  it("agrees with what calculateBookingCharge told PayMongo to collect", () => {
+    // The two must not drift: one decides the charge, the other reports it.
+    for (const court of [8000, 40000, 80000, 150000]) {
+      const charge = calculateBookingCharge(court);
+      expect(calculateAmountPaid({ price_amount: court, processing_fee_amount: charge.processingFeeAmount })).toBe(charge.totalChargedAmount);
+    }
+  });
+
+  it("leaves pre-fee bookings reading exactly their price", () => {
+    // Every booking made before the pass-through, and every booking made
+    // while the gate is off, carries a zero fee.
+    expect(calculateAmountPaid({ price_amount: 40000, processing_fee_amount: 0 })).toBe(40000);
+  });
+
+  it("counts credit as payment rather than subtracting it", () => {
+    // A booking settled partly from the wallet still cost the customer its
+    // full price — from two sources. credit_amount_applied is deliberately
+    // not a parameter here, so it cannot be subtracted by accident.
+    expect(calculateAmountPaid({ price_amount: 50000, processing_fee_amount: 0 })).toBe(50000);
   });
 });

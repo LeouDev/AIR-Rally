@@ -10,6 +10,7 @@ import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { getBookingById, reconcilePaymongoPendingBooking } from "@/lib/services/bookings";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
+import { calculateAmountPaid } from "@/lib/services/bookingFee";
 import { maybeCompleteRescheduleFromProvider, listReschedulesForBooking } from "@/lib/services/reschedules";
 import { logServerError } from "@/lib/errors";
 
@@ -188,7 +189,7 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">{completedReschedule ? "Booking total" : "Amount paid"}</dt>
-            <dd className="font-medium text-foreground">{formatMoney(booking.price_amount, booking.currency)}</dd>
+            <dd className="font-medium text-foreground">{formatMoney(calculateAmountPaid(booking), booking.currency)}</dd>
           </div>
           {completedReschedule && completedReschedule.price_difference !== 0 && (
             <div>

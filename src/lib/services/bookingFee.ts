@@ -44,6 +44,31 @@ export type BookingCharge = {
  * absorbs up to one centavo of the fee; that is the accepted trade for
  * confirmations that work.
  */
+/**
+ * What the customer actually parted with for a booking, in integer minor
+ * units — the figure a receipt should show.
+ *
+ * price_amount alone is NOT that figure once fees are passed on. A ₱800
+ * court with a ₱12.18 passed-on fee is an ₱812.18 charge, and showing
+ * ₱800.00 under "Amount paid" under-reports a real payment. Observed live:
+ * booking 9F50AD9F was charged ₱812.18 and its confirmation page read
+ * ₱800.00.
+ *
+ * credit_amount_applied is deliberately NOT subtracted. Credit is payment,
+ * not a discount — a booking settled half in credit still cost the
+ * customer its full price, just from two sources. Subtracting it here
+ * would under-report in the opposite direction. The figure that varies by
+ * funding source is what PayMongo collected, which is a different
+ * question from what the booking cost.
+ *
+ * Bookings made before the fee was passed on, and every booking made while
+ * the gate is off, carry processing_fee_amount = 0 — so this returns
+ * price_amount exactly, and their receipts are unchanged.
+ */
+export function calculateAmountPaid(booking: { price_amount: number; processing_fee_amount: number }): number {
+  return booking.price_amount + booking.processing_fee_amount;
+}
+
 export function calculateBookingCharge(courtAmountMinorUnits: number): BookingCharge {
   if (!Number.isInteger(courtAmountMinorUnits) || courtAmountMinorUnits < 0) {
     throw new Error(`courtAmount must be a non-negative integer in minor units, got ${courtAmountMinorUnits}`);
