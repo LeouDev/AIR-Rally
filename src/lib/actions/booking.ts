@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createBooking, cancelBooking, BookingError } from "@/lib/services/bookings";
+import { createBooking, cancelBooking, BookingError, type CancelBookingResult } from "@/lib/services/bookings";
 import { createBookingSchema, cancelBookingSchema, type CreateBookingValues, type CancelBookingValues } from "@/lib/validations/booking";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import type { Booking } from "@/lib/supabase/types";
@@ -42,7 +42,7 @@ export async function createBookingAction(values: CreateBookingValues): Promise<
   }
 }
 
-export async function cancelBookingAction(values: CancelBookingValues): Promise<ActionResult<Booking>> {
+export async function cancelBookingAction(values: CancelBookingValues): Promise<ActionResult<CancelBookingResult>> {
   const parsed = cancelBookingSchema.safeParse(values);
   if (!parsed.success) {
     return { success: false, error: "Please try again." };
@@ -60,9 +60,13 @@ export async function cancelBookingAction(values: CancelBookingValues): Promise<
   }
 
   try {
-    const booking = await cancelBooking(supabase, user.id, parsed.data.bookingId);
+    const { booking, credit } = await cancelBooking(supabase, user.id, parsed.data.bookingId);
     revalidatePath("/bookings");
-    return { success: true, data: booking };
+    // The credit decision travels with the result so the UI can STATE what
+    // happened to the customer's money. Cancelling and saying nothing reads
+    // as "they kept it", and recomputing the policy in a component is how
+    // the two implementations drift apart.
+    return { success: true, data: { booking, credit } };
   } catch (error) {
     if (error instanceof BookingError) {
       logServerError(`booking.cancel.${error.reason}`, error);

@@ -285,7 +285,7 @@ describe("cancelBooking", () => {
 
     const result = await cancelBooking(supabase, "user-1", "booking-1");
 
-    expect(result.status).toBe("cancelled");
+    expect(result.booking.status).toBe("cancelled");
     // Only status is sent — cancelled_at/cancelled_by are never
     // client-supplied, the bookings_prevent_tampering trigger computes
     // them server-side (see the migration's doc comment).

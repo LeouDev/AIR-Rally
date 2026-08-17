@@ -106,7 +106,7 @@ describe("cancelBookingAction", () => {
 
   it("cancels a booking for the authenticated user", async () => {
     mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
-    mockCancelBooking.mockResolvedValue({ ...BOOKING_ROW, status: "cancelled" } as Booking);
+    mockCancelBooking.mockResolvedValue({ booking: { ...BOOKING_ROW, status: "cancelled" } as Booking, credit: { amount: 0, eligible: false, reason: "This booking was never paid, so there is nothing to refund.", issued: false } });
 
     const result = await cancelBookingAction(validCancel);
 

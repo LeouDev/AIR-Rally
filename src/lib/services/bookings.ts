@@ -10,6 +10,8 @@ import {
 } from "@/lib/booking-config";
 import { retrievePayMongoCheckoutSession } from "@/lib/services/paymongo";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
+import { resolveCancellationCredit, addCredit, type CancellationCause, type CancellationCreditDecision } from "@/lib/services/credits";
+import { calculateRefundCredit } from "@/lib/services/bookingFee";
 import { logServerError } from "@/lib/errors";
 
 type Client = SupabaseClient<Database>;
@@ -72,6 +74,19 @@ export class BookingError extends Error {
     this.name = "BookingError";
   }
 }
+
+/**
+ * A cancellation and what it decided about the customer's money.
+ *
+ * The decision is RETURNED rather than left for the UI to recompute: a
+ * customer who cancels and is told nothing about their payment reads it as
+ * "they kept my money", and a second implementation of the policy in a
+ * component is how the two drift apart.
+ */
+export type CancelBookingResult = {
+  booking: Booking;
+  credit: CancellationCreditDecision & { issued: boolean };
+};
 
 export type CreateBookingInput = {
   courtId: string;
@@ -261,7 +276,12 @@ export async function getBookingById(supabase: Client, bookingId: string): Promi
  * bookings_prevent_tampering database trigger, not sent by this function
  * — see supabase/migrations/20260810000004_bookings.sql.
  */
-export async function cancelBooking(supabase: Client, userId: string, bookingId: string): Promise<Booking> {
+export async function cancelBooking(
+  supabase: Client,
+  userId: string,
+  bookingId: string,
+  options?: { cause?: CancellationCause }
+): Promise<CancelBookingResult> {
   const existing = await getBookingById(supabase, bookingId);
   if (!existing) {
     throw new BookingError("booking_not_found", "We couldn't find that booking.");
@@ -283,7 +303,101 @@ export async function cancelBooking(supabase: Client, userId: string, bookingId:
     .select("*")
     .single();
   if (updateError) throw updateError;
-  return cancelled;
+
+  const credit = await compensateCancelledBooking(cancelled, options?.cause ?? "customer");
+  return { booking: cancelled, credit };
+}
+
+/**
+ * Issues cancellation compensation for a booking that was just cancelled,
+ * and reports what was decided. SERVER ONLY.
+ *
+ * This is the wiring that was missing. resolveCancellationCredit() and
+ * issueCancellationCredit() have existed and been tested since
+ * 20260810000036, and NOTHING called them — cancelBooking() set the status
+ * and stopped. Four paid bookings were cancelled on production well inside
+ * policy and the credit ledger stayed empty, because there was no path.
+ *
+ * THE AMOUNT IS THE COURT PRICE, NOT WHAT WAS PAID.
+ *
+ * calculateRefundCredit() deliberately, and calculateAmountPaid() never.
+ * A ₱406.09 booking compensates ₱400.00: the processing fee was consumed
+ * by PayMongo at the moment of payment and AIR/Rally never held it.
+ * calculateAmountPaid() is the RECEIPT figure and sits in the same module,
+ * which is exactly why it is easy to reach for by mistake.
+ *
+ * NEVER THROWS. A failure to issue credit must not fail the cancellation:
+ * the customer would be left unable to cancel at all, which is worse than
+ * being owed credit that an admin can grant. Failures are logged loudly
+ * and reported as issued:false, so the gap is visible rather than silent —
+ * the same posture as the paid-but-unconfirmed alarm.
+ */
+async function compensateCancelledBooking(
+  booking: Booking,
+  cause: CancellationCause
+): Promise<CancellationCreditDecision & { issued: boolean }> {
+  // Nothing was taken, so there is nothing to give back. This is the
+  // common case by volume: most cancelled bookings are abandoned
+  // checkouts, and lib/actions/checkout.ts cancels a just-created pending
+  // booking whenever session creation fails. Compensating those would mint
+  // credit for money that never moved.
+  if (!booking.paid_at) {
+    return { amount: 0, eligible: false, reason: "This booking was never paid, so there is nothing to refund.", issued: false };
+  }
+
+  const decision = resolveCancellationCredit({
+    // The REFUNDABLE base, not the amount paid — see the doc comment.
+    amountPaid: calculateRefundCredit(booking),
+    cause,
+    startTime: booking.start_time,
+    now: Date.now(),
+  });
+
+  if (!decision.eligible || decision.amount <= 0) {
+    return { ...decision, issued: false };
+  }
+
+  try {
+    // Idempotency at the ledger. cancelBooking() already refuses an
+    // already-cancelled booking, so this should be unreachable — but credit
+    // is money-like and the ledger is append-only, so a double-issue cannot
+    // be undone, only offset. Two guards for something with no undo.
+    const alreadyCompensated = await hasCancellationCompensation(booking.id);
+    if (alreadyCompensated) {
+      logServerError(
+        "bookings.cancellationCredit.alreadyCompensated",
+        new Error(`booking ${booking.confirmation_code} already has cancellation compensation; refusing to issue a second time`)
+      );
+      return { ...decision, issued: false };
+    }
+
+    await addCredit({
+      userId: booking.user_id,
+      amount: decision.amount,
+      transactionType: "cancellation_compensation",
+      referenceId: booking.id,
+      description: `Credit issued for cancelled booking #${booking.confirmation_code}`,
+    });
+    return { ...decision, issued: true };
+  } catch (error) {
+    // The booking IS cancelled at this point. Saying so loudly beats
+    // pretending it succeeded or unwinding a cancellation the customer
+    // asked for.
+    logServerError("bookings.cancellationCredit.issueFailed", error);
+    return { ...decision, issued: false };
+  }
+}
+
+/** Has this booking already been compensated? Service-role, because it reads another user's ledger rows. */
+async function hasCancellationCompensation(bookingId: string): Promise<boolean> {
+  const { data, error } = await getBookingsServiceRoleClient()
+    .from("credit_transactions")
+    .select("id")
+    .eq("reference_id", bookingId)
+    .eq("transaction_type", "cancellation_compensation")
+    .limit(1);
+  if (error) throw error;
+  return (data ?? []).length > 0;
 }
 
 /** A user's own bookings, most recent first. */
