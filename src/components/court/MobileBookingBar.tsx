@@ -17,19 +17,23 @@ type MobileBookingBarProps = {
 };
 
 /**
- * Airbnb-style persistent price + CTA bar, mobile only (the sidebar
- * BookingWidget is already visible and sticky at sm/lg widths, and
- * stays the only booking UI there — this bar and its sheet render
- * nothing above md). Tapping "Book a court" pops the exact same
- * BookingWidget up as a bottom sheet rather than the page carrying a
- * second always-visible copy of it inline.
+ * Airbnb-style persistent price + CTA bar. Tapping "Book a court" pops
+ * the exact same BookingWidget up as a bottom sheet rather than the page
+ * carrying a second always-visible copy of it inline.
+ *
+ * Hidden at `lg` and up, which is exactly where the sidebar BookingWidget
+ * takes over (it is `hidden lg:block` on the court page). These two
+ * breakpoints MUST stay in sync: this bar used to hide at `md` while the
+ * sidebar only appeared at `lg`, which left 768–1023px — iPad portrait,
+ * most Android tablets, a split-screen laptop window — with no booking
+ * UI on the page at all. The court was simply unbookable at those widths.
  */
 export function MobileBookingBar({ startingPrice, venueName, venueTimezone, courts, phone, email, isAuthenticated }: MobileBookingBarProps) {
   const [open, setOpen] = useState(false);
 
   return (
     <div
-      className="fixed inset-x-0 z-30 flex items-center justify-between gap-4 border-t border-border bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 md:hidden"
+      className="fixed inset-x-0 z-30 flex items-center justify-between gap-4 border-t border-border bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden"
       style={{ bottom: "calc(4rem + env(safe-area-inset-bottom))" }}
     >
       <p className="text-sm text-muted-foreground">

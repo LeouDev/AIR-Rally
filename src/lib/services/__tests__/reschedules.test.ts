@@ -504,7 +504,7 @@ describe("createReschedule — price increase", () => {
     const paymongoOriginal = { ...ORIGINAL_BOOKING, payment_provider: "paymongo" as const };
     mockGetBookingById.mockResolvedValue(paymongoOriginal);
     mockCreateBooking.mockResolvedValue(higherPriceReplacement);
-    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
+    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venueTimezone: "Asia/Manila", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
     mockCreatePayMongoCheckoutSession.mockResolvedValue({ id: "cs_pm_diff_1", url: "https://checkout.paymongo.com/diff_1" });
 
     let insertedPayload: unknown;
@@ -543,7 +543,7 @@ describe("createReschedule — price increase", () => {
     const higherPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 70000, payment_provider: "paymongo" as const };
     mockGetBookingById.mockResolvedValue({ ...ORIGINAL_BOOKING, payment_provider: "paymongo" });
     mockCreateBooking.mockResolvedValue(higherPriceReplacement);
-    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venuePaymongoAccountId: "acc_venue_1", venuePaymongoActivationStatus: "activated" });
+    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venueTimezone: "Asia/Manila", venuePaymongoAccountId: "acc_venue_1", venuePaymongoActivationStatus: "activated" });
     mockMarketplaceSplitEnabled.mockReturnValue(true);
     mockCreatePayMongoCheckoutSession.mockResolvedValue({ id: "cs_pm_diff_2", url: "https://checkout.paymongo.com/diff_2" });
     const supabase = createTableMockSupabase({
@@ -567,7 +567,7 @@ describe("createReschedule — price increase", () => {
     const higherPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 70000 };
     mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
     mockCreateBooking.mockResolvedValue(higherPriceReplacement);
-    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
+    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venueTimezone: "Asia/Manila", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
     mockCreatePayMongoCheckoutSession.mockRejectedValue(new Error("paymongo unavailable"));
     const supabase = createTableMockSupabase({
       booking_refunds: NOT_FOUND,
@@ -833,7 +833,7 @@ describe("resumeRescheduleCheckout", () => {
           : { ...REPLACEMENT_BOOKING, payment_provider: "paymongo" as const }
       )
     );
-    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
+    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venueTimezone: "Asia/Manila", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
     mockCreatePayMongoCheckoutSession.mockResolvedValue({ id: "cs_pm_resume", url: "https://checkout.paymongo.com/resume" });
     const supabase = createTableMockSupabase({ booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_payment", price_difference: 20000 }, error: null } });
 

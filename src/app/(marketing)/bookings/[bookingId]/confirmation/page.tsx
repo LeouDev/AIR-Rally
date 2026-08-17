@@ -29,6 +29,24 @@ function formatMoney(amountMinorUnits: number, currency: string): string {
   return `${symbol}${(amountMinorUnits / 100).toFixed(2)}`;
 }
 
+/**
+ * Always renders in the VENUE's local time, matching My Bookings.
+ *
+ * This page previously formatted with no timeZone at all, which on the
+ * server means UTC — so a 5:00 PM Manila booking printed "9:00 AM" on the
+ * customer's own confirmation while every other screen said 5:00 PM. The
+ * fallback is only reached if the court/venue lookup failed, in which
+ * case the page already shows "—" for venue and court.
+ */
+function formatWhen(startIso: string, endIso: string, timeZone: string | undefined): string {
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const date = new Intl.DateTimeFormat("en-US", { timeZone, dateStyle: "medium" }).format(start);
+  const from = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(start);
+  const to = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(end);
+  return `${date}, ${from} – ${to}`;
+}
+
 export default async function BookingConfirmationPage({ params, searchParams }: ConfirmationPageProps) {
   const { bookingId } = await params;
   const { session_id: sessionId, cancelled } = await searchParams;
@@ -166,10 +184,7 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Date &amp; time</dt>
-            <dd className="font-medium text-foreground">
-              {new Date(booking.start_time).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })} –{" "}
-              {new Date(booking.end_time).toLocaleTimeString("en-US", { timeStyle: "short" })}
-            </dd>
+            <dd className="font-medium text-foreground">{formatWhen(booking.start_time, booking.end_time, display?.venueTimezone)}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">{completedReschedule ? "Booking total" : "Amount paid"}</dt>

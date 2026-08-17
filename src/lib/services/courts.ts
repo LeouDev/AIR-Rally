@@ -83,6 +83,14 @@ export type CourtCheckoutDisplayInfo = {
   courtName: string;
   venueName: string;
   /**
+   * IANA identifier, needed so a booking's time renders in the VENUE's
+   * local time. Without it the confirmation page formatted with no
+   * timeZone at all, which means the server's zone (UTC): a 5:00 PM
+   * Manila booking printed "9:00 AM" on the customer's own receipt while
+   * My Bookings, which does pass the zone, correctly said 5:00 PM.
+   */
+  venueTimezone: string;
+  /**
    * Marketplace-split gate, added alongside the PayMongo Platforms
    * checkout extension (see ARCHITECTURE.md): only a venue whose
    * paymongo_activation_status is 'activated' has a real, payable
@@ -108,7 +116,7 @@ export async function getCourtDisplayInfo(supabase: Client, courtId: string): Pr
 
   const { data: venue, error: venueError } = await supabase
     .from("venues")
-    .select("name, paymongo_account_id, paymongo_activation_status")
+    .select("name, timezone, paymongo_account_id, paymongo_activation_status")
     .eq("id", court.venue_id)
     .maybeSingle();
   if (venueError) throw venueError;
@@ -117,6 +125,7 @@ export async function getCourtDisplayInfo(supabase: Client, courtId: string): Pr
   return {
     courtName: court.name,
     venueName: venue.name,
+    venueTimezone: venue.timezone,
     venuePaymongoAccountId: venue.paymongo_account_id,
     venuePaymongoActivationStatus: venue.paymongo_activation_status,
   };

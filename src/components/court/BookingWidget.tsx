@@ -345,7 +345,7 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
                 totalAmount={(estimatedTotal ?? 0) * 100}
               />
               <p className="text-xs text-muted-foreground">
-                You&apos;ll be redirected to Stripe to complete payment securely. Your booking is only confirmed once payment succeeds.
+                You&apos;ll be redirected to PayMongo to complete payment securely. Your booking is only confirmed once payment succeeds.
               </p>
             </div>
           )}
