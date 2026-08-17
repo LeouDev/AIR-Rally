@@ -83,6 +83,12 @@ export type CourtCheckoutDisplayInfo = {
   courtName: string;
   venueName: string;
   /**
+   * Already read to resolve the venue below — returned so a screen that needs
+   * to send someone BACK to the court (an unpaid booking's "book it again")
+   * can link there without a second lookup.
+   */
+  venueId: string;
+  /**
    * IANA identifier, needed so a booking's time renders in the VENUE's
    * local time. Without it the confirmation page formatted with no
    * timeZone at all, which means the server's zone (UTC): a 5:00 PM
@@ -125,6 +131,7 @@ export async function getCourtDisplayInfo(supabase: Client, courtId: string): Pr
   return {
     courtName: court.name,
     venueName: venue.name,
+    venueId: court.venue_id,
     venueTimezone: venue.timezone,
     venuePaymongoAccountId: venue.paymongo_account_id,
     venuePaymongoActivationStatus: venue.paymongo_activation_status,

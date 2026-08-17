@@ -64,3 +64,17 @@ export function venueTimeZoneLabel(iso: string, timeZone: string): string {
   );
   return parts.find((part) => part.type === "timeZoneName")?.value ?? timeZone;
 }
+
+/**
+ * A single instant with its date: "Wed, Aug 19, 6:00 PM".
+ *
+ * For owner-facing views, where each timestamp stands alone (booked at, paid
+ * at, a timeline entry) rather than forming a start–end slot.
+ */
+export function formatVenueDateTime(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    ...DATE_WITH_WEEKDAY,
+    ...TIME_ONLY,
+    timeZone,
+  }).format(new Date(iso));
+}

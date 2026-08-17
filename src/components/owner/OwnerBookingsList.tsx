@@ -7,6 +7,7 @@ import { BookingDetailDialog } from "@/components/owner/BookingDetailDialog";
 import { cn } from "@/lib/utils";
 import type { BookingStatus } from "@/lib/supabase/types";
 import type { OwnerBookingWithDetails } from "@/lib/services/ownerBookings";
+import { formatVenueDateTime } from "@/lib/bookingTime";
 
 const STATUS_STYLES: Record<BookingStatus, string> = {
   pending: "bg-warning/15 text-warning",
@@ -19,17 +20,6 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
   confirmed: "Confirmed",
   cancelled: "Cancelled",
 };
-
-function formatDateTime(iso: string, timezone: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: timezone,
-  }).format(new Date(iso));
-}
 
 /** Groups the flat, already-sorted list into venue → court sections —
  * grouping is a rendering concern here, not a second query (the service
@@ -81,7 +71,7 @@ export function OwnerBookingsList({ bookings }: { bookings: OwnerBookingWithDeta
                         <User className="size-3.5 text-muted-foreground" aria-hidden="true" />
                         {booking.customerName}
                       </span>
-                      <span className="text-sm text-muted-foreground">{formatDateTime(booking.startTime, booking.venueTimezone)}</span>
+                      <span className="text-sm text-muted-foreground">{formatVenueDateTime(booking.startTime, booking.venueTimezone)}</span>
                       <Badge className={cn("border-transparent", STATUS_STYLES[booking.status])}>{STATUS_LABELS[booking.status]}</Badge>
                     </button>
                   </li>

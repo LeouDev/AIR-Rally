@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { BookingStatus } from "@/lib/supabase/types";
 import type { OwnerBookingWithDetails } from "@/lib/services/ownerBookings";
 import { buildBookingTimeline } from "@/lib/services/bookingTimeline";
+import { formatVenueDateTime } from "@/lib/bookingTime";
 
 const STATUS_STYLES: Record<BookingStatus, string> = {
   pending: "bg-warning/15 text-warning",
@@ -23,17 +24,6 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
 function formatMoney(amountMinorUnits: number, currency: string): string {
   const symbol = currency === "PHP" ? "₱" : `${currency} `;
   return `${symbol}${(amountMinorUnits / 100).toFixed(2)}`;
-}
-
-function formatDateTime(iso: string, timezone: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: timezone,
-  }).format(new Date(iso));
 }
 
 /**
@@ -76,8 +66,8 @@ export function BookingDetailDialog({
                     {booking.venueName} · {booking.courtName}
                   </p>
                   <p className="text-muted-foreground">
-                    {formatDateTime(booking.startTime, booking.venueTimezone)} –{" "}
-                    {formatDateTime(booking.endTime, booking.venueTimezone)}
+                    {formatVenueDateTime(booking.startTime, booking.venueTimezone)} –{" "}
+                    {formatVenueDateTime(booking.endTime, booking.venueTimezone)}
                   </p>
                 </div>
               </div>
@@ -91,13 +81,13 @@ export function BookingDetailDialog({
                 <CreditCard className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span>
                   {formatMoney(booking.priceAmount, booking.currency)}
-                  {booking.paidAt ? ` · paid ${formatDateTime(booking.paidAt, booking.venueTimezone)}` : " · unpaid"}
+                  {booking.paidAt ? ` · paid ${formatVenueDateTime(booking.paidAt, booking.venueTimezone)}` : " · unpaid"}
                 </span>
               </div>
 
               <div className="flex items-center gap-2">
                 <Hash className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span className="text-muted-foreground">Booked {formatDateTime(booking.createdAt, booking.venueTimezone)}</span>
+                <span className="text-muted-foreground">Booked {formatVenueDateTime(booking.createdAt, booking.venueTimezone)}</span>
               </div>
 
               <div className="border-t border-border pt-4">
@@ -114,7 +104,7 @@ export function BookingDetailDialog({
                       />
                       <div className={cn(entry.upcoming && "text-muted-foreground")}>
                         <p className={cn("leading-tight", !entry.upcoming && "text-foreground")}>{entry.label}</p>
-                        <p className="text-xs text-muted-foreground">{formatDateTime(entry.at, booking.venueTimezone)}</p>
+                        <p className="text-xs text-muted-foreground">{formatVenueDateTime(entry.at, booking.venueTimezone)}</p>
                       </div>
                     </li>
                   ))}
