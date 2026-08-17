@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { MessageCircle, Repeat2, Heart, Share2, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -177,20 +178,24 @@ export function PostCard({
         >
           {post.image_paths.map((path) => {
             const url = getPostImageUrl(createClient(), path);
+            const single = post.image_paths.length === 1;
             return (
-              // Supabase storage host isn't in next.config's image
-              // allowlist, so next/image would fail at runtime here.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={path}
-                src={url}
-                alt=""
-                loading="lazy"
-                className={cn(
-                  "w-full object-cover",
-                  post.image_paths.length === 1 ? "max-h-96" : "aspect-square"
-                )}
-              />
+              // next/image handles these: next.config's remotePatterns
+              // already trusts *.supabase.co/storage/v1/object/public/**.
+              // A `fill` image needs a positioned, sized parent, which also
+              // reserves the space and stops the feed jumping as photos
+              // decode.
+              <div key={path} className={cn("relative w-full overflow-hidden", single ? "h-96" : "aspect-square")}>
+                <Image
+                  src={url}
+                  alt=""
+                  fill
+                  // One column on phones; the grid halves each image above
+                  // the sm breakpoint, and the feed column caps out ~600px.
+                  sizes={single ? "(max-width: 640px) 100vw, 600px" : "(max-width: 640px) 50vw, 300px"}
+                  className="object-cover"
+                />
+              </div>
             );
           })}
         </div>

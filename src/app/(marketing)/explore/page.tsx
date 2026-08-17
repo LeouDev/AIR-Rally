@@ -39,9 +39,16 @@ export default async function ExplorePage({ searchParams }: ExplorePageProps) {
     getCurrentUser(),
   ]);
 
-  const favoritedIds = user ? new Set(await listFavoriteVenueIds(supabase, user.id)) : new Set<string>();
+  // Both depend on the wave above and neither on the other, so they run
+  // together rather than one after the other — a second round-trip to the
+  // database is worth more than the line saved by awaiting in sequence.
+  const [favoriteIds, cards] = await Promise.all([
+    user ? listFavoriteVenueIds(supabase, user.id) : Promise.resolve([]),
+    toVenueCardData(supabase, searchResult.venues),
+  ]);
+
+  const favoritedIds = new Set(favoriteIds);
   const totalPages = Math.max(1, Math.ceil(searchResult.total / searchResult.pageSize));
-  const cards = await toVenueCardData(supabase, searchResult.venues);
 
   const results =
     cards.length > 0 ? (

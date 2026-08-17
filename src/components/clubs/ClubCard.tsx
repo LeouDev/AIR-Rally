@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Users, MapPin, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Club } from "@/lib/supabase/types";
@@ -26,10 +27,11 @@ export function ClubCard({ club }: { club: Club }) {
       href={`/clubs/${club.id}`}
       className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
-      {/* Supabase storage host isn't in next.config's image allowlist, so
-          next/image would fail at runtime here — same as PostCard. */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="h-32 w-full object-cover" />}
+      {imageUrl && (
+        <div className="relative h-32 w-full overflow-hidden">
+          <Image src={imageUrl} alt="" fill sizes="(max-width: 640px) 100vw, 400px" className="object-cover" />
+        </div>
+      )}
 
       <div className="flex flex-col gap-3 p-5">
       <div className="flex items-start justify-between gap-3">

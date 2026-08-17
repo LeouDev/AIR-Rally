@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Image from "next/image";
 import { Users, MapPin, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ClubMembership } from "@/components/clubs/ClubMembership";
@@ -56,16 +57,18 @@ export default async function ClubDetailPage({ params }: PageProps) {
   if (!club) notFound();
 
   const [members, events] = await Promise.all([listClubMembers(supabase, clubId), listEventsForClub(supabase, clubId)]);
+  const clubImageUrl = clubImagePublicUrl(club.image_url);
   const upcoming = upcomingOnly(events);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
       <BackLink href="/clubs" label="Back to clubs" />
 
-      {clubImagePublicUrl(club.image_url) && (
-        <div className="mt-4 overflow-hidden rounded-2xl border border-border">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={clubImagePublicUrl(club.image_url)!} alt="" className="h-48 w-full object-cover sm:h-64" />
+      {clubImageUrl && (
+        <div className="relative mt-4 h-48 w-full overflow-hidden rounded-2xl border border-border sm:h-64">
+          {/* The club's hero — `priority` because it's the largest element
+              above the fold here, so it's this page's LCP candidate. */}
+          <Image src={clubImageUrl} alt="" fill priority sizes="(max-width: 768px) 100vw, 768px" className="object-cover" />
         </div>
       )}
 

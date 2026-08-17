@@ -70,14 +70,21 @@ export async function listFeedPosts(
   if (error) throw error;
 
   const rows = (data ?? []) as FeedRow[];
-  // Authors AND resharers, in one lookup — a reshare row needs both names.
-  const withAuthors = await attachAuthors(supabase, rows);
-  const resharerIds = rows.map((r) => r.resharer_id).filter((id): id is string => id !== null);
-  const resharers = await profilesByIds(supabase, resharerIds);
 
-  const posts: FeedPost[] = withAuthors.map((row) => ({
+  // Authors and resharers resolve in ONE query over the union of both id
+  // sets, not two round-trips against the same view. They overlap heavily
+  // in practice — a resharer is usually also an author somewhere on the
+  // page — so the union is barely larger than either set alone, and with
+  // the database a network hop away the second query cost far more than
+  // the extra ids do.
+  const authorIds = rows.map((r) => r.user_id);
+  const resharerIds = rows.map((r) => r.resharer_id).filter((id): id is string => id !== null);
+  const profiles = await profilesByIds(supabase, [...authorIds, ...resharerIds]);
+
+  const posts: FeedPost[] = rows.map((row) => ({
     ...row,
-    resharer: row.resharer_id ? (resharers.get(row.resharer_id) ?? null) : null,
+    author: profiles.get(row.user_id) ?? null,
+    resharer: row.resharer_id ? (profiles.get(row.resharer_id) ?? null) : null,
   }));
 
   const nextCursor = rows.length === limit ? rows[rows.length - 1].effective_at : null;
