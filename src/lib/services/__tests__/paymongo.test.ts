@@ -249,6 +249,60 @@ describe("constructPayMongoWebhookEvent", () => {
       /signature verification failed/i
     );
   });
+
+  // Live mode puts the HMAC in li= and leaves te= EMPTY. Every test above
+  // sends `li=` empty, so nothing here ever exercised a real live
+  // delivery — which is why a live deployment silently rejected every
+  // webhook, leaving genuinely-paid bookings stuck on 'pending'.
+  const liveBody = JSON.stringify({
+    data: { id: "evt_1", type: "event", attributes: { type: "checkout_session.payment.paid", livemode: true, data: { id: "cs_1" } } },
+  });
+
+  it("verifies a live-mode delivery, where the HMAC is in li= and te= is empty", async () => {
+    process.env.PAYMONGO_WEBHOOK_SECRET = "whsec_x";
+    process.env.PAYMONGO_SECRET_KEY = "sk_live_x";
+    const timestamp = "1700000000";
+    const signature = sign("whsec_x", timestamp, liveBody);
+
+    const { constructPayMongoWebhookEvent } = await import("../paymongo");
+    const event = constructPayMongoWebhookEvent(liveBody, `t=${timestamp},te=,li=${signature}`);
+
+    expect(event.data.attributes.type).toBe("checkout_session.payment.paid");
+  });
+
+  it("still refuses a live-mode delivery when this deployment holds test keys", async () => {
+    // The original mode isolation, preserved: a test-mode deployment must
+    // never accept a live event just because li= happens to be signed.
+    process.env.PAYMONGO_WEBHOOK_SECRET = "whsec_x";
+    process.env.PAYMONGO_SECRET_KEY = "sk_test_x";
+    const timestamp = "1700000000";
+    const signature = sign("whsec_x", timestamp, liveBody);
+
+    const { constructPayMongoWebhookEvent } = await import("../paymongo");
+    expect(() => constructPayMongoWebhookEvent(liveBody, `t=${timestamp},te=,li=${signature}`)).toThrow(/[Mm]alformed/);
+  });
+
+  it("refuses a test-mode delivery when this deployment holds live keys — isolation in both directions", async () => {
+    process.env.PAYMONGO_WEBHOOK_SECRET = "whsec_x";
+    process.env.PAYMONGO_SECRET_KEY = "sk_live_x";
+    const timestamp = "1700000000";
+    const signature = sign("whsec_x", timestamp, rawBody);
+
+    const { constructPayMongoWebhookEvent } = await import("../paymongo");
+    expect(() => constructPayMongoWebhookEvent(rawBody, `t=${timestamp},te=${signature},li=`)).toThrow(/[Mm]alformed/);
+  });
+
+  it("rejects a tampered body in live mode too", async () => {
+    process.env.PAYMONGO_WEBHOOK_SECRET = "whsec_x";
+    process.env.PAYMONGO_SECRET_KEY = "sk_live_x";
+    const timestamp = "1700000000";
+    const signature = sign("whsec_x", timestamp, liveBody);
+
+    const { constructPayMongoWebhookEvent } = await import("../paymongo");
+    expect(() => constructPayMongoWebhookEvent(liveBody.replace("cs_1", "cs_evil"), `t=${timestamp},te=,li=${signature}`)).toThrow(
+      /signature verification failed/i
+    );
+  });
 });
 
 describe("describePayMongoErrorDetail", () => {

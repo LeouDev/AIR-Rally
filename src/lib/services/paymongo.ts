@@ -355,11 +355,22 @@ export type PayMongoMerchantActivationEventData = {
  * HMAC>,li=<live-mode HMAC>`. The signed string is `${t}.${rawBody}`
  * (period-joined), HMAC-SHA256'd with the webhook endpoint's secret.
  *
- * This implementation deliberately only ever checks `te=` (test mode) —
- * never `li=` — since this integration is TEST MODE only by design; a
- * missing/empty `te=` is treated as unverifiable rather than silently
- * falling back to checking `li=`, so a live-mode event can never be
- * accidentally accepted by a test-mode-only verifier.
+ * Which of the two HMACs is populated depends on the mode of the event:
+ * a test-mode delivery signs `te=` and leaves `li=` empty, a live-mode
+ * delivery does the reverse. This originally only ever checked `te=`,
+ * because the integration was TEST MODE by design — which meant that the
+ * moment live keys were deployed, every real webhook was rejected as
+ * malformed and genuinely-paid bookings sat on 'pending' forever.
+ *
+ * So the field is chosen by THIS deployment's own mode, read from the
+ * secret key's `sk_live_`/`sk_test_` prefix — our own configuration,
+ * never anything in the request. That keeps the original isolation
+ * property intact and now enforces it in both directions: a test-mode
+ * deployment still refuses a live event, and a live deployment refuses a
+ * test one, rather than either accepting whichever HMAC happens to be
+ * present. The body's own `livemode` flag is deliberately NOT used for
+ * this — it is attacker-controlled input that hasn't been verified yet at
+ * this point.
  */
 export function constructPayMongoWebhookEvent(rawBody: string, signatureHeader: string): PayMongoEvent {
   const webhookSecret = process.env.PAYMONGO_WEBHOOK_SECRET;
@@ -380,16 +391,21 @@ export function constructPayMongoWebhookEvent(rawBody: string, signatureHeader: 
     })
   );
   const timestamp = parts.t;
-  const testSignature = parts.te;
+  const isLiveDeployment = (process.env.PAYMONGO_SECRET_KEY ?? "").startsWith("sk_live_");
+  const expectedSignature = isLiveDeployment ? parts.li : parts.te;
 
-  if (!timestamp || !testSignature) {
-    throw new PayMongoError("invalid_webhook_signature", "Malformed webhook signature header.");
+  if (!timestamp || !expectedSignature) {
+    throw new PayMongoError(
+      "invalid_webhook_signature",
+      "Malformed webhook signature header.",
+      `Expected a non-empty ${isLiveDeployment ? "li=" : "te="} signature (this deployment holds ${isLiveDeployment ? "live" : "test"} keys); header carried t=${timestamp ? "yes" : "no"}, te=${parts.te ? "yes" : "no"}, li=${parts.li ? "yes" : "no"}.`
+    );
   }
 
   const signedPayload = `${timestamp}.${rawBody}`;
   const computedSignature = crypto.createHmac("sha256", webhookSecret).update(signedPayload).digest("hex");
 
-  const expectedBuffer = Buffer.from(testSignature, "utf8");
+  const expectedBuffer = Buffer.from(expectedSignature, "utf8");
   const computedBuffer = Buffer.from(computedSignature, "utf8");
   const signaturesMatch =
     expectedBuffer.length === computedBuffer.length && crypto.timingSafeEqual(expectedBuffer, computedBuffer);
