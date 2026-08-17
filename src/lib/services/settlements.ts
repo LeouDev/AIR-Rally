@@ -172,6 +172,15 @@ export type AdminSettlementSummary = {
   payableAmount: number;
   payableCount: number;
   /**
+   * Real cash actually collected through PayMongo on live (pending +
+   * payable) settlements — the sum of paymongo_amount, never derived from
+   * the other totals. Credit never reaches this figure: a fully
+   * credit-covered booking contributes 0, a mixed one contributes only its
+   * PayMongo portion. This is the honest counterpart to totalVenueLiability
+   * — what's owed vs. what was actually received.
+   */
+  totalCollectedAmount: number;
+  /**
    * The platform's own cash shortfall on unsettled bookings — the sum of
    * every negative cash_position, expressed as a positive number.
    *
@@ -197,7 +206,7 @@ export type AdminSettlementSummary = {
 export async function getAdminSettlementSummary(supabase: Client): Promise<AdminSettlementSummary> {
   const { data, error } = await supabase
     .from("booking_settlements")
-    .select("venue_amount, cash_position, settlement_status, currency");
+    .select("venue_amount, paymongo_amount, cash_position, settlement_status, currency");
   if (error) throw error;
 
   const summary: AdminSettlementSummary = {
@@ -207,6 +216,7 @@ export async function getAdminSettlementSummary(supabase: Client): Promise<Admin
     pendingCount: 0,
     payableAmount: 0,
     payableCount: 0,
+    totalCollectedAmount: 0,
     creditFundedExposure: 0,
     reversedCount: 0,
     onHoldCount: 0,
@@ -225,6 +235,14 @@ export async function getAdminSettlementSummary(supabase: Client): Promise<Admin
       summary.reversedCount += 1;
     } else if (row.settlement_status === "on_hold") {
       summary.onHoldCount += 1;
+    }
+
+    // Same scope as the liability figures: live entitlement only. A
+    // reversed booking's cash, if any was ever collected, isn't owed to a
+    // venue anymore, so it doesn't belong in a "what we owe vs. what we
+    // collected" comparison.
+    if (row.settlement_status === "pending" || row.settlement_status === "payable") {
+      summary.totalCollectedAmount += row.paymongo_amount;
     }
 
     // Exposure counts only live entitlement. A reversed settlement is no

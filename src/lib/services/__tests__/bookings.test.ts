@@ -387,11 +387,12 @@ describe("reconcilePaymongoPendingBooking — the 'confirmation page loads befor
   it("returns the booking unchanged, without calling PayMongo, when it's not a pending PayMongo booking", async () => {
     const supabase = createTableMockSupabase({ bookings: { data: { ...PENDING_PAYMONGO_BOOKING, payment_provider: "stripe" }, error: null } });
     const result = await reconcilePaymongoPendingBooking(supabase, "booking-1");
-    expect(result.payment_provider).toBe("stripe");
+    expect(result.booking.payment_provider).toBe("stripe");
+    expect(result.paymentInFlight).toBe(false);
     expect(mockRetrievePayMongoCheckoutSession).not.toHaveBeenCalled();
   });
 
-  it("checks PayMongo directly but leaves the booking pending when there's no paid payment yet", async () => {
+  it("checks PayMongo directly but leaves the booking pending when there's no payment attempt at all", async () => {
     const supabase = createTableMockSupabase({ bookings: { data: PENDING_PAYMONGO_BOOKING, error: null } });
     mockRetrievePayMongoCheckoutSession.mockResolvedValue({
       id: "cs_pm_test_123",
@@ -400,10 +401,78 @@ describe("reconcilePaymongoPendingBooking — the 'confirmation page loads befor
 
     const result = await reconcilePaymongoPendingBooking(supabase, "booking-1");
 
-    expect(result).toEqual(PENDING_PAYMONGO_BOOKING);
+    expect(result.booking).toEqual(PENDING_PAYMONGO_BOOKING);
+    // Checkout was opened but nothing was ever attempted — not in flight.
+    expect(result.paymentInFlight).toBe(false);
     expect(mockRetrievePayMongoCheckoutSession).toHaveBeenCalledWith("cs_pm_test_123");
     // confirm_paymongo_booking_payment must never be reached — createTableMockSupabase
     // throws if .rpc() is called without a configured result, the assertion we want here.
+  });
+
+  it("reports paymentInFlight when PayMongo shows an unresolved attempt within the recent window", async () => {
+    const supabase = createTableMockSupabase({ bookings: { data: PENDING_PAYMONGO_BOOKING, error: null } });
+    mockRetrievePayMongoCheckoutSession.mockResolvedValue({
+      id: "cs_pm_test_123",
+      attributes: {
+        payment_intent: {
+          id: "pi_pm_test_456",
+          attributes: {
+            amount: 50000,
+            currency: "PHP",
+            status: "processing",
+            payments: [{ id: "pay_1", attributes: { amount: 50000, currency: "php", status: "processing" } }],
+          },
+        },
+      },
+    });
+
+    const result = await reconcilePaymongoPendingBooking(supabase, "booking-1");
+
+    expect(result.booking).toEqual(PENDING_PAYMONGO_BOOKING);
+    expect(result.paymentInFlight).toBe(true);
+  });
+
+  it("does not report paymentInFlight once every attempt is known-failed", async () => {
+    const supabase = createTableMockSupabase({ bookings: { data: PENDING_PAYMONGO_BOOKING, error: null } });
+    mockRetrievePayMongoCheckoutSession.mockResolvedValue({
+      id: "cs_pm_test_123",
+      attributes: {
+        payment_intent: {
+          id: "pi_pm_test_456",
+          attributes: {
+            amount: 50000,
+            currency: "PHP",
+            status: "awaiting_payment_method",
+            payments: [{ id: "pay_1", attributes: { amount: 50000, currency: "php", status: "failed" } }],
+          },
+        },
+      },
+    });
+
+    const result = await reconcilePaymongoPendingBooking(supabase, "booking-1");
+    expect(result.paymentInFlight).toBe(false);
+  });
+
+  it("stops reporting paymentInFlight once the booking is older than the in-flight window, even with an unresolved attempt", async () => {
+    const OLD_PENDING_PAYMONGO_BOOKING: Booking = { ...PENDING_PAYMONGO_BOOKING, created_at: "2026-08-09T00:00:00Z" }; // well over 10 minutes before NOW
+    const supabase = createTableMockSupabase({ bookings: { data: OLD_PENDING_PAYMONGO_BOOKING, error: null } });
+    mockRetrievePayMongoCheckoutSession.mockResolvedValue({
+      id: "cs_pm_test_123",
+      attributes: {
+        payment_intent: {
+          id: "pi_pm_test_456",
+          attributes: {
+            amount: 50000,
+            currency: "PHP",
+            status: "processing",
+            payments: [{ id: "pay_1", attributes: { amount: 50000, currency: "php", status: "processing" } }],
+          },
+        },
+      },
+    });
+
+    const result = await reconcilePaymongoPendingBooking(supabase, "booking-1");
+    expect(result.paymentInFlight).toBe(false);
   });
 
   it("confirms the booking through the same guarded RPC the webhook itself uses, once PayMongo reports a paid payment", async () => {
@@ -431,7 +500,7 @@ describe("reconcilePaymongoPendingBooking — the 'confirmation page loads befor
       p_expected_amount: 50000,
       p_expected_currency: "PHP",
     });
-    expect(result).toEqual(CONFIRMED_PAYMONGO_BOOKING);
+    expect(result.booking).toEqual(CONFIRMED_PAYMONGO_BOOKING);
     // No available_at/credited_at were on the mocked payment, so no
     // extra write to bookings should happen beyond the initial read and
     // the final refetch (2 total .from("bookings") calls).
@@ -478,6 +547,6 @@ describe("reconcilePaymongoPendingBooking — the 'confirmation page loads befor
       paymongo_available_at: new Date(1787043600 * 1000).toISOString(),
       paymongo_credited_at: new Date(1787187600 * 1000).toISOString(),
     });
-    expect(result).toEqual(CONFIRMED_PAYMONGO_BOOKING);
+    expect(result.booking).toEqual(CONFIRMED_PAYMONGO_BOOKING);
   });
 });
