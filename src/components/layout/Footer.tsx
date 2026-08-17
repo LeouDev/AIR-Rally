@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Apple } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
+import { getCurrentUser } from "@/lib/supabase/auth";
 
 const PRODUCT_LINKS = [
   { href: "/explore", label: "Explore Courts" },
@@ -9,13 +10,31 @@ const PRODUCT_LINKS = [
   { href: "/#how-it-works", label: "How It Works" },
 ];
 
-const ACCOUNT_LINKS = [
+/**
+ * The Account column depends on whether anyone is signed in. The navbar
+ * has always known this (AuthNavSection); the footer did not, so a
+ * signed-in visitor was still being offered "Sign In" and "Create
+ * Account" at the bottom of every page.
+ */
+const SIGNED_OUT_LINKS = [
   { href: "/login", label: "Sign In" },
   { href: "/signup", label: "Create Account" },
   { href: "/favorites", label: "Favorites" },
 ];
 
-export function Footer() {
+const SIGNED_IN_LINKS = [
+  { href: "/profile", label: "Profile" },
+  { href: "/bookings", label: "My Bookings" },
+  { href: "/favorites", label: "Favorites" },
+];
+
+export async function Footer() {
+  // Never throws — getCurrentUser swallows its own errors and returns
+  // null, so a session lookup failing degrades to the signed-out footer
+  // rather than taking down every page that renders the shell.
+  const user = await getCurrentUser();
+  const accountLinks = user ? SIGNED_IN_LINKS : SIGNED_OUT_LINKS;
+
   return (
     <footer className="border-t border-border bg-background">
       <div className="mx-auto max-w-7xl px-4 pt-12 pb-28 sm:px-6 md:pb-12 lg:px-8">
@@ -26,7 +45,7 @@ export function Footer() {
           </div>
 
           <FooterColumn title="Product" links={PRODUCT_LINKS} />
-          <FooterColumn title="Account" links={ACCOUNT_LINKS} />
+          <FooterColumn title="Account" links={accountLinks} />
 
           {/* Web-only (Phase 6) — the store badges aren't real download
               links yet, and a dead App Store/Google Play row read as
