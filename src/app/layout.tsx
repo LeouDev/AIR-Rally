@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -55,7 +56,13 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Nonce-based CSP (src/proxy.ts) only reaches script tags on dynamically
+  // rendered pages — a statically prerendered page has no request to read a
+  // nonce from, so its bundled scripts ship with no nonce and get blocked.
+  // This forces every route in the app to render per-request.
+  await connection();
+
   return (
     <html
       lang="en"
