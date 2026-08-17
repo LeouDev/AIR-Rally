@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { CheckCircle2, Clock, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PendingPaymentAutoRefresh } from "@/components/court/PendingPaymentAutoRefresh";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { getCurrentUser } from "@/lib/supabase/auth";
@@ -12,9 +13,8 @@ import { getCourtDisplayInfo } from "@/lib/services/courts";
 import { maybeCompleteRescheduleFromProvider, listReschedulesForBooking } from "@/lib/services/reschedules";
 import { logServerError } from "@/lib/errors";
 
-// Real per-viewer booking state, possibly reconciled against Stripe on
-// every load (see the pending-with-session_id branch below) — never
-// statically cached.
+// Real per-viewer booking state, possibly reconciled against PayMongo on
+// every load (see the pending branch below) — never statically cached.
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Booking Confirmation" };
@@ -130,11 +130,14 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
         <EmptyState
           icon={Clock}
           title="Your payment is being confirmed"
-          description="This usually takes just a few seconds. Refresh this page to check again — we'll never show a booking as confirmed until payment is actually verified."
+          description="This usually takes just a few seconds — this page updates by itself. We'll never show a booking as confirmed until payment is actually verified."
           action={
-            <Button asChild variant="outline">
-              <Link href={`/bookings/${booking.id}/confirmation${sessionId ? `?session_id=${sessionId}` : ""}`}>Refresh</Link>
-            </Button>
+            <div className="flex flex-col items-center gap-3">
+              <PendingPaymentAutoRefresh />
+              <Button asChild variant="outline">
+                <Link href={`/bookings/${booking.id}/confirmation${sessionId ? `?session_id=${sessionId}` : ""}`}>Refresh now</Link>
+              </Button>
+            </div>
           }
         />
       </div>
