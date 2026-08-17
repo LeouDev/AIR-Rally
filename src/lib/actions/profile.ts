@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { updateProfile, updateAvatar } from "@/lib/services/profiles";
+import { updateProfile, updateAvatar, searchPublicProfiles } from "@/lib/services/profiles";
 import { updateProfileSchema, updateAvatarSchema, type UpdateProfileValues } from "@/lib/validations/profile";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
-import type { Profile } from "@/lib/supabase/types";
+import type { Profile, PublicProfile } from "@/lib/supabase/types";
 import { getServerClient, type ActionResult } from "@/lib/actions/auth";
 
 export async function updateProfileAction(values: UpdateProfileValues): Promise<ActionResult<Profile>> {
@@ -66,5 +66,37 @@ export async function updateAvatarAction(avatarUrl: string): Promise<ActionResul
   } catch (error) {
     logServerError("profile.updateAvatar", error);
     return { success: false, error: getFriendlyErrorMessage(error, "We couldn't save your new photo.") };
+  }
+}
+
+
+/**
+ * Finds players by display name, for the "who's coming?" picker.
+ *
+ * Reads public_profiles — the view that exposes only id, display name and
+ * avatar — so a name search can never surface an email, phone number, or
+ * anything else private. Signed-in callers only: an open people-search on
+ * a public endpoint is a scraping target.
+ */
+export async function searchPlayersAction(query: string): Promise<ActionResult<PublicProfile[]>> {
+  const term = query.trim();
+  if (term.length < 2) return { success: true, data: [] };
+
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Sign in to find players." };
+
+  try {
+    const profiles = await searchPublicProfiles(supabase, term, 8);
+    // Never offer the organiser themselves — they're already on the roster.
+    return { success: true, data: profiles.filter((p) => p.id !== user.id) };
+  } catch (error) {
+    logServerError("profile.searchPlayers", error);
+    return { success: false, error: getFriendlyErrorMessage(error, "We couldn't search for players.") };
   }
 }

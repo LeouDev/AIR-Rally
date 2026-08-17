@@ -13,6 +13,9 @@ import { DatePickerCalendar } from "@/components/shared/DatePickerCalendar";
 import { cn } from "@/lib/utils";
 import { getAvailableSlotsAction } from "@/lib/actions/availability";
 import { createCheckoutSessionAction } from "@/lib/actions/checkout";
+import { createOpenPlayForBookingAction } from "@/lib/actions/events";
+import { PlayerPicker } from "@/components/court/PlayerPicker";
+import type { PublicProfile } from "@/lib/supabase/types";
 import { SLOT_INCREMENT_MINUTES, MIN_DURATION_MINUTES, MAX_DURATION_MINUTES, MAX_BOOKING_WINDOW_DAYS } from "@/lib/booking-config";
 import type { AvailableSlot, Court } from "@/lib/supabase/types";
 
@@ -75,6 +78,7 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
   // slot just became unavailable) without needing any selection to change.
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [selectedSlot, setSelectedSlot] = useState<AvailableSlot | null>(null);
+  const [players, setPlayers] = useState<PublicProfile[]>([]);
   const [isBooking, startBooking] = useTransition();
   const [calendarOpen, setCalendarOpen] = useState(false);
 
@@ -139,6 +143,21 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
         refreshSlots();
         return;
       }
+
+      // The roster is set up AFTER the booking exists and BEFORE the
+      // redirect. Deliberately non-fatal: a failure here must never block
+      // a payment the player has already committed to, so it is reported
+      // and the redirect continues regardless.
+      if (players.length > 0) {
+        const openPlay = await createOpenPlayForBookingAction({
+          bookingId: result.data.bookingId,
+          playerIds: players.map((p) => p.id),
+        });
+        if (!openPlay.success) {
+          toast.error("Booked, but we couldn't invite your players. You can invite them from the game page.");
+        }
+      }
+
       window.location.href = result.data.url;
     });
   }
@@ -319,6 +338,12 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
                 <span className="text-sm font-medium text-accent-foreground">Total</span>
                 <span className="text-lg font-semibold text-accent-foreground">₱{estimatedTotal}</span>
               </div>
+
+              <PlayerPicker
+                selected={players}
+                onChange={setPlayers}
+                totalAmount={(estimatedTotal ?? 0) * 100}
+              />
               <p className="text-xs text-muted-foreground">
                 You&apos;ll be redirected to Stripe to complete payment securely. Your booking is only confirmed once payment succeeds.
               </p>

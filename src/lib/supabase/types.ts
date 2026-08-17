@@ -166,6 +166,8 @@ export type Notification = {
   title: string;
   message: string;
   read_at: string | null;
+  /** In-app path this points at. Null falls back to a type-based route — see lib/notificationRoutes.ts. */
+  link_url: string | null;
   created_at: string;
 };
 
@@ -1006,6 +1008,15 @@ export type Database = {
           p_user_id: string;
           p_amount: number;
         };
+        Returns: number;
+      };
+      /**
+       * Notifies specific players that the organiser wants them in a game.
+       * Creator-only (checked inside), capped at 20 per call, one invite
+       * per player per event. Returns how many were newly invited.
+       */
+      invite_event_players: {
+        Args: { p_event_id: string; p_user_ids: string[] };
         Returns: number;
       };
       /** Venue payout readiness counts plus settlements blocked by missing setup. Admin-only. */

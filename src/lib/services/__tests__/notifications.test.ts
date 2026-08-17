@@ -9,6 +9,7 @@ const NOTIFICATION: Notification = {
   title: "Booking confirmed",
   message: "Your booking (confirmation #ABC123) is confirmed.",
   read_at: null,
+  link_url: null,
   created_at: "2026-08-12T00:00:00Z",
 };
 

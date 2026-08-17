@@ -41,7 +41,7 @@ import { getServerClient, type ActionResult } from "@/lib/actions/auth";
  */
 export async function createCheckoutSessionAction(
   values: CreateBookingValues
-): Promise<ActionResult<{ url: string; creditApplied: number; amountDue: number }>> {
+): Promise<ActionResult<{ url: string; bookingId: string; creditApplied: number; amountDue: number }>> {
   const parsed = createBookingSchema.safeParse(values);
   if (!parsed.success) {
     return { success: false, error: "Please fix the errors below and try again." };
@@ -101,7 +101,7 @@ export async function createCheckoutSessionAction(
       if (!confirmed) {
         throw new BookingError("credit_confirmation_failed", "We couldn't complete this booking with your credits. Please try again.");
       }
-      return { success: true, data: { url: confirmationUrl, creditApplied, amountDue: 0 } };
+      return { success: true, data: { url: confirmationUrl, bookingId: booking.id, creditApplied, amountDue: 0 } };
     }
 
     // Marketplace split only applies when (a) the platform-wide kill
@@ -151,7 +151,7 @@ export async function createCheckoutSessionAction(
       }
     );
 
-    return { success: true, data: { url: session.url, creditApplied, amountDue } };
+    return { success: true, data: { url: session.url, bookingId: booking.id, creditApplied, amountDue } };
   } catch (error) {
     // The booking was created but something after it failed — release the
     // slot rather than leaving an unpayable pending booking behind. This

@@ -2,25 +2,33 @@
 
 import { useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { Bell, CalendarCheck, CalendarX, Star } from "lucide-react";
+import Link from "next/link";
+import { Bell, CalendarCheck, CalendarX, Star, Users, Coins, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
 import { listNotifications, getUnreadCount } from "@/lib/services/notifications";
 import { markNotificationReadAction, markAllNotificationsReadAction } from "@/lib/actions/notifications";
-import type { Notification, NotificationType } from "@/lib/supabase/types";
+import type { Notification } from "@/lib/supabase/types";
+import { notificationHref, displayMessage } from "@/lib/notificationRoutes";
 import { cn } from "@/lib/utils";
 
 type NotificationBellProps = {
   userId: string;
 };
 
-const ICONS: Record<NotificationType, typeof Bell> = {
+// Keyed loosely on purpose: the database emits more notification types
+// than the NotificationType union lists (credits, invites, community), and
+// an unknown type should fall back to a bell rather than fail to compile.
+const ICONS: Record<string, typeof Bell> = {
   booking_confirmed: CalendarCheck,
+  booking_created: CalendarCheck,
   booking_received: CalendarCheck,
   booking_cancelled: CalendarX,
   reschedule_completed: CalendarCheck,
   review_received: Star,
+  credits_added: Coins,
+  event_invite: Users,
 };
 
 /**
@@ -136,9 +144,12 @@ export function NotificationBell({ userId }: NotificationBellProps) {
               const Icon = ICONS[notification.type] ?? Bell;
               const isUnread = notification.read_at === null;
               return (
-                <button
+                // A link, not a button: the point of tapping a
+                // notification is to get to the thing it is about. Marking
+                // it read happens on the way through.
+                <Link
                   key={notification.id}
-                  type="button"
+                  href={notificationHref(notification)}
                   onClick={() => handleMarkRead(notification)}
                   className={cn(
                     "flex w-full items-start gap-2.5 border-b border-border px-3 py-2.5 text-left last:border-b-0 hover:bg-muted",
@@ -151,14 +162,26 @@ export function NotificationBell({ userId }: NotificationBellProps) {
                       <span className="text-sm font-medium text-foreground">{notification.title}</span>
                       {isUnread && <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-primary" />}
                     </span>
-                    <span className="text-xs text-muted-foreground">{notification.message}</span>
+                    <span className="text-xs text-muted-foreground">{displayMessage(notification.message)}</span>
                     <span className="text-[11px] text-muted-foreground/80">
                       {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
                     </span>
                   </span>
-                </button>
+                </Link>
               );
             })}
+        </div>
+
+        {/* Always present, even when empty — "see everything" is the one
+            thing a truncated popover must never hide. */}
+        <div className="border-t border-border p-1">
+          <Link
+            href="/notifications"
+            className="flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-muted"
+          >
+            See all notifications
+            <ArrowRight className="size-3.5" aria-hidden="true" />
+          </Link>
         </div>
       </PopoverContent>
     </Popover>

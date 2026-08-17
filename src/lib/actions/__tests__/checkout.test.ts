@@ -111,7 +111,7 @@ describe("createCheckoutSessionAction — credits", () => {
 
     expect(result).toEqual({
       success: true,
-      data: { url: "https://paymongo.test/cs_test_1", creditApplied: 0, amountDue: 50000 },
+      data: { url: "https://paymongo.test/cs_test_1", bookingId: "booking-1", creditApplied: 0, amountDue: 50000 },
     });
     expect(mockApplyCredit).not.toHaveBeenCalled();
     expect(chargedAmount()).toBe(50000);
@@ -127,6 +127,7 @@ describe("createCheckoutSessionAction — credits", () => {
     expect(result.success).toBe(true);
     expect(result.success && result.data).toEqual({
       url: "https://paymongo.test/cs_test_1",
+      bookingId: "booking-1",
       creditApplied: 30000,
       amountDue: 20000,
     });
@@ -143,6 +144,7 @@ describe("createCheckoutSessionAction — credits", () => {
 
     expect(result.success && result.data).toEqual({
       url: "https://air-rally.test/bookings/booking-1/confirmation",
+      bookingId: "booking-1",
       creditApplied: 50000,
       amountDue: 0,
     });
