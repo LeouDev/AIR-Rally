@@ -79,11 +79,37 @@ Point the PayMongo webhook at `https://air-rally.com/api/paymongo/webhook` and s
 The endpoint verifies the signature against the raw request body before parsing anything —
 an unsigned or mismatched request is rejected with a 400 and never reaches a booking.
 
-## 6. Attach the domain
+## 6. Email notifications
+
+Every in-app notification is also emailed, via a **Supabase Database Webhook** —
+configured here in the Supabase dashboard, not by a migration, same posture as the
+PayMongo webhook above.
+
+1. In [resend.com](https://resend.com), verify `air-rally.com` as a sending domain and
+   generate an API key.
+2. Set `RESEND_API_KEY` and `RESEND_FROM_EMAIL` (an address at the verified domain, e.g.
+   `AIR/Rally <notifications@air-rally.com>`).
+3. Generate a random secret (`openssl rand -hex 32`) and set it as
+   `SUPABASE_DB_WEBHOOK_SECRET`.
+4. In the Supabase dashboard → Database → Webhooks, create a webhook:
+   - Table: `notifications`
+   - Events: `INSERT`
+   - Type: HTTP Request → `https://air-rally.com/api/webhooks/notification-created`
+   - HTTP Headers: add `x-webhook-secret` set to the **same value** as
+     `SUPABASE_DB_WEBHOOK_SECRET` above — this header is the endpoint's entire
+     authority, so a mismatched or missing value here means every email silently fails
+     (a 401, logged, never a broken notification — see the route's own comment).
+
+One generic template covers every notification type today (title + message + a link
+back into the app) — there's no per-type email design yet, and none of this affects
+whether a notification appears in-app, which happens regardless of whether the email
+send succeeds.
+
+## 7. Attach the domain
 
 Add `air-rally.com` in the host's domain settings and follow its DNS instructions.
 
-## 7. Smoke test, signed in
+## 8. Smoke test, signed in
 
 The things I cannot verify without a session, in the order they'd hurt most:
 

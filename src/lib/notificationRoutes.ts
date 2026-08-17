@@ -41,7 +41,7 @@ function embeddedEventId(message: string): string | null {
   return match ? match[1] : null;
 }
 
-export function notificationHref(notification: Pick<Notification, "type" | "message"> & { link_url?: string | null }): string {
+export function notificationHref(notification: { type: string; message: Notification["message"]; link_url?: string | null }): string {
   if (notification.link_url) return notification.link_url;
 
   const eventId = embeddedEventId(notification.message ?? "");
