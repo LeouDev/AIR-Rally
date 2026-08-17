@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BackLink } from "@/components/shared/BackLink";
 import { OwnerApplicationWizard, OwnerApplicationSubmittedState } from "@/components/owner/OwnerApplicationWizard";
 import { requestOwnerAccessAction } from "@/lib/actions/ownerApplications";
 import type { OwnerStatus } from "@/lib/supabase/types";
@@ -77,6 +79,9 @@ export function OwnerOnboardingContent({ isSignedIn, ownerStatus, hasSubmittedAp
   if (view === "submitted") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
+        <div className="mb-4">
+          <BackLink href="/profile" label="Back to profile" />
+        </div>
         <OwnerApplicationSubmittedState />
       </div>
     );
@@ -85,6 +90,17 @@ export function OwnerOnboardingContent({ isSignedIn, ownerStatus, hasSubmittedAp
   if (view === "wizard") {
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
+        {/* Back to the landing view, not to /profile — the wizard is a
+            client-toggled view of this same route, so there is no history
+            entry to return to and a link would leave the flow entirely. */}
+        <button
+          type="button"
+          onClick={() => setView("landing")}
+          className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" aria-hidden="true" />
+          Back
+        </button>
         <OwnerApplicationWizard onSubmitted={() => setView("submitted")} />
       </div>
     );
@@ -94,6 +110,13 @@ export function OwnerOnboardingContent({ isSignedIn, ownerStatus, hasSubmittedAp
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
+      {/* Only for signed-in visitors: /profile is where the CTA that
+          reaches this page lives, and it redirects anyone signed out. */}
+      {isSignedIn && (
+        <div className="mb-6">
+          <BackLink href="/profile" label="Back to profile" />
+        </div>
+      )}
       <div className="text-center">
         <h1 className="text-3xl font-semibold tracking-tight text-balance text-foreground sm:text-4xl">
           Turn your court into a business with AIR/Rally

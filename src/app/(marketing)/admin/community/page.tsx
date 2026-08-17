@@ -10,6 +10,7 @@ import { requireAdmin } from "@/lib/services/admin";
 import { listClubsForAdmin, getClubModerationCounts } from "@/lib/services/clubs";
 import type { Club } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Live moderation state — never statically cached.
 export const dynamic = "force-dynamic";
@@ -59,6 +60,7 @@ export default async function AdminCommunityPage({ searchParams }: PageProps) {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
+      <div className="mb-4"><BackLink href="/admin" label="Back to moderation dashboard" /></div>
       <Link href="/admin" className="text-sm text-muted-foreground hover:text-foreground">
         ← Admin dashboard
       </Link>

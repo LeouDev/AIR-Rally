@@ -9,6 +9,7 @@ import { getPayoutReadiness } from "@/lib/services/payoutReadiness";
 import { getAdminSettlementSummary } from "@/lib/services/settlements";
 import { getVenuePayoutReadiness } from "@/lib/services/venuePaymentAccounts";
 import { formatSettlementMoney } from "@/lib/settlementFormat";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Live financial position — never statically cached.
 export const dynamic = "force-dynamic";
@@ -54,6 +55,7 @@ export default async function AdminFinancePage() {
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
+      <BackLink href="/admin" label="Back to moderation dashboard" />
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Finance</h1>
         <p className="mt-1 text-sm text-muted-foreground">

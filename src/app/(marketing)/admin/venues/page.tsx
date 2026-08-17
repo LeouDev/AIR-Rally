@@ -9,6 +9,7 @@ import { requireAdmin } from "@/lib/services/admin";
 import { listVenuesForAdmin } from "@/lib/services/venues";
 import type { VenueStatus } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Live admin view over real venue state — never statically cached.
 export const dynamic = "force-dynamic";
@@ -69,6 +70,7 @@ export default async function AdminVenuesPage({ searchParams }: AdminVenuesPageP
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
+      <div className="mb-4"><BackLink href="/admin" label="Back to moderation dashboard" /></div>
       <h1 className="text-2xl font-semibold text-foreground">Venue Management</h1>
       <p className="mt-1 text-muted-foreground">Approve new venues, and suspend or reinstate existing ones.</p>
 

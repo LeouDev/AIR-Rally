@@ -8,6 +8,7 @@ import { getPayoutBatchDetail } from "@/lib/services/payouts";
 import { PayoutBatchActions } from "@/components/admin/PayoutBatchActions";
 import { formatSettlementMoney } from "@/lib/settlementFormat";
 import type { PayoutBatchStatus } from "@/lib/supabase/types";
+import { BackLink } from "@/components/shared/BackLink";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,7 @@ export default async function PayoutBatchDetailPage({ params }: { params: Promis
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
+      <BackLink href="/admin/payouts" label="Back to payout batches" />
       <div>
         <Link href="/admin/payouts" className="text-sm text-muted-foreground hover:underline">
           ← Payout batches

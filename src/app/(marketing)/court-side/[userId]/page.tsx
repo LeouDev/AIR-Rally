@@ -10,6 +10,7 @@ import { getPublicProfile } from "@/lib/services/profiles";
 import { listPostsByUser, listLikedPostIds, listResharedPostIds } from "@/lib/services/posts";
 import { listFollowingIds, getFollowCounts } from "@/lib/services/follows";
 import { resolveClubMentionsForPosts } from "@/lib/services/clubs";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Renders per-viewer data (own like/follow state via a cookie-scoped
 // Supabase session) for whichever profile the URL names — never cached
@@ -34,6 +35,9 @@ export default async function UserRallyProfilePage({ params }: PageProps) {
   if (!session) {
     return (
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mb-4">
+          <BackLink href="/court-side" label="Back to COURT/Side" />
+        </div>
         <EmptyState
           icon={Users}
           title="Sign in to view this profile"
@@ -72,6 +76,9 @@ export default async function UserRallyProfilePage({ params }: PageProps) {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mb-4">
+        <BackLink href="/court-side" label="Back to COURT/Side" />
+      </div>
       <UserRallyProfile
         viewerId={session.user.id}
         isAdmin={session.profile?.role === "admin"}

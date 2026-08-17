@@ -8,6 +8,7 @@ import { listAttendingEventIds } from "@/lib/services/events";
 import { calculateSplit, formatShare } from "@/lib/eventSplit";
 import { EventJoinButton } from "@/components/events/EventJoinButton";
 import type { CommunityEvent, PublicProfile } from "@/lib/supabase/types";
+import { BackLink } from "@/components/shared/BackLink";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Game" };
@@ -53,9 +54,7 @@ export default async function EventDetailPage({ params }: { params: Promise<{ ev
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-10 sm:px-6 lg:px-8">
       <div>
-        <Link href="/events" className="text-sm text-muted-foreground hover:underline">
-          ← Open Play
-        </Link>
+        <BackLink href="/events" label="Back to open play" />
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{game.title}</h1>
         {creator && (
           <p className="mt-1 text-sm text-muted-foreground">

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { CreateClubForm } from "@/components/clubs/CreateClubForm";
 import { requireSignedIn } from "@/lib/supabase/auth";
+import { BackLink } from "@/components/shared/BackLink";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +14,7 @@ export default async function NewClubPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6 lg:px-8">
-      <Link href="/clubs" className="text-sm text-muted-foreground hover:text-foreground">
-        ← Back to clubs
-      </Link>
+      <BackLink href="/clubs" label="Back to clubs" />
 
       <h1 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">Create a club</h1>
       <p className="mt-1 text-muted-foreground">

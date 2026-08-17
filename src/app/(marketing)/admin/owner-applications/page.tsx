@@ -9,6 +9,7 @@ import { requireAdmin } from "@/lib/services/admin";
 import { listOwnerApplicationsForAdmin } from "@/lib/services/ownerApplications";
 import type { OwnerApplicationStatus } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Live admin view over real application state — never statically cached.
 export const dynamic = "force-dynamic";
@@ -65,6 +66,7 @@ export default async function AdminOwnerApplicationsPage({ searchParams }: Admin
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
+      <div className="mb-4"><BackLink href="/admin" label="Back to moderation dashboard" /></div>
       <h1 className="text-2xl font-semibold text-foreground">Owner Applications</h1>
       <p className="mt-1 text-muted-foreground">Review and approve venue owner applications.</p>
 

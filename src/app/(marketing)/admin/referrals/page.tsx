@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
 import { getReferralFunnelStats } from "@/lib/services/referralAnalytics";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Live admin view over real referral state — never statically cached.
 export const dynamic = "force-dynamic";
@@ -31,6 +32,7 @@ export default async function AdminReferralsPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
+      <div className="mb-4"><BackLink href="/admin" label="Back to moderation dashboard" /></div>
       <h1 className="text-2xl font-semibold text-foreground">Referral Funnel</h1>
       <p className="mt-1 text-muted-foreground">How owner referrals progress from invite to approved venue owner.</p>
 

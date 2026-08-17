@@ -8,6 +8,7 @@ import { listAllPaymentAccounts, getVenuePayoutReadiness } from "@/lib/services/
 import { PaymentAccountActions } from "@/components/admin/PaymentAccountActions";
 import { formatSettlementMoney } from "@/lib/settlementFormat";
 import type { VenuePaymentAccountStatus } from "@/lib/supabase/types";
+import { BackLink } from "@/components/shared/BackLink";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,7 @@ export default async function AdminPaymentAccountsPage({ searchParams }: { searc
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
+      <BackLink href="/admin" label="Back to moderation dashboard" />
       <div>
         <Link href="/admin/finance" className="text-sm text-muted-foreground hover:underline">
           ← Finance

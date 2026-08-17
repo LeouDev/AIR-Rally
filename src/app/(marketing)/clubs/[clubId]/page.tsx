@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Users, MapPin, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getClubForViewer, listClubMembers } from "@/lib/services/clubs";
 import { listEventsForClub } from "@/lib/services/events";
 import type { Club, CommunityEvent } from "@/lib/supabase/types";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Per-viewer: RLS decides whether this club is even visible, and the
 // viewer's own role drives what renders.
@@ -58,9 +58,7 @@ export default async function ClubDetailPage({ params }: PageProps) {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
-      <Link href="/clubs" className="text-sm text-muted-foreground hover:text-foreground">
-        ← Back to clubs
-      </Link>
+      <BackLink href="/clubs" label="Back to clubs" />
 
       <header className="mt-4 flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">

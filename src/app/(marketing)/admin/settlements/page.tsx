@@ -8,6 +8,7 @@ import { requireAdmin } from "@/lib/services/admin";
 import { getAdminSettlementSummary, listAllSettlements } from "@/lib/services/settlements";
 import type { SettlementSource, SettlementStatus } from "@/lib/supabase/types";
 import { formatSettlementMoney } from "@/lib/settlementFormat";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Live financial position — never statically cached.
 export const dynamic = "force-dynamic";
@@ -71,6 +72,7 @@ export default async function AdminSettlementsPage({ searchParams }: { searchPar
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
+      <BackLink href="/admin" label="Back to moderation dashboard" />
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Settlements</h1>
         <p className="mt-1 text-sm text-muted-foreground">

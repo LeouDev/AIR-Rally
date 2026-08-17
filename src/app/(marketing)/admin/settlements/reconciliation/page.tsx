@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
 import { getSettlementIssues, getAdminSettlementSummary } from "@/lib/services/settlements";
 import { formatSettlementMoney } from "@/lib/settlementFormat";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Runs the check live on every load — a cached reconciliation is worthless.
 export const dynamic = "force-dynamic";
@@ -40,6 +41,7 @@ export default async function SettlementReconciliationPage() {
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
+      <BackLink href="/admin/settlements" label="Back to settlements" />
       <div>
         <Link href="/admin/settlements" className="text-sm text-muted-foreground hover:underline">
           ← Settlements

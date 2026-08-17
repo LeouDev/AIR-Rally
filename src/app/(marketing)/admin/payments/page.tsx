@@ -9,6 +9,7 @@ import { listPaymentMonitoringRows, listVenuePaymentIssues, type PaymentLifecycl
 import { listRescheduleActivity, type RescheduleActivityRow } from "@/lib/services/reschedules";
 import type { RefundStatus, RescheduleStatus } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
+import { BackLink } from "@/components/shared/BackLink";
 
 // Real, per-request admin view over live payment state — never statically cached.
 export const dynamic = "force-dynamic";
@@ -101,6 +102,7 @@ export default async function AdminPaymentsPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
+      <div className="mb-4"><BackLink href="/admin" label="Back to moderation dashboard" /></div>
       <h1 className="text-2xl font-semibold text-foreground">Payment Monitoring</h1>
       <p className="mt-1 text-muted-foreground">
         Live view over every booking&apos;s payment state. Showing the {rows.length} most recent bookings.
