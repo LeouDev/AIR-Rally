@@ -192,6 +192,34 @@ describe("getAdminSettlementSummary", () => {
     });
   });
 
+  // The venue's entitlement is withdrawn on reversal, but the original
+  // charge never was — AIR/Rally keeps the full paymongo_amount, not just
+  // its platform fee.
+  it("sums real cash retained from reversed settlements", async () => {
+    const supabase = createMockSupabase({
+      data: [
+        row({ settlement_status: "reversed", paymongo_amount: 50000 }),
+        row({ settlement_status: "reversed", paymongo_amount: 40000 }),
+        row({ settlement_status: "pending", paymongo_amount: 50000 }), // still live — excluded
+        row({ settlement_status: "on_hold", paymongo_amount: 50000 }), // already paid out — excluded
+      ],
+      error: null,
+    });
+
+    await expect(getAdminSettlementSummary(supabase)).resolves.toMatchObject({ retainedFromReversedAmount: 90000 });
+  });
+
+  // Credit-funded bookings never collected real cash, so a reversed one
+  // must contribute 0, not something derived from venue_amount or gross.
+  it("credit-funded reversed settlements contribute nothing to retained cash", async () => {
+    const supabase = createMockSupabase({
+      data: [row({ settlement_status: "reversed", paymongo_amount: 0 })],
+      error: null,
+    });
+
+    await expect(getAdminSettlementSummary(supabase)).resolves.toMatchObject({ retainedFromReversedAmount: 0 });
+  });
+
   it("counts on-hold settlements so they can be surfaced for review", async () => {
     const supabase = createMockSupabase({ data: [row({ settlement_status: "on_hold" })], error: null });
     await expect(getAdminSettlementSummary(supabase)).resolves.toMatchObject({ onHoldCount: 1 });

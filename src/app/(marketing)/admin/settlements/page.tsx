@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert, Wallet } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
@@ -121,6 +121,22 @@ export default async function AdminSettlementsPage({ searchParams }: { searchPar
           </dd>
           <p className="mt-1 text-xs text-muted-foreground">
             Owed to venues but never collected in cash, because the player paid with credits.
+          </p>
+        </div>
+        {/* A reversal withdraws the VENUE's entitlement, not the original
+            charge — QR Ph can't be refunded through PayMongo's API, so
+            this cash was never given back either. AIR/Rally keeps all of
+            it, not just its usual platform fee. */}
+        <div className="rounded-2xl border border-border bg-card p-6">
+          <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Wallet className="size-3.5" aria-hidden />
+            Retained from reversed
+          </dt>
+          <dd className="mt-1 text-2xl font-semibold text-foreground">
+            {formatSettlementMoney(summary.retainedFromReversedAmount, summary.currency)}
+          </dd>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Cash already collected on {summary.reversedCount} cancelled booking(s) — never refunded, never paid to the venue.
           </p>
         </div>
       </dl>
