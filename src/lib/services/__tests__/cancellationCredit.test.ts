@@ -128,3 +128,37 @@ describe("cancelBooking — compensation wiring", () => {
     expect(result.credit.eligible).toBe(true);
   });
 });
+
+describe("credit-paid bookings are final", () => {
+  const CREDIT_PAID = { ...PAID, credit_amount_applied: 40000 } as Booking;
+
+  it("refuses to cancel a CONFIRMED booking that used credit", async () => {
+    // Credit is itself a refund instrument. Without this, a customer could
+    // cancel for credit, rebook with it, cancel again — holding a balance
+    // forever while taking and releasing real inventory each cycle.
+    await expect(cancelBooking(client(CREDIT_PAID), "user-1", "booking-1")).rejects.toMatchObject({
+      reason: "credit_booking_not_cancellable",
+    });
+    expect(mockAddCredit).not.toHaveBeenCalled();
+  });
+
+  it("refuses on ANY credit, not only a fully covered booking", async () => {
+    const partial = { ...PAID, credit_amount_applied: 100 } as Booking;
+    await expect(cancelBooking(client(partial), "user-1", "booking-1")).rejects.toMatchObject({
+      reason: "credit_booking_not_cancellable",
+    });
+  });
+
+  it("STILL cancels a PENDING booking that holds credit", async () => {
+    // Load-bearing. lib/actions/checkout.ts cancels a just-created pending
+    // booking when Checkout Session creation fails, and credit is applied
+    // before that point. Refusing here would strand the customer's credit
+    // on a dead booking. Migration 20260810000037 restores it on this path.
+    const pendingWithCredit = { ...PAID, status: "pending", paid_at: null, credit_amount_applied: 40000 } as Booking;
+    const result = await cancelBooking(client(pendingWithCredit), "user-1", "booking-1");
+
+    expect(result.booking.status).toBe("cancelled");
+    // The trigger returns the credit, not this code path.
+    expect(mockAddCredit).not.toHaveBeenCalled();
+  });
+});

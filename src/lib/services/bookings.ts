@@ -43,6 +43,11 @@ export type BookingErrorReason =
   | "unauthorized_cancellation"
   | "already_cancelled"
   | "cancellation_window_passed"
+  /**
+   * A CONFIRMED booking that used AIR/Rally Credits cannot be cancelled —
+   * credit spent on a secured court is final. See cancelBooking().
+   */
+  | "credit_booking_not_cancellable"
   /** A fully credit-covered booking could not be confirmed — see lib/actions/checkout.ts. */
   | "credit_confirmation_failed"
   /**
@@ -291,6 +296,32 @@ export async function cancelBooking(
   }
   if (existing.status === "cancelled") {
     throw new BookingError("already_cancelled", "This booking has already been cancelled.");
+  }
+
+  // Credit spent on a SECURED court is final: a confirmed booking that used
+  // any AIR/Rally Credits cannot be cancelled and nothing is returned.
+  //
+  // Without this, credit is a perpetual motion machine. Credit is itself a
+  // refund instrument, so a customer could cancel a paid booking for credit,
+  // rebook with that credit, cancel again for credit, and hold the balance
+  // forever while repeatedly taking and releasing real inventory.
+  //
+  // CONFIRMED ONLY, and that qualifier is load-bearing. A PENDING booking
+  // must stay cancellable: lib/actions/checkout.ts cancels a just-created
+  // pending booking whenever Checkout Session creation fails, and credit is
+  // applied BEFORE that point. Refusing here would make the cleanup throw
+  // and strand the customer's credit on a dead booking they can never use.
+  // Migration 20260810000037 restores credit on exactly that path, which is
+  // correct — nothing was consumed because the booking never happened.
+  //
+  // Any credit at all, not only fully-covered bookings: one rule is easier
+  // to state to a customer than a threshold, and credit_amount_applied > 0
+  // is the whole test.
+  if (existing.status === "confirmed" && existing.credit_amount_applied > 0) {
+    throw new BookingError(
+      "credit_booking_not_cancellable",
+      "Bookings paid with AIR/Rally Credits can't be cancelled, and the credits aren't returned."
+    );
   }
   if (new Date(existing.start_time).getTime() <= Date.now()) {
     throw new BookingError("cancellation_window_passed", "This booking has already started and can no longer be cancelled.");

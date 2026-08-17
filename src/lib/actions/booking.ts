@@ -129,6 +129,23 @@ export async function previewCancellationAction(values: CancelBookingValues): Pr
       };
     }
 
+    // Credit spent on a secured court is final — cancelBooking() refuses
+    // this outright. Said here too so the dialog states it BEFORE the
+    // customer commits, rather than letting them click cancel and meet an
+    // error. Mirrors the same confirmed-only condition; a pending booking
+    // stays cancellable and its credit is restored by migration
+    // 20260810000037.
+    if (booking.status === "confirmed" && booking.credit_amount_applied > 0) {
+      return {
+        success: true,
+        data: {
+          amount: 0,
+          eligible: false,
+          reason: "Bookings paid with AIR/Rally Credits can't be cancelled, and the credits aren't returned.",
+        },
+      };
+    }
+
     return {
       success: true,
       data: resolveCancellationCredit({
