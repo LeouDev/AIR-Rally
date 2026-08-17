@@ -41,16 +41,28 @@ export const PLATFORM_FEE_PERCENT = 0.05;
  * PayMongo's QR Ph merchant discount rate, VAT-inclusive — the cost of
  * collecting the money, passed on to the customer rather than absorbed.
  *
- * 1.34% is PayMongo's published QR Ph rate (paymongo.com/pricing), and
- * their pricing page states all rates EXCLUDE VAT, so the real cost is
- * 1.34% x 1.12 = 1.5008%.
+ * 1.50%, MEASURED — not derived. PayMongo publishes 1.34% for QR Ph and
+ * states rates exclude VAT, which computes to 1.5008%; but an observed
+ * live checkout with pass_on_fees on charged ₱406.09 against a ₱400
+ * court, and 400 / (1 - 0.015) = 406.0914 -> ₱406.09 reproduces that
+ * exactly, while 1.5008% gives ₱406.10. The published figure and the
+ * charged figure disagree by a centavo, and this constant follows what
+ * PayMongo actually charges.
  *
- * QR Ph is the only payment method currently enabled. If another method
- * is ever turned on this constant stops being correct for it — GCash is
- * 2.23%, cards are 3.125% + a fixed peso amount — and this must become
- * per-method rather than a single number.
+ * That centavo is not cosmetic. confirm_paymongo_booking_payment()
+ * compares the amount paid against what we stored; predicting ₱6.10 when
+ * PayMongo charges ₱6.09 means zero rows match and the booking never
+ * confirms. This constant and PayMongo's own arithmetic must agree
+ * exactly, which is the known fragility of this approach: if PayMongo
+ * ever changes rate or rounding, confirmations stop and nothing in this
+ * repo will have changed to explain why. Re-verify against a real
+ * checkout if confirmations start failing.
+ *
+ * QR Ph is the only method enabled. GCash (2.23%) and cards (3.125% plus
+ * a fixed peso amount) would each need their own rate — enabling one
+ * without making this per-method will under-collect on it.
  */
-export const PROCESSING_FEE_PERCENT = 0.015008;
+export const PROCESSING_FEE_PERCENT = 0.015;
 
 /**
  * V1 rescheduling business rule (locked): a confirmed booking may only be

@@ -2,11 +2,13 @@ import { calculateBookingCharge } from "../bookingFee";
 import { PROCESSING_FEE_PERCENT } from "@/lib/booking-config";
 
 describe("calculateBookingCharge", () => {
-  it("grosses up a ₱400 court to ₱406.10, the worked example from the brief", () => {
+  it("reproduces PayMongo's own charge exactly: a ₱400 court becomes ₱406.09", () => {
+    // Observed on a real pass_on_fees checkout — PayMongo billed ₱406.09.
+    // This assertion is the contract: if it drifts, confirmations break.
     expect(calculateBookingCharge(40000)).toEqual({
       courtAmount: 40000,
-      processingFeeAmount: 610,
-      totalChargedAmount: 40610,
+      processingFeeAmount: 609,
+      totalChargedAmount: 40609,
     });
   });
 
@@ -17,7 +19,10 @@ describe("calculateBookingCharge", () => {
       const { totalChargedAmount } = calculateBookingCharge(court);
       const paymongoTakes = totalChargedAmount * PROCESSING_FEE_PERCENT;
       const netToPlatform = totalChargedAmount - paymongoTakes;
-      expect(netToPlatform).toBeGreaterThanOrEqual(court);
+      // Within a centavo: matching PayMongo's round-to-nearest means the
+      // platform absorbs up to ₱0.01 on some prices. Deliberate — see
+      // bookingFee.ts. Rounding up instead would break confirmation.
+      expect(netToPlatform).toBeGreaterThanOrEqual(court - 1);
     }
   });
 
@@ -55,10 +60,10 @@ describe("calculateBookingCharge", () => {
   it("matches the live court prices on the venue used for UAT", () => {
     // ₱80 / ₱90 / ₱100 / ₱120 / ₱150 / ₱200 — the six real courts.
     expect(calculateBookingCharge(8000).totalChargedAmount).toBe(8122);
-    expect(calculateBookingCharge(9000).totalChargedAmount).toBe(9138);
-    expect(calculateBookingCharge(10000).totalChargedAmount).toBe(10153);
+    expect(calculateBookingCharge(9000).totalChargedAmount).toBe(9137);
+    expect(calculateBookingCharge(10000).totalChargedAmount).toBe(10152);
     expect(calculateBookingCharge(12000).totalChargedAmount).toBe(12183);
-    expect(calculateBookingCharge(15000).totalChargedAmount).toBe(15229);
+    expect(calculateBookingCharge(15000).totalChargedAmount).toBe(15228);
     expect(calculateBookingCharge(20000).totalChargedAmount).toBe(20305);
   });
 });

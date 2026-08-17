@@ -35,9 +35,14 @@ export type BookingCharge = {
  * exactly. Deriving the fee independently and adding it would let a
  * rounding step land in both terms and produce a total a centavo off.
  *
- * Rounds the total UP (ceil): a fractional centavo that rounded down
- * would leave AIR/Rally paying the difference, and a centavo is not worth
- * a discrepancy in a payment reconciliation.
+ * Rounds to NEAREST, not up — deliberately, and at a small cost.
+ * Rounding up would occasionally leave AIR/Rally a centavo better off,
+ * but PayMongo rounds to nearest, and this number's job is to predict
+ * theirs exactly so the amount-integrity check matches. Where the two
+ * disagree the booking does not confirm at all, which is worth far more
+ * than a centavo. The consequence is that on some prices AIR/Rally
+ * absorbs up to one centavo of the fee; that is the accepted trade for
+ * confirmations that work.
  */
 export function calculateBookingCharge(courtAmountMinorUnits: number): BookingCharge {
   if (!Number.isInteger(courtAmountMinorUnits) || courtAmountMinorUnits < 0) {
@@ -50,7 +55,7 @@ export function calculateBookingCharge(courtAmountMinorUnits: number): BookingCh
     return { courtAmount: 0, processingFeeAmount: 0, totalChargedAmount: 0 };
   }
 
-  const totalChargedAmount = Math.ceil(courtAmountMinorUnits / (1 - PROCESSING_FEE_PERCENT));
+  const totalChargedAmount = Math.round(courtAmountMinorUnits / (1 - PROCESSING_FEE_PERCENT));
   const processingFeeAmount = totalChargedAmount - courtAmountMinorUnits;
 
   return { courtAmount: courtAmountMinorUnits, processingFeeAmount, totalChargedAmount };
