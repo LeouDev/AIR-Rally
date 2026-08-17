@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signIn } from "@/lib/actions/auth";
 import { loginSchema, type LoginValues } from "@/lib/validations/auth";
+import { OAuthButtons } from "@/components/auth/OAuthButtons";
 
 function LoginForm() {
   const router = useRouter();
@@ -47,7 +48,11 @@ function LoginForm() {
         </p>
       )}
 
-      <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)} noValidate>
+      <div className="mt-6">
+        <OAuthButtons redirectTo={redirectTo} />
+      </div>
+
+      <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)} noValidate>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="email">Email</Label>
           <Input

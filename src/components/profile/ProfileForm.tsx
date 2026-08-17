@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { updateProfileAction } from "@/lib/actions/profile";
 import { updateProfileSchema, type UpdateProfileValues } from "@/lib/validations/profile";
+import { ChangePasswordForm } from "@/components/profile/ChangePasswordForm";
+import { EmailNotificationToggle } from "@/components/profile/EmailNotificationToggle";
 import type { Profile } from "@/lib/supabase/types";
 
 type ProfileFormProps = {
@@ -90,6 +92,21 @@ export function ProfileForm({ profile, email }: ProfileFormProps) {
           {isSubmitting ? "Saving…" : "Save Changes"}
         </Button>
       </form>
+
+      <div className="border-t border-border pt-8">
+        <h2 className="text-lg font-semibold text-foreground">Notifications</h2>
+        <div className="mt-4">
+          <EmailNotificationToggle initialEnabled={profile.email_notifications_enabled} />
+        </div>
+      </div>
+
+      <div className="border-t border-border pt-8">
+        <h2 className="text-lg font-semibold text-foreground">Password</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Change the password for this account.</p>
+        <div className="mt-4">
+          <ChangePasswordForm />
+        </div>
+      </div>
     </div>
   );
 }

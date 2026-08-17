@@ -41,6 +41,8 @@ export type Profile = {
   owner_status: OwnerStatus;
   /** Stable per-user code embedded in their shareable referral link — generated unconditionally on signup, never null. */
   referral_code: string;
+  /** Whether this user gets the email copy of their notifications. Never affects the in-app notification itself. */
+  email_notifications_enabled: boolean;
   created_at: string;
   updated_at: string;
 };

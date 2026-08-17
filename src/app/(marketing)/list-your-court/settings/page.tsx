@@ -8,7 +8,10 @@ import {
   hasBankDetails,
   maskAccountNumber,
 } from "@/lib/services/venuePaymentAccounts";
+import { getProfile } from "@/lib/services/profiles";
 import { BankDetailsForm } from "@/components/owner/BankDetailsForm";
+import { ChangePasswordForm } from "@/components/profile/ChangePasswordForm";
+import { EmailNotificationToggle } from "@/components/profile/EmailNotificationToggle";
 import type { VenuePaymentAccountStatus } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
@@ -34,10 +37,10 @@ const STATUS_TONES: Record<VenuePaymentAccountStatus, string> = {
 };
 
 export default async function OwnerSettingsPage() {
-  await requireSignedIn("/list-your-court/settings");
+  const user = await requireSignedIn("/list-your-court/settings");
   const supabase = await createClient();
   // RLS scopes these to venues this caller owns.
-  const accounts = await listOwnerPaymentAccounts(supabase);
+  const [accounts, profile] = await Promise.all([listOwnerPaymentAccounts(supabase), getProfile(supabase, user.id)]);
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
@@ -117,6 +120,22 @@ export default async function OwnerSettingsPage() {
           Payouts are arranged manually for now and sent over PESONet on banking days. Adding your details here is what puts your
           venue in a payout run.
         </p>
+      </section>
+
+      <section className="flex flex-col gap-4 border-t border-border pt-8">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Notifications</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Same account as your player profile — this covers both.</p>
+        </div>
+        <EmailNotificationToggle initialEnabled={profile?.email_notifications_enabled ?? true} />
+      </section>
+
+      <section className="flex flex-col gap-4 border-t border-border pt-8">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Password</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Change the password for this account.</p>
+        </div>
+        <ChangePasswordForm />
       </section>
     </div>
   );
