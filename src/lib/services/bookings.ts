@@ -448,6 +448,178 @@ export async function setBookingProcessingFee(bookingId: string, amount: number)
   return data ?? false;
 }
 
+/**
+ * Why a verified-paid PayMongo payment did not confirm its booking.
+ *
+ * `amount_mismatch` is the only one that is an alarm. The others are
+ * ordinary and expected, and conflating them is what made this failure
+ * invisible: the webhook logged a single "confirmNoOp" line for all of
+ * them, carrying no amounts, so a real mismatch was indistinguishable
+ * from a duplicate webhook delivery.
+ */
+export type PaymentConfirmationDiagnosis =
+  | { kind: "already_confirmed"; detail: string }
+  | { kind: "reschedule_difference"; detail: string }
+  | { kind: "amount_mismatch"; expected: number; actual: number; delta: number; detail: string }
+  | { kind: "currency_mismatch"; detail: string }
+  | { kind: "session_mismatch"; detail: string }
+  | { kind: "booking_not_found"; detail: string }
+  | { kind: "unknown"; detail: string };
+
+/**
+ * Works out why confirm_paymongo_booking_payment() returned false for a
+ * payment PayMongo reports as PAID. SERVER ONLY.
+ *
+ * WHY THIS EXISTS
+ *
+ * The amount check is strict equality by design — it is what stops a
+ * browser session confirming a booking it never paid for (see migration
+ * 20260810000047, verified exploitable on staging). It must never be
+ * loosened into a tolerance band.
+ *
+ * But a strict check that fails SILENTLY is its own outage. Until now,
+ * "PayMongo says paid" plus "our check refused" produced a still-pending
+ * booking and, at best, an ambiguous log line. The customer sees a
+ * pending screen having actually paid, and nobody finds out until someone
+ * thinks to look.
+ *
+ * The concrete trigger is PROCESSING_FEE_PERCENT. It is 0.015, measured
+ * against test-mode PayMongo fees, while PayMongo's published live QR Ph
+ * rate is 1.34% + 12% VAT = 1.5008%. If live billing follows the
+ * published rate, a ₱400 court is charged 40610 against a stored
+ * expectation of 40609 and every booking strands. That is triggered by
+ * account activation rather than by any deploy, so it will not announce
+ * itself.
+ *
+ * This does not change the outcome — the booking still does not confirm,
+ * correctly, because we cannot verify what was paid. It changes how fast
+ * anyone finds out, and it reports the ACTUAL amount, which is the number
+ * needed to recalibrate.
+ *
+ * Only ever called on the failure path, so its extra reads cost nothing
+ * in the normal case.
+ */
+export async function diagnoseUnconfirmedPayment(
+  supabase: Client,
+  params: { bookingId: string; paidAmount: number; paidCurrency: string; checkoutSessionId: string }
+): Promise<PaymentConfirmationDiagnosis> {
+  const booking = await getBookingById(supabase, params.bookingId);
+  if (!booking) {
+    return { kind: "booking_not_found", detail: `booking ${params.bookingId} does not exist` };
+  }
+
+  // A redelivered webhook for a booking already confirmed. Expected, and
+  // the single most common reason for a false return.
+  if (booking.status === "confirmed") {
+    return { kind: "already_confirmed", detail: `booking ${booking.confirmation_code} was already confirmed` };
+  }
+
+  // A price-increase reschedule's difference checkout charges less than the
+  // replacement booking's own price_amount, so this RPC ALWAYS no-ops for
+  // it by design — maybeCompleteReschedule() is its real confirmation path.
+  // Queried directly rather than through lib/services/reschedules.ts, which
+  // imports this module.
+  const { data: reschedule } = await supabase
+    .from("booking_reschedules")
+    .select("id, price_difference")
+    .eq("new_booking_id", params.bookingId)
+    .eq("status", "pending_payment")
+    .maybeSingle();
+  if (reschedule) {
+    return {
+      kind: "reschedule_difference",
+      detail: `booking ${booking.confirmation_code} is a reschedule replacement; difference ${reschedule.price_difference} confirms via maybeCompleteReschedule()`,
+    };
+  }
+
+  if (booking.paymongo_checkout_session_id !== params.checkoutSessionId) {
+    return {
+      kind: "session_mismatch",
+      detail: `booking ${booking.confirmation_code} carries session ${booking.paymongo_checkout_session_id ?? "none"}, payment arrived for ${params.checkoutSessionId}`,
+    };
+  }
+
+  if (booking.currency.toUpperCase() !== params.paidCurrency.toUpperCase()) {
+    return {
+      kind: "currency_mismatch",
+      detail: `booking ${booking.confirmation_code} is ${booking.currency}, payment was ${params.paidCurrency}`,
+    };
+  }
+
+  // The expression the RPC checks against — see migration 20260810000054.
+  const expected = booking.price_amount - booking.credit_amount_applied + booking.processing_fee_amount;
+  if (expected !== params.paidAmount) {
+    return {
+      kind: "amount_mismatch",
+      expected,
+      actual: params.paidAmount,
+      delta: params.paidAmount - expected,
+      detail:
+        `booking ${booking.confirmation_code}: PayMongo charged ${params.paidAmount} but we expected ${expected} ` +
+        `(price ${booking.price_amount} - credit ${booking.credit_amount_applied} + fee ${booking.processing_fee_amount}); ` +
+        `delta ${params.paidAmount - expected}. The customer HAS PAID and this booking will NOT confirm. ` +
+        `If the delta is small and consistent, PROCESSING_FEE_PERCENT no longer matches PayMongo's rate — set ` +
+        `PAYMONGO_PASS_ON_FEES_ENABLED=false and redeploy, then recalibrate. Do NOT loosen the amount check.`,
+    };
+  }
+
+  return {
+    kind: "unknown",
+    detail: `booking ${booking.confirmation_code} did not confirm and no known cause matched (status ${booking.status})`,
+  };
+}
+
+/**
+ * Records a diagnosis at the right volume: a real mismatch means a
+ * customer has paid for a booking that will not confirm, and is logged as
+ * such. Everything else is ordinary and logged quietly, or not at all.
+ *
+ * Returns whether it was the alarm case, so callers can surface it.
+ */
+/**
+ * Diagnose and report in one call, and NEVER throw. SERVER ONLY.
+ *
+ * This is the only form callers should use. Diagnosis runs on the failure
+ * path of a payment webhook, and a diagnostic that can throw is worse than
+ * no diagnostic at all: in the webhook it turned a 200 into a 500, which
+ * makes PayMongo retry the delivery indefinitely and buries the very log
+ * line this exists to surface. Caught in review by an existing idempotency
+ * test rather than in production.
+ *
+ * Returns true when the caller should treat this as a real problem.
+ */
+export async function reportUnconfirmedPaymentSafely(
+  supabase: Client,
+  source: string,
+  params: { bookingId: string; paidAmount: number; paidCurrency: string; checkoutSessionId: string }
+): Promise<boolean> {
+  try {
+    const diagnosis = await diagnoseUnconfirmedPayment(supabase, params);
+    return reportUnconfirmedPayment(source, diagnosis);
+  } catch (error) {
+    // Even the fallback must not throw. Log and carry on — the booking's
+    // actual state is unaffected by whether we managed to explain it.
+    logServerError(`${source}.diagnosisFailed`, error);
+    return false;
+  }
+}
+
+export function reportUnconfirmedPayment(source: string, diagnosis: PaymentConfirmationDiagnosis): boolean {
+  switch (diagnosis.kind) {
+    case "already_confirmed":
+    case "reschedule_difference":
+      // Expected, and both happen routinely. Logging them as failures is
+      // what buried the real case.
+      return false;
+    case "amount_mismatch":
+      logServerError(`${source}.PAID_BUT_UNCONFIRMED.amountMismatch`, new Error(diagnosis.detail));
+      return true;
+    default:
+      logServerError(`${source}.PAID_BUT_UNCONFIRMED.${diagnosis.kind}`, new Error(diagnosis.detail));
+      return true;
+  }
+}
+
 /** Twin of confirmBookingPayment() — calls confirm_paymongo_booking_payment() instead. */
 export async function confirmPaymongoBookingPayment(
   supabase: Client,
@@ -494,13 +666,27 @@ export async function reconcilePaymongoPendingBooking(supabase: Client, bookingI
     return booking;
   }
 
-  await confirmPaymongoBookingPayment(supabase, {
+  const confirmed = await confirmPaymongoBookingPayment(supabase, {
     bookingId,
     paymongoCheckoutSessionId: booking.paymongo_checkout_session_id,
     paymongoPaymentIntentId: paymentIntent.id,
     expectedAmount: paidPayment.attributes.amount,
     expectedCurrency: paidPayment.attributes.currency.toUpperCase(),
   });
+
+  // PayMongo says this was paid and our check refused it. That is either
+  // ordinary (a reschedule difference, or already confirmed) or an alarm —
+  // a customer who has paid for a booking that will not confirm. The
+  // result used to be discarded entirely here, so the alarm case was
+  // completely silent on this path.
+  if (!confirmed) {
+    await reportUnconfirmedPaymentSafely(supabase, "bookings.reconcilePaymongo", {
+      bookingId,
+      paidAmount: paidPayment.attributes.amount,
+      paidCurrency: paidPayment.attributes.currency,
+      checkoutSessionId: booking.paymongo_checkout_session_id,
+    });
+  }
 
   // Purely informational, best-effort — only written when PayMongo's
   // response actually included these fields; never required for

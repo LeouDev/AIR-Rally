@@ -3,7 +3,7 @@
  */
 import { POST } from "../route";
 import { constructPayMongoWebhookEvent, PayMongoError } from "../../../../../lib/services/paymongo";
-import { confirmPaymongoBookingPayment } from "../../../../../lib/services/bookings";
+import { confirmPaymongoBookingPayment, reportUnconfirmedPaymentSafely } from "../../../../../lib/services/bookings";
 import { syncVenuePaymongoActivation } from "../../../../../lib/services/venues";
 import { maybeCompleteReschedule } from "../../../../../lib/services/reschedules";
 import { createClient } from "../../../../../lib/supabase/server";
@@ -24,7 +24,10 @@ jest.mock("../../../../../lib/services/paymongo", () => {
     PayMongoError,
   };
 });
-jest.mock("../../../../../lib/services/bookings", () => ({ confirmPaymongoBookingPayment: jest.fn() }));
+jest.mock("../../../../../lib/services/bookings", () => ({
+  confirmPaymongoBookingPayment: jest.fn(),
+  reportUnconfirmedPaymentSafely: jest.fn(),
+}));
 jest.mock("../../../../../lib/services/venues", () => ({ syncVenuePaymongoActivation: jest.fn() }));
 jest.mock("../../../../../lib/services/reschedules", () => ({ maybeCompleteReschedule: jest.fn() }));
 jest.mock("../../../../../lib/supabase/server", () => ({ createClient: jest.fn() }));
@@ -36,6 +39,7 @@ jest.mock("../../../../../lib/supabase/serviceRole", () => ({ createServiceRoleC
 
 const mockConstructEvent = constructPayMongoWebhookEvent as jest.MockedFunction<typeof constructPayMongoWebhookEvent>;
 const mockConfirmPayment = confirmPaymongoBookingPayment as jest.MockedFunction<typeof confirmPaymongoBookingPayment>;
+const mockReportUnconfirmed = reportUnconfirmedPaymentSafely as jest.MockedFunction<typeof reportUnconfirmedPaymentSafely>;
 const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
 const mockCreateServiceRoleClient = createServiceRoleClient as jest.MockedFunction<typeof createServiceRoleClient>;
 const mockSyncActivation = syncVenuePaymongoActivation as jest.MockedFunction<typeof syncVenuePaymongoActivation>;
@@ -80,6 +84,8 @@ beforeEach(() => {
   mockCreateServiceRoleClient.mockReset();
   mockCreateServiceRoleClient.mockReturnValue({} as never);
   mockSyncActivation.mockReset();
+  mockReportUnconfirmed.mockReset();
+  mockReportUnconfirmed.mockResolvedValue(true);
   mockMaybeCompleteReschedule.mockReset();
   mockMaybeCompleteReschedule.mockResolvedValue(false);
 });
@@ -144,6 +150,51 @@ describe("POST /api/paymongo/webhook", () => {
     // replacement's own price_amount by design, so this always fires
     // regardless of `confirmed`.
     expect(mockMaybeCompleteReschedule).toHaveBeenCalledWith(expect.anything(), "booking-1", 50000, "PHP", "cs_test_123");
+  });
+
+  it("diagnoses a paid-but-unconfirmed payment, and only after the reschedule path has also declined", async () => {
+    mockConstructEvent.mockReturnValue(PAID_EVENT);
+    // THE POINT: a price-increase reschedule ALWAYS no-ops in
+    // confirmPaymongoBookingPayment() by design. Diagnosing immediately
+    // after it would alarm on every one of them, which is what made the
+    // old confirmNoOp log useless.
+    mockConfirmPayment.mockResolvedValue(false);
+    mockMaybeCompleteReschedule.mockResolvedValue(true);
+
+    const response = await POST(fakeRequest("{}"));
+
+    expect(response.status).toBe(200);
+    // The reschedule path confirmed it, so there is nothing wrong.
+    expect(mockReportUnconfirmed).not.toHaveBeenCalled();
+  });
+
+  it("reports when BOTH confirmation paths decline a payment PayMongo says is paid", async () => {
+    mockConstructEvent.mockReturnValue(PAID_EVENT);
+    mockConfirmPayment.mockResolvedValue(false);
+    mockMaybeCompleteReschedule.mockResolvedValue(false);
+
+    const response = await POST(fakeRequest("{}"));
+
+    expect(response.status).toBe(200);
+    expect(mockReportUnconfirmed).toHaveBeenCalledWith(
+      expect.anything(),
+      "paymongo.webhook",
+      expect.objectContaining({ bookingId: "booking-1" })
+    );
+  });
+
+  it("still returns 200 when the diagnosis itself fails", async () => {
+    mockConstructEvent.mockReturnValue(PAID_EVENT);
+    // A diagnostic must never change the outcome. It once turned this into
+    // a 500, which would make PayMongo retry the delivery indefinitely and
+    // bury the very log line it exists to surface.
+    mockConfirmPayment.mockResolvedValue(false);
+    mockMaybeCompleteReschedule.mockResolvedValue(false);
+    mockReportUnconfirmed.mockRejectedValue(new Error("diagnosis blew up"));
+
+    const response = await POST(fakeRequest("{}"));
+
+    expect(response.status).toBe(200);
   });
 
   it("is idempotent: a duplicate delivery of the same event still returns 200 even though confirmPaymongoBookingPayment no-ops", async () => {

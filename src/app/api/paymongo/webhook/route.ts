@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { constructPayMongoWebhookEvent, PayMongoError, type PayMongoMerchantActivationEventData } from "@/lib/services/paymongo";
-import { confirmPaymongoBookingPayment } from "@/lib/services/bookings";
+import { confirmPaymongoBookingPayment, reportUnconfirmedPaymentSafely } from "@/lib/services/bookings";
 import { syncVenuePaymongoActivation } from "@/lib/services/venues";
 import { maybeCompleteReschedule } from "@/lib/services/reschedules";
 import { logServerError } from "@/lib/errors";
@@ -82,17 +82,6 @@ export async function POST(request: Request): Promise<Response> {
       expectedCurrency: paidPayment.attributes.currency.toUpperCase(),
     });
 
-    if (!confirmed) {
-      // Not an error — either already confirmed (duplicate delivery,
-      // expected and fine) or a genuine session/amount mismatch (worth a
-      // server-side log to investigate, never a reason to make PayMongo
-      // retry indefinitely).
-      logServerError(
-        "paymongo.webhook.confirmNoOp",
-        new Error(`booking ${bookingId} / session ${checkoutSession.id} did not transition`)
-      );
-    }
-
     // Additive: a reschedule's price-increase difference checkout charges
     // less than the replacement booking's own price_amount, so
     // confirmPaymongoBookingPayment() above always no-ops for it (by
@@ -107,6 +96,35 @@ export async function POST(request: Request): Promise<Response> {
       checkoutSession.id
     );
 
+    // Diagnosed only after BOTH confirmation paths have had their turn.
+    // Doing it immediately after confirmPaymongoBookingPayment() would
+    // fire on every price-increase reschedule, which no-ops there by
+    // design — that noise is what made the old confirmNoOp line useless.
+    //
+    // A mismatch surviving both paths means PayMongo took money for a
+    // booking that will not confirm. It is logged loudly, with both
+    // amounts, because the customer is already on a pending screen.
+    if (!confirmed && !rescheduleCompleted) {
+      // Belt and braces: reportUnconfirmedPaymentSafely() already swallows
+      // its own failures, but this route must not depend on another
+      // module's promise never rejecting. An exception escaping here would
+      // reach the outer catch and return 500, which makes PayMongo retry
+      // the delivery indefinitely and buries the log line this exists to
+      // surface. A diagnostic must never change the response.
+      try {
+        await reportUnconfirmedPaymentSafely(supabase, "paymongo.webhook", {
+          bookingId,
+          paidAmount: paidPayment.attributes.amount,
+          paidCurrency: paidPayment.attributes.currency,
+          checkoutSessionId: checkoutSession.id,
+        });
+      } catch (diagnosticError) {
+        logServerError("paymongo.webhook.diagnosisFailed", diagnosticError);
+      }
+    }
+
+    // Still a 200 regardless: PayMongo retrying cannot fix a mismatch, and
+    // an endless retry storm would bury the log line above.
     return NextResponse.json({ received: true, confirmed, rescheduleCompleted });
   } catch (error) {
     if (error instanceof PayMongoError) {
