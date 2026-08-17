@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -10,7 +11,7 @@ import type { Profile } from "@/lib/supabase/types";
  * isn't configured at all, so pages that don't otherwise touch Supabase
  * keep working with no env vars set (see .env.example).
  */
-export async function getCurrentUser(): Promise<User | null> {
+export const getCurrentUser = cache(async function getCurrentUser(): Promise<User | null> {
   try {
     const supabase = await createClient();
     const {
@@ -20,9 +21,12 @@ export async function getCurrentUser(): Promise<User | null> {
   } catch {
     return null;
   }
-}
+});
 
-export async function getCurrentUserWithProfile(): Promise<{ user: User; profile: Profile | null } | null> {
+export const getCurrentUserWithProfile = cache(async function getCurrentUserWithProfile(): Promise<{
+  user: User;
+  profile: Profile | null;
+} | null> {
   try {
     const supabase = await createClient();
     const {
@@ -34,7 +38,7 @@ export async function getCurrentUserWithProfile(): Promise<{ user: User; profile
   } catch {
     return null;
   }
-}
+});
 
 /**
  * The repeated "getCurrentUser() then redirect to /login?redirect=... if

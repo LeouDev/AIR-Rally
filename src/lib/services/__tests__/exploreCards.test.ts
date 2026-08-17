@@ -43,12 +43,18 @@ const venueRow: VenueMarketplaceRow = {
   cover_image_path: "venue-1/cover.jpg",
 };
 
+// court_images comes back NESTED now — toVenueCardData embeds it in the
+// courts query rather than issuing a second round-trip for it.
 const courts = [
-  { id: "court-1", name: "Court A", venue_id: "venue-1", surface_type: "Concrete" },
-  { id: "court-2", name: "Court B", venue_id: "venue-1", surface_type: null },
+  {
+    id: "court-1",
+    name: "Court A",
+    venue_id: "venue-1",
+    surface_type: "Concrete",
+    court_images: [{ storage_path: "venue-1/courts/court-1/a.jpg", sort_order: 0 }],
+  },
+  { id: "court-2", name: "Court B", venue_id: "venue-1", surface_type: null, court_images: [] },
 ];
-
-const courtImages = [{ court_id: "court-1", storage_path: "venue-1/courts/court-1/a.jpg", sort_order: 0 }];
 
 const operatingHoursRows = [
   { id: "h-0", venue_id: "venue-1", day_of_week: 0, start_time: "00:00", end_time: "23:59", created_at: "", updated_at: "" },
@@ -61,33 +67,52 @@ describe("toVenueCardData", () => {
     expect(result).toEqual([]);
   });
 
-  it("batches courts/court_images/operating_hours across the whole page, not per venue", async () => {
+  it("hits only two tables — court images ride along with the courts query, not a third round-trip", async () => {
     const supabase = buildSupabase({
       courts: { data: courts, error: null },
-      court_images: { data: courtImages, error: null },
       venue_operating_hours: { data: operatingHoursRows, error: null },
     });
     const fromSpy = supabase.from as unknown as jest.Mock;
 
     await toVenueCardData(supabase, [venueRow]);
 
+    // Was ["courts", "court_images", "venue_operating_hours"] issued in
+    // sequence. With the database a continent away each hop was a full
+    // round-trip, so images now come back embedded and hours runs in
+    // parallel. Asserting the table list is what keeps a future refactor
+    // from quietly reintroducing the third query.
     const calledTables = fromSpy.mock.calls.map(([table]: [string]) => table);
-    expect(calledTables).toEqual(["courts", "court_images", "venue_operating_hours"]);
+    expect(calledTables).toEqual(["courts", "venue_operating_hours"]);
+    expect(calledTables).not.toContain("court_images");
 
-    const courtsCallIndex = calledTables.indexOf("courts");
-    const courtsBuilder = fromSpy.mock.results[courtsCallIndex].value as { eq: jest.Mock; in: jest.Mock };
+    const courtsBuilder = fromSpy.mock.results[calledTables.indexOf("courts")].value as { eq: jest.Mock; in: jest.Mock };
     expect(courtsBuilder.eq).toHaveBeenCalledWith("status", "active");
     expect(courtsBuilder.in).toHaveBeenCalledWith("venue_id", ["venue-1"]);
+  });
 
-    const imagesCallIndex = calledTables.indexOf("court_images");
-    const imagesBuilder = fromSpy.mock.results[imagesCallIndex].value as { in: jest.Mock };
-    expect(imagesBuilder.in).toHaveBeenCalledWith("court_id", ["court-1", "court-2"]);
+  it("picks the lowest sort_order image, since an embed can't be ordered per parent row", async () => {
+    const outOfOrder = [
+      {
+        ...courts[0],
+        court_images: [
+          { storage_path: "venue-1/courts/court-1/z.jpg", sort_order: 5 },
+          { storage_path: "venue-1/courts/court-1/a.jpg", sort_order: 0 },
+        ],
+      },
+    ];
+    const supabase = buildSupabase({
+      courts: { data: outOfOrder, error: null },
+      venue_operating_hours: { data: operatingHoursRows, error: null },
+    });
+
+    const [card] = await toVenueCardData(supabase, [venueRow]);
+    expect(card.courtThumbnails?.[0]?.imageUrl).toBe("https://cdn.test/venue-1/courts/court-1/a.jpg");
   });
 
   it("maps a venue row into a full card: count, cover photo, per-court thumbnails (with a null fallback), and an open-status object", async () => {
     const supabase = buildSupabase({
       courts: { data: courts, error: null },
-      court_images: { data: courtImages, error: null },
+
       venue_operating_hours: { data: operatingHoursRows, error: null },
     });
 
@@ -114,7 +139,7 @@ describe("toVenueCardData", () => {
   it("never puts owner-only data (customer names, booking ids, block reasons) on a card", async () => {
     const supabase = buildSupabase({
       courts: { data: courts, error: null },
-      court_images: { data: courtImages, error: null },
+
       venue_operating_hours: { data: operatingHoursRows, error: null },
     });
 

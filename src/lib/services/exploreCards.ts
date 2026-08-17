@@ -25,41 +25,56 @@ export async function toVenueCardData(supabase: Client, rows: VenueMarketplaceRo
 
   const venueIds = rows.map((r) => r.id);
 
-  const { data: courts, error: courtsError } = await supabase
-    .from("courts")
-    .select("id, name, venue_id, surface_type")
-    .eq("status", "active")
-    .in("venue_id", venueIds);
-  if (courtsError) throw courtsError;
+  // ONE round-trip for courts AND their images (court_images has a real FK
+  // to courts, so PostgREST embeds it), issued in parallel with the hours
+  // query, which only needs venueIds.
+  //
+  // This used to be three sequential queries: courts, then images keyed on
+  // the returned court ids, then hours. With the database in Seoul and the
+  // functions elsewhere, each hop cost a full round-trip — about 600ms on
+  // an Explore page load for work that has no ordering requirement.
+  const [courtsResult, hoursResult] = await Promise.all([
+    supabase
+      .from("courts")
+      .select("id, name, venue_id, surface_type, court_images(storage_path, sort_order)")
+      .eq("status", "active")
+      .in("venue_id", venueIds),
+    supabase
+      .from("venue_operating_hours")
+      .select("id, venue_id, day_of_week, start_time, end_time, created_at, updated_at")
+      .in("venue_id", venueIds),
+  ]);
+
+  if (courtsResult.error) throw courtsResult.error;
+  if (hoursResult.error) throw hoursResult.error;
+
+  type CourtWithImages = CourtRow & { court_images?: { storage_path: string; sort_order: number | null }[] | null };
+  // Cast through `unknown` because supabase-js resolves embeds from the
+  // generated `Relationships` metadata, and this project's hand-written
+  // Database type declares `Relationships: []` for every table (see the
+  // TableDef helper in supabase/types.ts). PostgREST resolves the embed
+  // from the real foreign key regardless — verified against staging, which
+  // returns court_images nested exactly as typed here.
+  const courts = (courtsResult.data ?? []) as unknown as CourtWithImages[];
+  const operatingHours = hoursResult.data;
 
   const courtsByVenue = new Map<string, CourtRow[]>();
-  for (const court of courts ?? []) {
+  const firstImagePathByCourtId = new Map<string, string>();
+  for (const court of courts) {
     const list = courtsByVenue.get(court.venue_id) ?? [];
     list.push(court);
     courtsByVenue.set(court.venue_id, list);
-  }
 
-  const courtIds = (courts ?? []).map((c) => c.id);
-  const firstImagePathByCourtId = new Map<string, string>();
-  if (courtIds.length > 0) {
-    const { data: courtImages, error: imagesError } = await supabase
-      .from("court_images")
-      .select("court_id, storage_path, sort_order")
-      .in("court_id", courtIds)
-      .order("sort_order", { ascending: true });
-    if (imagesError) throw imagesError;
-    for (const image of courtImages ?? []) {
-      if (image.court_id && !firstImagePathByCourtId.has(image.court_id)) {
-        firstImagePathByCourtId.set(image.court_id, image.storage_path);
-      }
+    // The embed can't be ordered per-row, so pick the lowest sort_order
+    // here rather than relying on the query's ordering.
+    const images = court.court_images ?? [];
+    if (images.length > 0) {
+      const first = images.reduce((best, img) =>
+        (img.sort_order ?? Number.MAX_SAFE_INTEGER) < (best.sort_order ?? Number.MAX_SAFE_INTEGER) ? img : best
+      );
+      firstImagePathByCourtId.set(court.id, first.storage_path);
     }
   }
-
-  const { data: operatingHours, error: hoursError } = await supabase
-    .from("venue_operating_hours")
-    .select("id, venue_id, day_of_week, start_time, end_time, created_at, updated_at")
-    .in("venue_id", venueIds);
-  if (hoursError) throw hoursError;
 
   const hoursByVenue = new Map<string, OperatingHoursRow[]>();
   for (const row of operatingHours ?? []) {
