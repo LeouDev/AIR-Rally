@@ -146,6 +146,18 @@ export default async function BookingsPage() {
             })()}
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
+            {/* A pending booking here means the payment hasn't been
+                confirmed back to us yet — normal for a few seconds with
+                e-wallets, and the only way out if a webhook is ever
+                missed. The confirmation page re-checks the payment
+                against PayMongo directly on load, so this link is the
+                self-service recovery; without it a paid-but-pending
+                booking was a dead end on this page. */}
+            {booking.status === "pending" && (
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/bookings/${booking.id}/confirmation`}>Check payment status</Link>
+              </Button>
+            )}
             {isReschedulable(booking, (reschedulesByBooking.get(booking.id) ?? []).some((r) => r.status === "completed")) && (
               <RescheduleButton bookingId={booking.id} />
             )}
