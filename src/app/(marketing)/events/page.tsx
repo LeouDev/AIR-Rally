@@ -28,11 +28,21 @@ export default async function EventsPage() {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-10 sm:px-6 lg:px-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Open Play</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Games with open spots. One player books the court — everyone sorts out the split between themselves.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Open Play</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Games with open spots. One player books the court — everyone sorts out the split between themselves.
+          </p>
+        </div>
+        {user && (
+          <Link
+            href="/events/new"
+            className="shrink-0 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+          >
+            Start a game
+          </Link>
+        )}
       </div>
 
       {events.length === 0 ? (

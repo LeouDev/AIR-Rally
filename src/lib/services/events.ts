@@ -182,3 +182,69 @@ export async function listAttendingEventIds(supabase: Client, userId: string, ev
   if (error) throw error;
   return (data ?? []).map((row) => row.event_id);
 }
+
+
+export type HostableBooking = {
+  bookingId: string;
+  courtId: string;
+  courtName: string;
+  venueName: string;
+  startTime: string;
+  endTime: string;
+  priceAmount: number;
+  currency: string;
+  /** The game already opened on this booking, if any. */
+  existingEventId: string | null;
+};
+
+/**
+ * The caller's upcoming bookings, and whether each already has a game on
+ * it. Only these can host an Open Play: the events RLS policy requires a
+ * live booking of the creator's own before an event may claim a court, so
+ * offering anything else would produce a policy rejection at submit time.
+ *
+ * Cancelled and past bookings are excluded — you cannot open a game on a
+ * court you no longer hold, or on one that has already been played.
+ */
+export async function listHostableBookings(supabase: Client, userId: string): Promise<HostableBooking[]> {
+  const { data: bookings, error } = await supabase
+    .from("bookings")
+    .select("id, court_id, start_time, end_time, price_amount, currency, status, courts(name, venues(name))")
+    .eq("user_id", userId)
+    .in("status", ["pending", "confirmed"])
+    .gte("start_time", new Date().toISOString())
+    .order("start_time", { ascending: true })
+    .limit(50);
+  if (error) throw error;
+  if (!bookings || bookings.length === 0) return [];
+
+  const rows = bookings as unknown as {
+    id: string;
+    court_id: string;
+    start_time: string;
+    end_time: string;
+    price_amount: number;
+    currency: string;
+    courts: { name: string; venues: { name: string } | null } | null;
+  }[];
+
+  // One query for every existing game rather than one per booking.
+  const { data: events } = await supabase
+    .from("events")
+    .select("id, booking_id")
+    .in("booking_id", rows.map((b) => b.id))
+    .neq("status", "cancelled");
+  const eventByBooking = new Map((events ?? []).map((e) => [e.booking_id, e.id]));
+
+  return rows.map((booking) => ({
+    bookingId: booking.id,
+    courtId: booking.court_id,
+    courtName: booking.courts?.name ?? "Court",
+    venueName: booking.courts?.venues?.name ?? "Venue",
+    startTime: booking.start_time,
+    endTime: booking.end_time,
+    priceAmount: booking.price_amount,
+    currency: booking.currency,
+    existingEventId: eventByBooking.get(booking.id) ?? null,
+  }));
+}

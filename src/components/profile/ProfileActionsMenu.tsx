@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Settings, LayoutGrid, Play, Users, ShieldCheck, Building2, CalendarCheck } from "lucide-react";
+import { Settings, LayoutGrid, Play, Users, ShieldCheck, Building2, CalendarCheck, CalendarDays } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProfileForm } from "@/components/profile/ProfileForm";
 import type { Profile } from "@/lib/supabase/types";
@@ -47,9 +47,16 @@ export function ProfileActionsMenu({ profile, email }: ProfileActionsMenuProps) 
       description: "Find a club or manage the ones you're in.",
     },
     {
+      key: "events",
+      href: "/events",
+      icon: CalendarCheck,
+      title: "Open Play",
+      description: "Join a game, or start one on a court you've booked.",
+    },
+    {
       key: "bookings",
       href: "/bookings",
-      icon: CalendarCheck,
+      icon: CalendarDays,
       title: "My bookings",
       description: "Upcoming games and your booking history.",
     },
