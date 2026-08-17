@@ -76,7 +76,23 @@ const SERVICE_ROLE_ONLY = [
   "apply_credit_to_booking",
   "confirm_credit_only_booking",
   "mark_settlements_payable",
+  // Both added after this script's first run found them anon-callable.
+  // Each writes payment-authoritative state and cannot verify payment
+  // itself, so the caller must be trusted server code:
+  //   confirm_paymongo_booking_payment — free bookings (migration 047)
+  //   confirm_booking_payment          — its dead Stripe twin (047)
+  //   sync_venue_paymongo_activation   — venue self-activation (048)
+  "confirm_paymongo_booking_payment",
+  "confirm_booking_payment",
+  "sync_venue_paymongo_activation",
 ];
+
+/**
+ * SECURITY DEFINER functions that are intentionally callable by anon.
+ * Anonymous visitors browse courts before signing in, so availability has
+ * to resolve without a session. Both are read-only.
+ */
+const PUBLIC_READ_ONLY = ["get_available_slots", "is_court_time_bookable"];
 
 async function main(): Promise<void> {
   const connectionString = process.env.DATABASE_URL;
@@ -129,11 +145,12 @@ async function main(): Promise<void> {
   console.log("\n— SECURITY DEFINER authorization —");
   const definers = (await rows(
     `select p.proname, p.prosrc,
+            pg_get_function_result(p.oid) = 'trigger' as is_trigger,
             has_function_privilege('authenticated', p.oid, 'EXECUTE') auth_can_execute,
             has_function_privilege('anon', p.oid, 'EXECUTE') anon_can_execute
      from pg_proc p join pg_namespace n on n.oid=p.pronamespace
      where n.nspname='public' and p.prosecdef order by p.proname`
-  )) as { proname: string; prosrc: string; auth_can_execute: boolean; anon_can_execute: boolean }[];
+  )) as { proname: string; prosrc: string; is_trigger: boolean; auth_can_execute: boolean; anon_can_execute: boolean }[];
 
   console.log(`  (${definers.length} SECURITY DEFINER functions)`);
 
@@ -157,10 +174,26 @@ async function main(): Promise<void> {
 
   // Anything SECURITY DEFINER, callable by anon, and lacking any visible
   // guard is worth a human look — that is the exact shape of the
-  // reconcile_settlements leak.
+  // reconcile_settlements leak, and of the two holes fixed in migrations
+  // 047 and 048.
+  //
+  // Two exclusions, both about what is actually *reachable*:
+  //
+  //  * Trigger functions. They take no arguments and return `trigger`, so
+  //    PostgREST will not expose them as RPCs at all — Postgres reports
+  //    EXECUTE for anon on all of them, which made the first run of this
+  //    script flag 35 of them and bury the two real findings.
+  //  * PUBLIC_READ_ONLY below: deliberately anon-callable availability
+  //    lookups. Anonymous visitors browse courts before signing in, so
+  //    these have to work without a session. Both only SELECT.
   console.log("\n— Unguarded definer functions reachable by anon —");
   const suspicious = definers.filter(
-    (d) => d.anon_can_execute && !d.prosrc.includes("is_admin") && !d.prosrc.includes("auth.uid")
+    (d) =>
+      d.anon_can_execute &&
+      !d.is_trigger &&
+      !PUBLIC_READ_ONLY.includes(d.proname) &&
+      !d.prosrc.includes("is_admin") &&
+      !d.prosrc.includes("auth.uid")
   );
   check(
     "no anon-callable definer function lacks an authorization check",

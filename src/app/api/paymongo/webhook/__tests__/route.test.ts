@@ -241,7 +241,12 @@ describe("POST /api/paymongo/webhook — merchant activation events", () => {
     const response = await POST(fakeRequest("{}"));
 
     expect(response.status).toBe(200);
-    expect(mockSyncActivation).toHaveBeenCalledWith(expect.anything(), {
+    // Service role, not the request-scoped client — sync_venue_paymongo_activation()
+    // is granted to service_role only since migration 20260810000048, because it
+    // raises the bypass GUC that stops owners writing their own activation status.
+    // Anon-callable, this let a venue self-activate without PayMongo; proven on
+    // staging by scripts/verify-staging-paymongo-activation-authz.ts.
+    expect(mockSyncActivation).toHaveBeenCalledWith(mockCreateServiceRoleClient.mock.results[0].value, {
       paymongoAccountId: "org_venue_1",
       activationStatus: "activated",
       declinedReason: null,

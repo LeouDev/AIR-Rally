@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { constructPayMongoWebhookEvent, PayMongoError, type PayMongoMerchantActivationEventData } from "@/lib/services/paymongo";
 import { confirmPaymongoBookingPayment } from "@/lib/services/bookings";
@@ -131,7 +130,12 @@ async function handleMerchantActivationEvent(data: PayMongoMerchantActivationEve
   const activationStatus = data.activation_status === "activated" ? "activated" : "declined";
 
   try {
-    const supabase = await createClient();
+    // Service role, for the same reason as the confirmation handler above:
+    // sync_venue_paymongo_activation() is granted to service_role only since
+    // migration 20260810000048, because it raises the bypass GUC that stops
+    // owners writing their own activation status. The authority for this
+    // call is the verified webhook signature.
+    const supabase = createServiceRoleClient();
     const synced = await syncVenuePaymongoActivation(supabase, {
       paymongoAccountId: data.merchant_id,
       activationStatus,
