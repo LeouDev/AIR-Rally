@@ -99,7 +99,16 @@ export function ImageUploadManager({
     }
   }
 
-  function handleDelete(imageId: string) {
+  function handleDelete(imageId: string, isCover: boolean) {
+    // Deleting removes the Storage object as well as the row, so there is
+    // nothing to undo afterwards — hence a confirm rather than an undo
+    // toast. The cover case is called out because losing it silently
+    // changes how the venue looks on the marketplace.
+    const message = isCover
+      ? "Remove this photo? It's your cover image on the marketplace — the next photo will take its place. This can't be undone."
+      : "Remove this photo? This can't be undone.";
+    if (!window.confirm(message)) return;
+
     setDeletingId(imageId);
     startDeleteTransition(async () => {
       const result = await deleteImageAction(imageId, venueId);
@@ -147,9 +156,14 @@ export function ImageUploadManager({
                 disabled={isDeletePending && deletingId === image.id}
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleDelete(image.id);
+                  handleDelete(image.id, index === 0);
                 }}
-                className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-background/90 text-destructive opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-100"
+                // Always visible, not hover-revealed. It used to be
+                // opacity-0 until group-hover, which meant that on any
+                // touch device — where there is no hover — removing a
+                // photo was simply impossible, and on desktop it was
+                // invisible until you happened to sweep over the tile.
+                className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-full border border-border bg-background/95 text-destructive shadow-sm transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-60"
               >
                 {isDeletePending && deletingId === image.id ? (
                   <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
