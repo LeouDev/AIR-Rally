@@ -3,23 +3,27 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Compass, CalendarCheck, Heart, User, Store } from "lucide-react";
+import { Home, Compass, CalendarCheck, User, Store, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getProfile } from "@/lib/services/profiles";
 import type { UserRole } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
+// Favorites moved out of this bar to make room for Open Play, which had
+// no mobile entry point at all despite being a headline feature. It stays
+// reachable from the user menu, the footer, and the profile shortcuts.
 const PLAYER_TABS = [
   { href: "/", label: "Home", icon: Home },
   { href: "/explore", label: "Explore", icon: Compass },
   { href: "/bookings", label: "Bookings", icon: CalendarCheck },
-  { href: "/favorites", label: "Favorites", icon: Heart },
+  { href: "/events", label: "Play", icon: Users },
   { href: "/profile", label: "Profile", icon: User },
 ];
 
-// Same 5-slot bar, but Favorites (a player-centric feature) is swapped
-// for an Owner-dashboard shortcut — a venue_owner/admin running their
-// business doesn't need favorites front-and-center. Self-contained
+// Same 5-slot bar, but the personal Bookings tab is swapped for an
+// Owner-dashboard shortcut — a venue_owner/admin running their business
+// reaches their venue's bookings through that dashboard, and their own
+// player bookings from the profile shortcuts. Self-contained
 // client fetch, same posture as AuthNavSection/NotificationBell — this
 // is a sibling of AuthNavSection in AppShell, not a child, so it can't
 // receive role as a prop without lifting state; a second small profile
@@ -27,7 +31,7 @@ const PLAYER_TABS = [
 const OWNER_TABS = [
   { href: "/", label: "Home", icon: Home },
   { href: "/explore", label: "Explore", icon: Compass },
-  { href: "/bookings", label: "Bookings", icon: CalendarCheck },
+  { href: "/events", label: "Play", icon: Users },
   { href: "/list-your-court", label: "Owner", icon: Store },
   { href: "/profile", label: "Profile", icon: User },
 ];

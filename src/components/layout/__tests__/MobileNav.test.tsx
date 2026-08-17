@@ -27,11 +27,11 @@ beforeEach(() => {
 });
 
 describe("MobileNav", () => {
-  it("shows the player tab bar (Favorites, no Owner tab) when signed out", async () => {
+  it("shows the player tab bar (Open Play, no Owner tab) when signed out", async () => {
     mockCreateClient.mockReturnValue(fakeSupabase(null));
     render(<MobileNav />);
 
-    expect(await screen.findByRole("link", { name: "Favorites" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Play" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Owner" })).not.toBeInTheDocument();
   });
 
@@ -41,20 +41,22 @@ describe("MobileNav", () => {
     render(<MobileNav />);
 
     await waitFor(() => expect(mockGetProfile).toHaveBeenCalled());
-    expect(screen.getByRole("link", { name: "Favorites" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Play" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Owner" })).not.toBeInTheDocument();
   });
 
-  it("swaps Favorites for an Owner tab for a venue_owner", async () => {
+  it("swaps the personal Bookings tab for an Owner tab for a venue_owner", async () => {
     mockCreateClient.mockReturnValue(fakeSupabase({ id: "user-1" }));
     mockGetProfile.mockResolvedValue({ role: "venue_owner" } as never);
     render(<MobileNav />);
 
     expect(await screen.findByRole("link", { name: "Owner" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Favorites" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Bookings" })).not.toBeInTheDocument();
+    // Open Play stays for owners — they play too.
+    expect(screen.getByRole("link", { name: "Play" })).toBeInTheDocument();
   });
 
-  it("swaps Favorites for an Owner tab for an admin", async () => {
+  it("swaps the personal Bookings tab for an Owner tab for an admin", async () => {
     mockCreateClient.mockReturnValue(fakeSupabase({ id: "admin-1" }));
     mockGetProfile.mockResolvedValue({ role: "admin" } as never);
     render(<MobileNav />);

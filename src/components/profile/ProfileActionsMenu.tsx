@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Settings, LayoutGrid, Play, Users, ShieldCheck, Building2, CalendarCheck, CalendarDays } from "lucide-react";
+import { Settings, LayoutGrid, Play, Users, ShieldCheck, Building2, CalendarCheck, CalendarDays, Heart } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProfileForm } from "@/components/profile/ProfileForm";
 import type { Profile } from "@/lib/supabase/types";
@@ -59,6 +59,13 @@ export function ProfileActionsMenu({ profile, email }: ProfileActionsMenuProps) 
       icon: CalendarDays,
       title: "My bookings",
       description: "Upcoming games and your booking history.",
+    },
+    {
+      key: "favorites",
+      href: "/favorites",
+      icon: Heart,
+      title: "Saved courts",
+      description: "Venues you've favourited.",
     },
     {
       key: "play",
