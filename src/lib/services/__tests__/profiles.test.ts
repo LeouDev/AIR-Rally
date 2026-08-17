@@ -1,4 +1,11 @@
-import { updateProfile, updateAvatar, getProfileStats, searchPublicProfiles, getPublicProfile } from "@/lib/services/profiles";
+import {
+  updateProfile,
+  updateAvatar,
+  updateEmailNotificationPreference,
+  getProfileStats,
+  searchPublicProfiles,
+  getPublicProfile,
+} from "@/lib/services/profiles";
 import { createMockSupabase, createTableMockSupabase } from "@/lib/test-helpers/mockSupabase";
 
 describe("profiles service", () => {
@@ -82,6 +89,17 @@ describe("profiles service", () => {
 
     expect(stats.tripCount).toBe(0);
     expect(stats.reviewCount).toBe(0);
+  });
+
+  it("updateEmailNotificationPreference only ever writes email_notifications_enabled, never other profile fields", async () => {
+    const supabase = createMockSupabase({ data: { id: "user-1", email_notifications_enabled: false }, error: null });
+
+    await updateEmailNotificationPreference(supabase, "user-1", false);
+
+    const fromMock = supabase.from as jest.Mock;
+    const builder = fromMock.mock.results[0].value as { update: jest.Mock; eq: jest.Mock };
+    expect(builder.update.mock.calls[0][0]).toEqual({ email_notifications_enabled: false });
+    expect(builder.eq).toHaveBeenCalledWith("id", "user-1");
   });
 });
 

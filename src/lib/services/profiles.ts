@@ -35,6 +35,24 @@ export async function getProfile(supabase: Client, userId: string): Promise<Prof
   return data;
 }
 
+/**
+ * Whether this user gets the email copy of their notifications. Separate
+ * from updateProfile() deliberately — a single-purpose toggle, not part
+ * of the name/phone/avatar form. Freely updatable under the existing
+ * "Users can update their own profile" RLS policy: profiles_prevent_role_
+ * change only guards the `role` column, nothing else.
+ */
+export async function updateEmailNotificationPreference(supabase: Client, userId: string, enabled: boolean): Promise<Profile> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ email_notifications_enabled: enabled })
+    .eq("id", userId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function updateProfile(
   supabase: Client,
   userId: string,

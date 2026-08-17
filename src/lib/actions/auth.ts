@@ -7,10 +7,12 @@ import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import {
   loginSchema,
   signUpSchema,
+  completeOAuthSignupSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
   type LoginValues,
   type SignUpValues,
+  type CompleteOAuthSignupValues,
   type ForgotPasswordValues,
   type ResetPasswordValues,
 } from "@/lib/validations/auth";
@@ -98,6 +100,47 @@ export async function signUp(
   }
 
   return { success: true, data: { requiresEmailConfirmation: data.session === null } };
+}
+
+/**
+ * Finishes signup for a user who just authenticated via Google/Facebook —
+ * the auth.users row (and, via handle_new_user(), the profiles row) were
+ * already created by Supabase the instant the OAuth callback exchanged its
+ * code; this only records what OAuth has no way to collect: agreement
+ * acceptance. `intendedRole` never touches `profiles.role` directly, same
+ * as the email/password signup form — it only decides whether the caller
+ * (the trimmed signup page) goes on to call requestOwnerAccessAction().
+ *
+ * Requires an active session — this is a continuation of the OAuth flow,
+ * not a way to backdate acceptance for an arbitrary user id.
+ */
+export async function completeOAuthSignup(values: CompleteOAuthSignupValues): Promise<ActionResult> {
+  const parsed = completeOAuthSignupSchema.safeParse(values);
+  if (!parsed.success) {
+    return { success: false, error: "Please fix the errors below and try again." };
+  }
+
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { success: false, error: "Your session has expired. Please sign in again." };
+  }
+
+  const { error } = await supabase.rpc("record_agreement_acceptance", {
+    p_user_id: user.id,
+    p_agreement_version: CURRENT_AGREEMENT_VERSION,
+  });
+  if (error) {
+    logServerError("auth.completeOAuthSignup", error);
+    return { success: false, error: getFriendlyErrorMessage(error, "We couldn't finish setting up your account.") };
+  }
+
+  return { success: true, data: undefined };
 }
 
 export async function signIn(values: LoginValues): Promise<ActionResult> {

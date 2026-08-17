@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { signUp } from "../auth";
+import { signUp, completeOAuthSignup } from "../auth";
 import { createClient } from "../../supabase/server";
 import { CURRENT_AGREEMENT_VERSION } from "../../legal";
 
@@ -116,5 +116,61 @@ describe("signUp", () => {
 
     expect(result.success).toBe(false);
     expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("completeOAuthSignup", () => {
+  function fakeSessionClient(overrides: { userId?: string | null; rpc?: jest.Mock }) {
+    const rpc = overrides.rpc ?? jest.fn().mockResolvedValue({ data: null, error: null });
+    return {
+      auth: {
+        getUser: jest.fn().mockResolvedValue({ data: { user: overrides.userId ? { id: overrides.userId } : null } }),
+      },
+      rpc,
+    } as never;
+  }
+
+  it("rejects without calling Supabase when agreedToTerms is false", async () => {
+    const client = fakeSessionClient({ userId: "user-1" });
+    mockCreateClient.mockResolvedValue(client);
+
+    const result = await completeOAuthSignup({ agreedToTerms: false, intendedRole: "player" });
+
+    expect(result.success).toBe(false);
+    expect((client as unknown as { rpc: jest.Mock }).rpc).not.toHaveBeenCalled();
+  });
+
+  it("requires an active session — this is a continuation of OAuth, not a way to backdate acceptance for an arbitrary user", async () => {
+    const client = fakeSessionClient({ userId: null });
+    mockCreateClient.mockResolvedValue(client);
+
+    const result = await completeOAuthSignup({ agreedToTerms: true, intendedRole: "player" });
+
+    expect(result).toEqual({ success: false, error: "Your session has expired. Please sign in again." });
+    expect((client as unknown as { rpc: jest.Mock }).rpc).not.toHaveBeenCalled();
+  });
+
+  it("records agreement acceptance for the CURRENT session's real user id, never trusting a client-supplied one", async () => {
+    const rpc = jest.fn().mockResolvedValue({ data: null, error: null });
+    const client = fakeSessionClient({ userId: "user-9", rpc });
+    mockCreateClient.mockResolvedValue(client);
+
+    const result = await completeOAuthSignup({ agreedToTerms: true, intendedRole: "venue_owner" });
+
+    expect(result).toEqual({ success: true, data: undefined });
+    expect(rpc).toHaveBeenCalledWith("record_agreement_acceptance", {
+      p_user_id: "user-9",
+      p_agreement_version: CURRENT_AGREEMENT_VERSION,
+    });
+  });
+
+  it("surfaces a friendly error when the RPC itself fails", async () => {
+    const rpc = jest.fn().mockResolvedValue({ data: null, error: { message: "db error" } });
+    const client = fakeSessionClient({ userId: "user-1", rpc });
+    mockCreateClient.mockResolvedValue(client);
+
+    const result = await completeOAuthSignup({ agreedToTerms: true, intendedRole: "player" });
+
+    expect(result.success).toBe(false);
   });
 });

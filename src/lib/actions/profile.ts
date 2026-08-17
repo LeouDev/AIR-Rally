@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { updateProfile, updateAvatar, searchPublicProfiles } from "@/lib/services/profiles";
+import { updateProfile, updateAvatar, updateEmailNotificationPreference, searchPublicProfiles } from "@/lib/services/profiles";
 import { updateProfileSchema, updateAvatarSchema, type UpdateProfileValues } from "@/lib/validations/profile";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import type { Profile, PublicProfile } from "@/lib/supabase/types";
@@ -69,6 +69,30 @@ export async function updateAvatarAction(avatarUrl: string): Promise<ActionResul
   }
 }
 
+
+/** Toggles whether this user gets emailed a copy of their notifications — used in account settings by both customers and venue owners, the same underlying account either way. */
+export async function updateEmailNotificationPreferenceAction(enabled: boolean): Promise<ActionResult<Profile>> {
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "Your session has expired. Please sign in again." };
+  }
+
+  try {
+    const profile = await updateEmailNotificationPreference(supabase, user.id, enabled);
+    revalidatePath("/profile");
+    return { success: true, data: profile };
+  } catch (error) {
+    logServerError("profile.updateEmailNotificationPreference", error);
+    return { success: false, error: getFriendlyErrorMessage(error, "We couldn't save that preference.") };
+  }
+}
 
 /**
  * Finds players by display name, for the "who's coming?" picker.

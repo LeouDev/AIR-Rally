@@ -48,6 +48,25 @@ export const signUpSchema = z
   });
 export type SignUpValues = z.infer<typeof signUpSchema>;
 
+/**
+ * What an OAuth (Google/Facebook) signup still needs after the provider
+ * has already authenticated them — Supabase creates the auth.users row
+ * automatically, so there's no email/password/name to collect here, only
+ * the two things the OAuth redirect skips entirely: role intent and
+ * agreeing to the User Agreement. See completeOAuthSignup() in
+ * lib/actions/auth.ts.
+ */
+export const completeOAuthSignupSchema = z
+  .object({
+    agreedToTerms: z.boolean(),
+    intendedRole: z.enum(["player", "venue_owner"]),
+  })
+  .refine((data) => data.agreedToTerms === true, {
+    message: "You must accept the User Agreement to create an account",
+    path: ["agreedToTerms"],
+  });
+export type CompleteOAuthSignupValues = z.infer<typeof completeOAuthSignupSchema>;
+
 export const forgotPasswordSchema = z.object({
   email: emailSchema,
 });

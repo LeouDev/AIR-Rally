@@ -32,7 +32,7 @@ function fakeRequest(body: unknown, secret: string | null = SECRET) {
   });
 }
 
-function mockGetUserById(result: { email: string } | null) {
+function mockGetUserById(result: { email: string } | null, emailNotificationsEnabled = true) {
   mockCreateServiceRoleClient.mockReturnValue({
     auth: {
       admin: {
@@ -41,6 +41,13 @@ function mockGetUserById(result: { email: string } | null) {
         ),
       },
     },
+    from: jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        eq: jest.fn().mockReturnValue({
+          maybeSingle: jest.fn().mockResolvedValue({ data: { email_notifications_enabled: emailNotificationsEnabled }, error: null }),
+        }),
+      }),
+    }),
   } as never);
 }
 
@@ -183,6 +190,24 @@ describe("POST /api/webhooks/notification-created", () => {
     const request = new Request("https://air-rally.com/api/webhooks/notification-created", { method: "POST", headers, body: "not json" });
     const response = await POST(request);
     expect(response.status).toBe(400);
+  });
+
+  describe("email notification preference", () => {
+    it("skips sending, but still acknowledges 200, when the recipient has opted out", async () => {
+      mockGetUserById({ email: "player@example.test" }, false);
+      const response = await POST(fakeRequest(INSERT_PAYLOAD));
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body).toMatchObject({ received: true, emailed: false, skipped: "opted_out" });
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    });
+
+    it("sends when the preference is explicitly on", async () => {
+      mockGetUserById({ email: "player@example.test" }, true);
+      mockSendEmail.mockResolvedValue(true);
+      await POST(fakeRequest(INSERT_PAYLOAD));
+      expect(mockSendEmail).toHaveBeenCalled();
+    });
   });
 
   describe("booking_confirmed receipt", () => {

@@ -81,6 +81,21 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ received: true, emailed: false });
     }
 
+    // The account-settings toggle. Checked here, not skipped upstream —
+    // the in-app notification (already written by the time this route
+    // runs) must exist regardless of this preference; only the EMAIL
+    // copy is conditional on it. Defaults to opted-in (the column itself
+    // defaults true) if the profile row can't be read for any reason —
+    // failing toward "sent" rather than silently going quiet forever.
+    const { data: profileRow } = await supabase
+      .from("profiles")
+      .select("email_notifications_enabled")
+      .eq("id", notification.user_id)
+      .maybeSingle();
+    if (profileRow?.email_notifications_enabled === false) {
+      return NextResponse.json({ received: true, emailed: false, skipped: "opted_out" });
+    }
+
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://air-rally.com";
     const href = notificationHref(notification);
     const link = href.startsWith("http") ? href : `${siteUrl}${href}`;
