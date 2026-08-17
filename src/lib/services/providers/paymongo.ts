@@ -4,6 +4,7 @@ import {
   type TransferRequest,
   type TransferResult,
   type TransferStatus,
+  type TransferWebhookEvent,
 } from "@/lib/services/payoutProvider";
 
 /**
@@ -75,6 +76,23 @@ class PayMongoPayoutProvider implements PayoutProvider {
   /** FUTURE: cancel a transfer that has not yet been executed. */
   async cancelTransfer(providerTransferId: string): Promise<void> {
     throw new PayoutNotImplementedError(`cancelTransfer for ${providerTransferId}`, this.name);
+  }
+
+  /**
+   * FUTURE: the pre-retry lookup by our own reference. Required because
+   * PayMongo offers no Idempotency-Key for transfers — see
+   * providers/paymongoTransfers.ts.
+   */
+  async findTransferByReference(referenceNumber: string): Promise<TransferResult | null> {
+    throw new PayoutNotImplementedError(`findTransferByReference for ${referenceNumber}`, this.name);
+  }
+
+  /** FUTURE: normalise a provider webhook. Never parses a guessed shape. */
+  handleWebhookEvent(rawEvent: unknown): TransferWebhookEvent {
+    // The event type is echoed back so a caller can see WHICH event was
+    // refused rather than a bare "not implemented".
+    const type = typeof rawEvent === "object" && rawEvent !== null && "type" in rawEvent ? String(rawEvent.type) : "unknown";
+    throw new PayoutNotImplementedError(`handleWebhookEvent for '${type}'`, this.name);
   }
 }
 

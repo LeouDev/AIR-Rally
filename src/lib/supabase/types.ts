@@ -373,6 +373,35 @@ export type VenuePaymentAccount = {
   updated_at: string;
 };
 
+/** An attempt to actually send money. Nothing can execute transfers yet. */
+export type PayoutTransferStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
+
+/**
+ * Record of a transfer attempt. Created BEFORE any provider call, so a
+ * crash mid-flight leaves a discoverable record rather than a silent
+ * possible-payment. `reference_number` is our own idempotency key —
+ * PayMongo documents none for transfers. See
+ * supabase/migrations/20260810000044_payout_transfers.sql.
+ */
+export type PayoutTransfer = {
+  id: string;
+  payout_batch_id: string;
+  venue_id: string;
+  amount: number;
+  currency: string;
+  provider: "paymongo";
+  reference_number: string;
+  /** Null means we cannot prove the request reached the provider. */
+  provider_transfer_id: string | null;
+  status: PayoutTransferStatus;
+  provider_response: unknown | null;
+  failure_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  failed_at: string | null;
+};
+
 /** Lifecycle of an internal payout preparation record. */
 export type PayoutBatchStatus = "draft" | "reviewing" | "approved" | "processing" | "completed" | "failed" | "cancelled";
 
@@ -832,6 +861,8 @@ export type Database = {
       booking_settlements: TableDef<BookingSettlement, never, never>;
       /** Read-only to clients — mirrored by trigger, changed via set_venue_payment_account_status(). */
       venue_payment_accounts: TableDef<VenuePaymentAccount, never, never>;
+      /** Read-only to clients — written by backend service code only. */
+      payout_transfers: TableDef<PayoutTransfer, never, never>;
       /** Created through create_payout_batch(); status moves via the admin RPCs. */
       payout_batches: TableDef<PayoutBatch, never, Partial<Pick<PayoutBatch, "status" | "notes">>>;
       payout_batch_items: TableDef<

@@ -34,7 +34,24 @@ export type TransferResult = {
   status: TransferStatus;
 };
 
+/**
+ * PayMongo's own transfer vocabulary is only pending / succeeded / failed —
+ * verified against docs/reference (August 2026). `cancelled` is AIR/Rally's
+ * own state for a transfer we abandoned before sending; PayMongo has no
+ * cancellation endpoint at all.
+ */
 export type TransferStatus = "pending" | "succeeded" | "failed" | "cancelled";
+
+/** A provider webhook, already signature-verified by the caller. */
+export type TransferWebhookEvent = {
+  type: string;
+  providerTransferId: string | null;
+  /** Our own reference_number, when the provider echoes it back. */
+  referenceNumber: string | null;
+  status: TransferStatus;
+  failureReason: string | null;
+  raw: unknown;
+};
 
 export interface PayoutProvider {
   readonly name: string;
@@ -44,6 +61,24 @@ export interface PayoutProvider {
   createTransfer(request: TransferRequest): Promise<TransferResult>;
   getTransferStatus(providerTransferId: string): Promise<TransferStatus>;
   cancelTransfer(providerTransferId: string): Promise<void>;
+
+  /**
+   * Looks a transfer up by OUR reference, not the provider's id.
+   *
+   * Added because of a concrete PayMongo finding: transfers have no
+   * Idempotency-Key header, so after a timeout we may hold no provider id
+   * at all. Without a way to ask "did my reference already go through?",
+   * the only options would be to retry blindly (risking double payment) or
+   * abandon the money. See docs/payments/paymongo-transfers.md.
+   */
+  findTransferByReference(referenceNumber: string): Promise<TransferResult | null>;
+
+  /**
+   * Normalises a provider webhook into the shape above. Keeping this on the
+   * provider is what stops PayMongo's event names and payload shape from
+   * leaking into the payout batch layer.
+   */
+  handleWebhookEvent(rawEvent: unknown): TransferWebhookEvent;
 }
 
 export class PayoutNotImplementedError extends Error {

@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Building2, Users, ClipboardCheck, CreditCard, Share2, Wallet, Landmark, BadgeCheck } from "lucide-react";
+import { Building2, Users, ClipboardCheck, CreditCard, Share2, Wallet, Landmark, BadgeCheck, ArrowLeftRight } from "lucide-react";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
@@ -82,6 +82,13 @@ export default async function AdminDashboardPage() {
       icon: BadgeCheck,
       title: "Payment accounts",
       description: "Which venues are ready to receive payouts.",
+      pending: 0,
+    },
+    {
+      href: "/admin/transfers",
+      icon: ArrowLeftRight,
+      title: "Transfers",
+      description: "Attempts to send money to venues. Execution is disabled.",
       pending: 0,
     },
     {

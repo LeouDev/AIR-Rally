@@ -306,6 +306,100 @@ async function main() {
       (await attempt(pg, ownerA, `select * from public.venue_payout_readiness()`)) === "blocked"
     );
 
+    // --- Transfer records (Phase 11) -----------------------------------------
+    console.log("\n— Transfer records —");
+    // Approve the batch so a transfer row is even permitted against it.
+    await asUser(pg, admin, async () => {
+      await pg.query(`select public.approve_payout_batch($1)`, [batchId]);
+    });
+
+    const transferInsert = await pg.query(
+      `insert into public.payout_transfers (payout_batch_id, venue_id, amount, reference_number)
+       values ($1, $2, 47500, $3) returning id, status`,
+      [batchId, venueIds[0], `ref-${run}-1`]
+    );
+    const transferId = transferInsert.rows[0].id as string;
+    check("a transfer record starts as pending", transferInsert.rows[0].status === "pending");
+
+    // The double-payment guard: one live transfer per venue per batch.
+    let duplicate = false;
+    try {
+      await pg.query(
+        `insert into public.payout_transfers (payout_batch_id, venue_id, amount, reference_number)
+         values ($1, $2, 47500, $3)`,
+        [batchId, venueIds[0], `ref-${run}-2`]
+      );
+      duplicate = true;
+    } catch {
+      /* expected */
+    }
+    check("a second live transfer for the same venue+batch is rejected", !duplicate);
+
+    let reusedRef = false;
+    try {
+      await pg.query(
+        `insert into public.payout_transfers (payout_batch_id, venue_id, amount, reference_number)
+         values ($1, $2, 10000, $3)`,
+        [batchId, venueIds[1], `ref-${run}-1`]
+      );
+      reusedRef = true;
+    } catch {
+      /* expected — reference_number is unique */
+    }
+    check("a reference number cannot be reused", !reusedRef);
+
+    // 'completed' asserts a venue was paid. Application code being disabled
+    // is not enough protection for that.
+    let completed = false;
+    try {
+      await pg.query(`update public.payout_transfers set status = 'processing' where id = $1`, [transferId]);
+      await pg.query(`update public.payout_transfers set status = 'completed' where id = $1`, [transferId]);
+      completed = true;
+    } catch {
+      /* expected — completion is gated at the database */
+    }
+    check("a transfer cannot be marked completed", !completed);
+
+    const ownerSeesTransfer = await asUser(pg, ownerA, async () => {
+      const r = await pg.query(`select count(*)::int n from public.payout_transfers`);
+      return r.rows[0].n as number;
+    });
+    check("a venue owner sees transfers for their own venue", ownerSeesTransfer === 1, `saw ${ownerSeesTransfer}`);
+
+    const otherOwnerSees = await asUser(pg, ownerB, async () => {
+      const r = await pg.query(`select count(*)::int n from public.payout_transfers`);
+      return r.rows[0].n as number;
+    });
+    check("another owner sees none of them", otherOwnerSees === 0, `saw ${otherOwnerSees}`);
+
+    const playerSeesTransfers = await asUser(pg, player, async () => {
+      const r = await pg.query(`select count(*)::int n from public.payout_transfers`);
+      return r.rows[0].n as number;
+    });
+    check("a customer sees no transfers", playerSeesTransfers === 0, `saw ${playerSeesTransfers}`);
+
+    const ownerCreates = await attempt(
+      pg,
+      ownerA,
+      `insert into public.payout_transfers (payout_batch_id, venue_id, amount, reference_number) values ($1, $2, 100, $3)`,
+      [batchId, venueIds[0], `ref-${run}-hack`]
+    );
+    check("a venue owner cannot create a transfer", ownerCreates === "blocked");
+
+    const adminCreates = await attempt(
+      pg,
+      admin,
+      `insert into public.payout_transfers (payout_batch_id, venue_id, amount, reference_number) values ($1, $2, 100, $3)`,
+      [batchId, venueIds[1], `ref-${run}-admin`]
+    );
+    check("even an admin cannot create a transfer from a session", adminCreates === "blocked");
+
+    const ownerEdits = await asUser(pg, ownerA, async () => {
+      const r = await pg.query(`update public.payout_transfers set status = 'completed' where id = $1`, [transferId]);
+      return r.rowCount ?? 0;
+    });
+    check("a venue owner cannot change a transfer's status", ownerEdits === 0, `updated ${ownerEdits}`);
+
     // --- Ledger unchanged / no money moved -----------------------------------
     console.log("\n— No money moved —");
     const settled = await pg.query(`select count(*)::int n from public.booking_settlements where settlement_status = 'settled'`);
@@ -325,6 +419,7 @@ async function main() {
     check("a batch still cannot be marked completed", toCompleted === "blocked");
   } finally {
     console.log("\nCleaning up…");
+    await pg.query(`delete from public.payout_transfers where payout_batch_id = any($1::uuid[])`, [batchIds]).catch(() => undefined);
     await pg.query(`delete from public.payout_batch_items where payout_batch_id = any($1::uuid[])`, [batchIds]).catch(() => undefined);
     await pg.query(`delete from public.payout_batches where created_by = any($1::uuid[])`, [userIds]).catch(() => undefined);
     await pg.query(`delete from public.booking_settlements where venue_id = any($1::uuid[])`, [venueIds]).catch(() => undefined);
