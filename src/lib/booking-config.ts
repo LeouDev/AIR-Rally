@@ -38,6 +38,21 @@ export const DEFAULT_CURRENCY = "PHP";
 export const PLATFORM_FEE_PERCENT = 0.05;
 
 /**
+ * PayMongo's QR Ph merchant discount rate, VAT-inclusive — the cost of
+ * collecting the money, passed on to the customer rather than absorbed.
+ *
+ * 1.34% is PayMongo's published QR Ph rate (paymongo.com/pricing), and
+ * their pricing page states all rates EXCLUDE VAT, so the real cost is
+ * 1.34% x 1.12 = 1.5008%.
+ *
+ * QR Ph is the only payment method currently enabled. If another method
+ * is ever turned on this constant stops being correct for it — GCash is
+ * 2.23%, cards are 3.125% + a fixed peso amount — and this must become
+ * per-method rather than a single number.
+ */
+export const PROCESSING_FEE_PERCENT = 0.015008;
+
+/**
  * V1 rescheduling business rule (locked): a confirmed booking may only be
  * rescheduled while its start_time is at least this many hours away. See
  * lib/services/reschedules.ts.
