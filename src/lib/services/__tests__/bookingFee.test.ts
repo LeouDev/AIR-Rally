@@ -1,4 +1,4 @@
-import { calculateBookingCharge, calculateAmountPaid } from "../bookingFee";
+import { calculateBookingCharge, calculateAmountPaid, calculateRefundCredit, describeBookingAmounts } from "../bookingFee";
 import { PROCESSING_FEE_PERCENT } from "@/lib/booking-config";
 
 describe("calculateBookingCharge", () => {
@@ -94,5 +94,81 @@ describe("calculateAmountPaid", () => {
     // full price — from two sources. credit_amount_applied is deliberately
     // not a parameter here, so it cannot be subtracted by accident.
     expect(calculateAmountPaid({ price_amount: 50000, processing_fee_amount: 0 })).toBe(50000);
+  });
+});
+
+describe("calculateRefundCredit — refunds never include the processing fee", () => {
+  /** The worked example from the business rule: ₱500 court, ₱25 fee, ₱525 charged. */
+  const WORKED_EXAMPLE = { price_amount: 50000, processing_fee_amount: 2500, credit_amount_applied: 0 };
+
+  it("refunds the court price only, not the total charged", () => {
+    expect(calculateRefundCredit(WORKED_EXAMPLE)).toBe(50000);
+    // The customer was charged ₱525; the refund is ₱500.
+    expect(calculateAmountPaid(WORKED_EXAMPLE)).toBe(52500);
+  });
+
+  it("never returns more than the court price, at any fee size", () => {
+    // THE POINT OF THIS TEST: the fee must never leak into a refund. If
+    // someone "fixes" calculateRefundCredit() to use calculateAmountPaid(),
+    // every one of these fails.
+    for (const court of [8000, 40000, 80000, 120000, 160000]) {
+      const { processingFeeAmount } = calculateBookingCharge(court);
+      expect(processingFeeAmount).toBeGreaterThan(0);
+      expect(calculateRefundCredit({ price_amount: court })).toBe(court);
+      expect(calculateRefundCredit({ price_amount: court })).toBeLessThan(calculateAmountPaid({ price_amount: court, processing_fee_amount: processingFeeAmount }));
+    }
+  });
+
+  it("is unaffected by how the booking was funded", () => {
+    // Credit-funded or card-funded, the venue was owed the same court price
+    // and that is what comes back.
+    expect(calculateRefundCredit({ price_amount: 50000 })).toBe(50000);
+    expect(describeBookingAmounts({ price_amount: 50000, processing_fee_amount: 2500, credit_amount_applied: 20000 }).refundableAsCredit).toBe(50000);
+  });
+
+  it("refunds the full price on a pre-fee booking, where fee is 0", () => {
+    expect(calculateRefundCredit({ price_amount: 40000 })).toBe(40000);
+    expect(calculateAmountPaid({ price_amount: 40000, processing_fee_amount: 0 })).toBe(40000);
+  });
+});
+
+describe("describeBookingAmounts — the four figures stay separate", () => {
+  it("separates court price, fee, credit and what the provider was asked for", () => {
+    // ₱500 court, ₱200 of credit, so PayMongo collects ₱300 plus ₱300's fee.
+    const fee = calculateBookingCharge(30000).processingFeeAmount;
+    const a = describeBookingAmounts({ price_amount: 50000, processing_fee_amount: fee, credit_amount_applied: 20000 });
+
+    expect(a.courtPrice).toBe(50000);
+    expect(a.creditApplied).toBe(20000);
+    expect(a.processingFee).toBe(fee);
+    // What the webhook's amount check compares against — must stay exactly
+    // price - credit + fee (migration 20260810000054).
+    expect(a.payableToProvider).toBe(50000 - 20000 + fee);
+    expect(a.totalPaid).toBe(50000 + fee);
+    expect(a.refundableAsCredit).toBe(50000);
+  });
+
+  it("agrees with what checkout actually asks PayMongo to collect", () => {
+    // Requirement 3: the fee is charged only on the remaining balance, so a
+    // booking's fee is its POST-credit amount's fee, never the full price's.
+    const courtPrice = 50000;
+    const credit = 20000;
+    const remaining = courtPrice - credit;
+    const charge = calculateBookingCharge(remaining);
+
+    const a = describeBookingAmounts({ price_amount: courtPrice, processing_fee_amount: charge.processingFeeAmount, credit_amount_applied: credit });
+    expect(a.payableToProvider).toBe(charge.totalChargedAmount);
+    // And the fee is strictly smaller than it would have been on the full price.
+    expect(a.processingFee).toBeLessThan(calculateBookingCharge(courtPrice).processingFeeAmount);
+  });
+
+  it("charges no fee at all when credit covers the whole booking", () => {
+    // A fully covered booking never reaches PayMongo, so there is no fee to
+    // pass on — which is what makes a court-price-only refund whole.
+    const a = describeBookingAmounts({ price_amount: 50000, processing_fee_amount: 0, credit_amount_applied: 50000 });
+    expect(a.payableToProvider).toBe(0);
+    expect(a.processingFee).toBe(0);
+    // A ₱500 refund buys a ₱500 court outright, with no new fee.
+    expect(calculateRefundCredit({ price_amount: 50000 })).toBe(a.courtPrice);
   });
 });

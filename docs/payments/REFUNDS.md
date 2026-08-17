@@ -14,44 +14,60 @@ Credit is therefore the mechanism, and this document is how to use it.
 
 ---
 
-## The amount: what the customer actually paid
+## The amount: the court price only
 
-**Refund `price_amount + processing_fee_amount`, not `price_amount`.**
+**Refund `price_amount`. Never include `processing_fee_amount`.**
 
-Since the processing-fee pass-through went live, the customer is charged the
-court price *plus* PayMongo's fee. A ₱1200 court is an ₱1218.27 charge. Refunding
-₱1200 leaves the customer ₱18.27 out of pocket for a booking they did not get —
-for a fee they only paid because they used the platform.
+```
+Court booking price          ₱500.00
+Payment processing fee        ₱25.00
+Total charged to customer    ₱525.00
+Refund credit issued         ₱500.00   <- court price only
+```
 
-`calculateAmountPaid()` in `src/lib/services/bookingFee.ts` is the single source
-of that number, and the refund script uses it. Do not compute it by hand.
+`calculateRefundCredit()` in `src/lib/services/bookingFee.ts` is the single
+source of that number and the refund script uses it. Do not compute it by hand,
+and do not reach for `calculateAmountPaid()` — that is the *receipt* figure,
+a factual statement of what was charged, and the two must never be conflated.
 
-### Credit is not subtracted
+### Why the fee is not refunded
 
-`calculateAmountPaid()` deliberately ignores `credit_amount_applied`. A booking
-half-settled from the wallet still **cost** the customer its full price — half
-from the wallet, half from their bank. Both halves come back as credit.
+PayMongo consumed the processing fee at the moment the payment was processed.
+AIR/Rally never held it and cannot return it. Refunding it as credit would mean
+paying that fee twice out of the 5% commission — once when the booking was made,
+and again as credit — which is the leak the pass-through was built to close.
 
-Two different numbers exist here and confusing them is the easiest mistake:
+### Why this does not shortchange the customer
 
-| Number | Meaning | Formula |
-|---|---|---|
-| **What the customer paid** | what you refund | `price_amount + processing_fee_amount` |
-| What PayMongo collected | reconciliation only | `price_amount - credit_amount_applied + processing_fee_amount` |
+**Credit does not attract a processing fee when it is spent.** Checkout grosses
+up the *post-credit* amount, so the fee is only ever charged on what PayMongo
+actually collects. A ₱500 refund therefore covers a ₱500 court in full: a fully
+credit-covered booking creates no PayMongo checkout session at all, so there is
+no second fee.
 
-They diverge only when credit was applied — which is exactly when a wrong choice
-looks like a bug and shortchanges the customer.
+Be precise about what that does and does not mean. The customer paid ₱525 and
+can rebook ₱500 of court, so they do bear the original ₱25. That fee is a real
+cost of the cancelled transaction, and this rule places it with the customer
+rather than with AIR/Rally. It is a deliberate business decision, not an
+oversight — recorded here and in `calculateRefundCredit()` so nobody "corrects"
+it later.
 
-### On refunding the fee
+### The four figures, kept separate
 
-AIR/Rally has already paid the processing fee to PayMongo and does not get it
-back. Refunding it in credit therefore costs AIR/Rally the fee — but at cost of
-credit, not cash, and only if the customer books again. Not refunding it means
-charging a customer ₱18.27 for a booking that did not happen, which is not
-defensible for a venue cancellation or a system error. **Refund it.** The script
-does this by default.
+`describeBookingAmounts()` exposes all of them, so no caller re-derives one
+slightly differently:
 
----
+| Figure | Meaning |
+|---|---|
+| `courtPrice` | what the venue is owed against — **the refundable base** |
+| `processingFee` | PayMongo's cut, passed to the customer — **never refunded** |
+| `creditApplied` | settled from the wallet, so never sent to PayMongo |
+| `payableToProvider` | `price - credit + fee` — what PayMongo was asked to collect |
+| `totalPaid` | `price + fee` — the receipt figure |
+
+`payableToProvider` is what `confirm_paymongo_booking_payment()` checks a real
+payment against, so it must stay exactly that expression — see migration
+`20260810000054`.
 
 ## Policy
 
@@ -88,8 +104,10 @@ TS_NODE_BASEURL=. TS_NODE_COMPILER_OPTIONS='{"module":"CommonJS","moduleResoluti
   scripts/issue-refund-credit.ts --code A6CCE76E --cause customer
 ```
 
-It prints the booking, the amount the customer actually paid, the policy
-decision and what it would issue. Re-run with `--confirm` to issue.
+It prints the booking's figures separated — court price, fee, credit, total
+paid — the policy decision, and what it would issue. The refundable base it
+quotes is the court price, with the fee shown but explicitly excluded. Re-run
+with `--confirm` to issue.
 
 ```bash
 … scripts/issue-refund-credit.ts --code A6CCE76E --cause customer --confirm

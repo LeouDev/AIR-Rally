@@ -15,9 +15,11 @@
  * Three things are easy to get wrong at 11pm with a customer waiting, and
  * all three are enforced here rather than remembered:
  *
- *   1. The amount. What the customer paid is price_amount +
- *      processing_fee_amount, NOT price_amount. Refunding price_amount
- *      leaves them out of pocket by the processing fee they were charged.
+ *   1. The amount. A refund covers the COURT PRICE ONLY — never the
+ *      processing fee, which PayMongo consumed when the payment was
+ *      processed and which AIR/Rally never held. Credit does not attract a
+ *      fee when spent, so a full court price refunds to a full court's
+ *      worth of booking. See calculateRefundCredit().
  *   2. Double-issuing. Credit is money-like and the ledger is immutable —
  *      there is no undo. This refuses if compensation already exists for
  *      the booking.
@@ -47,7 +49,7 @@
  */
 import { Client } from "pg";
 import { resolveCancellationCredit, addCredit, type CancellationCause } from "../src/lib/services/credits";
-import { calculateAmountPaid } from "../src/lib/services/bookingFee";
+import { calculateRefundCredit, describeBookingAmounts } from "../src/lib/services/bookingFee";
 
 type Row = {
   id: string;
@@ -101,19 +103,21 @@ async function main(): Promise<void> {
     if (rows.length === 0) throw new Error(`No booking with confirmation code ${code}.`);
     const b = rows[0];
 
-    // What the customer actually parted with. Credit counts as payment, so
-    // this is deliberately NOT reduced by credit_amount_applied — a booking
-    // half-settled from the wallet still cost them its full price, and the
-    // wallet half must come back too.
-    const amountPaid = calculateAmountPaid(b);
-    const collectedByPayMongo = b.price_amount - b.credit_amount_applied + b.processing_fee_amount;
+    // The refundable base is the COURT PRICE ONLY. The processing fee was
+    // consumed by PayMongo when the payment was processed — AIR/Rally never
+    // held it and cannot return it. Credit does not attract a fee when it is
+    // spent, so a full court price refunds to a full court's worth of credit.
+    // See calculateRefundCredit() for the whole argument.
+    const amounts = describeBookingAmounts(b);
+    const amountPaid = calculateRefundCredit(b);
 
     console.log(`Booking ${b.confirmation_code}  (${b.status}, ${b.payment_provider})`);
     console.log(`  starts        ${b.start_time}`);
-    console.log(`  court price   ${peso(b.price_amount)}`);
-    console.log(`  credit used   ${peso(b.credit_amount_applied)}`);
-    console.log(`  payment fee   ${peso(b.processing_fee_amount)}`);
-    console.log(`  PAID BY CUSTOMER ${peso(amountPaid)}   (PayMongo collected ${peso(collectedByPayMongo)})`);
+    console.log(`  court price       ${peso(amounts.courtPrice)}   <- refundable base`);
+    console.log(`  credit used       ${peso(amounts.creditApplied)}`);
+    console.log(`  processing fee    ${peso(amounts.processingFee)}   <- NOT refunded (consumed by PayMongo)`);
+    console.log(`  total paid        ${peso(amounts.totalPaid)}   (PayMongo collected ${peso(amounts.payableToProvider)})`);
+    console.log(`  REFUNDABLE CREDIT ${peso(amounts.refundableAsCredit)}`);
     console.log(`  paid_at       ${b.paid_at ?? "NEVER PAID"}\n`);
 
     if (!b.paid_at) {
@@ -145,7 +149,7 @@ async function main(): Promise<void> {
 
     const amount = override ? Number(override) : decision.amount;
     if (override && (!Number.isInteger(amount) || amount <= 0 || amount > amountPaid)) {
-      throw new Error(`--amount must be a positive whole number of centavos not exceeding ${amountPaid}.`);
+      throw new Error(`--amount must be a positive whole number of centavos not exceeding the refundable base ${amountPaid}.`);
     }
 
     console.log(`Policy (cause: ${cause}): ${decision.reason}`);

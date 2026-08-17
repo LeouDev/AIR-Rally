@@ -69,6 +69,81 @@ export function calculateAmountPaid(booking: { price_amount: number; processing_
   return booking.price_amount + booking.processing_fee_amount;
 }
 
+/**
+ * How much credit a cancelled booking is refunded: the court price ONLY,
+ * never the processing fee.
+ *
+ * This is deliberately NOT calculateAmountPaid(). The customer paid
+ * price + fee, but the fee was consumed by PayMongo at the moment the
+ * payment was processed — AIR/Rally never held it and cannot return it.
+ * Refunding it would mean paying PayMongo's fee twice out of the 5%
+ * commission: once when the booking was made, again as credit.
+ *
+ * What stops this shortchanging the customer is that credit does not
+ * attract a fee when it is spent. A ₱500 refund covers a ₱500 court in
+ * full, and a fully credit-covered booking never creates a PayMongo
+ * checkout session at all, so no second fee is charged. See
+ * lib/actions/checkout.ts, which grosses up the POST-credit amount for
+ * exactly this reason.
+ *
+ * Be precise about what that does and does not mean: the customer is not
+ * made whole on the original fee. They paid ₱525 and can rebook ₱500 of
+ * court. The fee is a real cost of the cancelled transaction, and this
+ * rule places it with the customer rather than with AIR/Rally. That is a
+ * business decision, recorded here so nobody "fixes" it into
+ * calculateAmountPaid() later.
+ *
+ * calculateAmountPaid() remains the right figure for a RECEIPT, which is
+ * a factual statement of what was charged. These two must never be
+ * conflated, which is why they are separate functions with separate
+ * names rather than one function with a flag.
+ */
+export function calculateRefundCredit(booking: { price_amount: number }): number {
+  return booking.price_amount;
+}
+
+/**
+ * Every money figure on a booking, separated and named, so that callers
+ * never re-derive one of them slightly differently.
+ *
+ * The four are genuinely distinct and the differences only show up on
+ * bookings that used credit — which is exactly where a wrong figure looks
+ * like a bug rather than an error:
+ *
+ *   courtPrice        what the venue is owed against; the refundable base
+ *   processingFee     PayMongo's cut, passed to the customer, non-refundable
+ *   creditApplied     settled from the wallet, so never sent to PayMongo
+ *   payableToProvider what PayMongo was actually asked to collect
+ *   totalPaid         what the customer parted with, from both sources
+ *
+ * payableToProvider is the figure confirm_paymongo_booking_payment()
+ * checks a real payment against, so it must stay
+ * price - credit + fee exactly; see migration 20260810000054.
+ */
+export type BookingAmounts = {
+  courtPrice: number;
+  processingFee: number;
+  creditApplied: number;
+  payableToProvider: number;
+  totalPaid: number;
+  refundableAsCredit: number;
+};
+
+export function describeBookingAmounts(booking: {
+  price_amount: number;
+  processing_fee_amount: number;
+  credit_amount_applied: number;
+}): BookingAmounts {
+  return {
+    courtPrice: booking.price_amount,
+    processingFee: booking.processing_fee_amount,
+    creditApplied: booking.credit_amount_applied,
+    payableToProvider: booking.price_amount - booking.credit_amount_applied + booking.processing_fee_amount,
+    totalPaid: calculateAmountPaid(booking),
+    refundableAsCredit: calculateRefundCredit(booking),
+  };
+}
+
 export function calculateBookingCharge(courtAmountMinorUnits: number): BookingCharge {
   if (!Number.isInteger(courtAmountMinorUnits) || courtAmountMinorUnits < 0) {
     throw new Error(`courtAmount must be a non-negative integer in minor units, got ${courtAmountMinorUnits}`);
