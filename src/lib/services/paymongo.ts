@@ -22,11 +22,24 @@ export type PayMongoErrorReason =
   | "invalid_webhook_signature"
   | "account_onboarding_failed";
 
-/** Typed domain error for the PayMongo payment layer, mirroring lib/services/payments.ts's PaymentError shape. */
+/**
+ * Typed domain error for the PayMongo payment layer, mirroring
+ * lib/services/payments.ts's PaymentError shape.
+ *
+ * `message` is CUSTOMER-FACING and must stay that way: every action that
+ * catches this (checkout.ts, reschedule.ts) returns it straight to the
+ * browser. A configuration message once leaked through that path and told
+ * a real player mid-checkout to "add PAYMONGO_SECRET_KEY to .env.local" —
+ * an instruction they cannot act on, about a file that does not exist in
+ * production. Put deployment diagnostics in `detail` instead; it rides
+ * along to logServerError() with the error object, which is the only
+ * place it's useful.
+ */
 export class PayMongoError extends Error {
   constructor(
     public reason: PayMongoErrorReason,
-    message: string
+    message: string,
+    public detail?: string
   ) {
     super(message);
     this.name = "PayMongoError";
@@ -54,7 +67,8 @@ export function getSecretKey(): string {
   if (!secretKey) {
     throw new PayMongoError(
       "paymongo_not_configured",
-      "PayMongo isn't set up yet — add PAYMONGO_SECRET_KEY to .env.local (see .env.example)."
+      "Payments are temporarily unavailable — please try again shortly.",
+      "PAYMONGO_SECRET_KEY is not set in this environment (see .env.example). In production this is a Vercel environment variable scoped to the Production target, not a .env.local file."
     );
   }
   return secretKey;
@@ -193,7 +207,8 @@ export async function createPayMongoCheckoutSession(input: CreatePayMongoCheckou
       if (!platformAccountId) {
         throw new PayMongoError(
           "paymongo_not_configured",
-          "PAYMONGO_PLATFORM_ACCOUNT_ID isn't set — add it to .env.local (see .env.example) before a venue can go through the marketplace split."
+          "Payments are temporarily unavailable — please try again shortly.",
+          "PAYMONGO_PLATFORM_ACCOUNT_ID is not set, but a marketplace split was requested (see .env.example)."
         );
       }
       attributes.split_payment = {
@@ -349,7 +364,13 @@ export type PayMongoMerchantActivationEventData = {
 export function constructPayMongoWebhookEvent(rawBody: string, signatureHeader: string): PayMongoEvent {
   const webhookSecret = process.env.PAYMONGO_WEBHOOK_SECRET;
   if (!webhookSecret) {
-    throw new PayMongoError("paymongo_not_configured", "PayMongo webhook isn't configured.");
+    // Server-to-server only — the webhook route turns this into a plain
+    // 400, so no customer ever reads either string.
+    throw new PayMongoError(
+      "paymongo_not_configured",
+      "PayMongo webhook isn't configured.",
+      "PAYMONGO_WEBHOOK_SECRET is not set in this environment (see .env.example)."
+    );
   }
 
   const parts = Object.fromEntries(

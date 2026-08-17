@@ -166,6 +166,9 @@ export async function createCheckoutSessionAction(
       }
     }
 
+    // PayMongoError.message is customer-safe by construction (the
+    // deployment detail lives on .detail, which the log above captures) —
+    // see lib/services/paymongo.ts.
     if (error instanceof BookingError || error instanceof PayMongoError) {
       logServerError(`checkout.${error.reason}`, error);
       return { success: false, error: error.message };

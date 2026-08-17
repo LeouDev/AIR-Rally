@@ -73,6 +73,20 @@ describe("createPayMongoCheckoutSession", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("keeps the not-configured message customer-safe, with the deployment detail on .detail", async () => {
+    // checkout.ts and reschedule.ts both return PayMongoError.message
+    // straight to the browser. This once shipped "add PAYMONGO_SECRET_KEY
+    // to .env.local" to a real player mid-checkout — asserting on `reason`
+    // alone (the test above) never caught it.
+    const { createPayMongoCheckoutSession } = await import("../paymongo");
+    const error = await createPayMongoCheckoutSession(CHECKOUT_INPUT).catch((e: unknown) => e);
+
+    const message = (error as Error).message;
+    expect(message).not.toMatch(/PAYMONGO_|\.env|process\.env|Vercel/i);
+    expect(message).toBe("Payments are temporarily unavailable — please try again shortly.");
+    expect((error as { detail?: string }).detail).toMatch(/PAYMONGO_SECRET_KEY/);
+  });
+
   it("charges exactly the booking's stored price_amount/currency, and sets booking_id/user_id metadata — never a client-supplied amount", async () => {
     process.env.PAYMONGO_SECRET_KEY = "sk_test_x";
     mockFetch.mockResolvedValue(
