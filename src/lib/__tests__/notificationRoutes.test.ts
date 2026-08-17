@@ -34,7 +34,7 @@ describe("notificationHref", () => {
   it.each([
     ["booking_confirmed", "/bookings"],
     ["booking_received", "/list-your-court/bookings"],
-    ["credits_added", "/profile"],
+    ["credits_added", "/profile/credits"],
     ["post_liked", "/court-side"],
     ["club_approved", "/clubs"],
     ["event_invite", "/events"],
