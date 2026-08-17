@@ -4,13 +4,20 @@
 import { POST } from "../route";
 import { createServiceRoleClient } from "../../../../../lib/supabase/serviceRole";
 import { sendEmail } from "../../../../../lib/services/email";
+import { getBookingById } from "../../../../../lib/services/bookings";
+import { getCourtDisplayInfo } from "../../../../../lib/services/courts";
 
 // Relative paths for jest.mock — see MEMORY.md (air-rally-jest-mock-colon-path-bug).
 jest.mock("../../../../../lib/supabase/serviceRole", () => ({ createServiceRoleClient: jest.fn() }));
 jest.mock("../../../../../lib/services/email", () => ({ sendEmail: jest.fn() }));
+jest.mock("../../../../../lib/services/bookings", () => ({ getBookingById: jest.fn() }));
+jest.mock("../../../../../lib/services/courts", () => ({ getCourtDisplayInfo: jest.fn() }));
+// calculateAmountPaid, formatVenueRange, isCreditOnly are pure — left real.
 
 const mockCreateServiceRoleClient = createServiceRoleClient as jest.MockedFunction<typeof createServiceRoleClient>;
 const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
+const mockGetBookingById = getBookingById as jest.MockedFunction<typeof getBookingById>;
+const mockGetCourtDisplayInfo = getCourtDisplayInfo as jest.MockedFunction<typeof getCourtDisplayInfo>;
 
 const SECRET = "test-webhook-secret";
 const ORIGINAL_ENV = process.env;
@@ -49,6 +56,39 @@ const INSERT_PAYLOAD = {
     message: "₱400.00 in credits have been added to your account.",
     link_url: null,
   },
+};
+
+const BOOKING_CONFIRMED_PAYLOAD = {
+  ...INSERT_PAYLOAD,
+  record: {
+    ...INSERT_PAYLOAD.record,
+    type: "booking_confirmed",
+    title: "Booking confirmed",
+    message: "Your booking (confirmation #ABCD1234) is confirmed.",
+    link_url: "/bookings/11111111-1111-4111-8111-111111111111/confirmation",
+  },
+};
+
+const RECEIPT_BOOKING = {
+  id: "11111111-1111-4111-8111-111111111111",
+  court_id: "court-1",
+  confirmation_code: "ABCD1234",
+  price_amount: 50000,
+  processing_fee_amount: 757,
+  credit_amount_applied: 0,
+  currency: "PHP",
+  payment_provider: "paymongo",
+  start_time: "2026-08-21T00:00:00Z",
+  end_time: "2026-08-21T01:00:00Z",
+};
+
+const RECEIPT_DISPLAY = {
+  courtName: "Court 2 — Riverside",
+  venueName: "AIR/Rally Virtual Court",
+  venueId: "venue-1",
+  venueTimezone: "Asia/Manila",
+  venuePaymongoAccountId: null,
+  venuePaymongoActivationStatus: null,
 };
 
 beforeEach(() => {
@@ -143,5 +183,87 @@ describe("POST /api/webhooks/notification-created", () => {
     const request = new Request("https://air-rally.com/api/webhooks/notification-created", { method: "POST", headers, body: "not json" });
     const response = await POST(request);
     expect(response.status).toBe(400);
+  });
+
+  describe("booking_confirmed receipt", () => {
+    it("builds a real receipt — confirmation code, court, venue, date/time, amount paid — not the generic template", async () => {
+      mockGetUserById({ email: "player@example.test" });
+      mockGetBookingById.mockResolvedValue(RECEIPT_BOOKING as never);
+      mockGetCourtDisplayInfo.mockResolvedValue(RECEIPT_DISPLAY as never);
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(fakeRequest(BOOKING_CONFIRMED_PAYLOAD));
+
+      expect(mockGetBookingById).toHaveBeenCalledWith(expect.anything(), "11111111-1111-4111-8111-111111111111");
+      const html = mockSendEmail.mock.calls[0][0].html;
+      expect(html).toContain("ABCD1234");
+      expect(html).toContain("Court 2 — Riverside");
+      expect(html).toContain("AIR/Rally Virtual Court");
+      // calculateAmountPaid() is price + fee (50000 + 757 = 50757), NEVER
+      // price alone — this is the exact "amount paid vs court price" trap
+      // the rest of the app is careful about.
+      expect(html).toContain("₱507.57");
+      expect(html).toContain("Paid in full.");
+      // Not the generic template's copy.
+      expect(html).not.toContain("Open in AIR/Rally");
+    });
+
+    it("shows the credit-paid variant for a fully credit-covered booking", async () => {
+      mockGetUserById({ email: "player@example.test" });
+      mockGetBookingById.mockResolvedValue({ ...RECEIPT_BOOKING, payment_provider: "air_rally_credit" } as never);
+      mockGetCourtDisplayInfo.mockResolvedValue(RECEIPT_DISPLAY as never);
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(fakeRequest(BOOKING_CONFIRMED_PAYLOAD));
+
+      expect(mockSendEmail.mock.calls[0][0].html).toContain("Paid with AIR/Rally Credits.");
+    });
+
+    it("falls back to the generic template when the booking can't be found", async () => {
+      mockGetUserById({ email: "player@example.test" });
+      mockGetBookingById.mockResolvedValue(null);
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(fakeRequest(BOOKING_CONFIRMED_PAYLOAD));
+
+      const html = mockSendEmail.mock.calls[0][0].html;
+      expect(html).toContain("Booking confirmed");
+      expect(html).toContain("Open in AIR/Rally");
+    });
+
+    it("falls back to the generic template when the court/venue lookup fails", async () => {
+      mockGetUserById({ email: "player@example.test" });
+      mockGetBookingById.mockResolvedValue(RECEIPT_BOOKING as never);
+      mockGetCourtDisplayInfo.mockResolvedValue(null);
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(fakeRequest(BOOKING_CONFIRMED_PAYLOAD));
+
+      expect(mockSendEmail.mock.calls[0][0].html).toContain("Open in AIR/Rally");
+    });
+
+    it("falls back to the generic template when link_url doesn't match a booking confirmation URL", async () => {
+      mockGetUserById({ email: "player@example.test" });
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(fakeRequest({ ...BOOKING_CONFIRMED_PAYLOAD, record: { ...BOOKING_CONFIRMED_PAYLOAD.record, link_url: "/bookings" } }));
+
+      expect(mockGetBookingById).not.toHaveBeenCalled();
+      expect(mockSendEmail.mock.calls[0][0].html).toContain("Open in AIR/Rally");
+    });
+
+    it("never attempts a receipt for a non-booking_confirmed type, even with a matching-shaped link_url", async () => {
+      mockGetUserById({ email: "player@example.test" });
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(
+        fakeRequest({
+          ...INSERT_PAYLOAD,
+          record: { ...INSERT_PAYLOAD.record, link_url: "/bookings/11111111-1111-4111-8111-111111111111/confirmation" },
+        })
+      );
+
+      expect(mockGetBookingById).not.toHaveBeenCalled();
+    });
   });
 });

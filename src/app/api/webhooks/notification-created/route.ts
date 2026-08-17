@@ -2,7 +2,14 @@ import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { sendEmail } from "@/lib/services/email";
 import { notificationHref, displayMessage } from "@/lib/notificationRoutes";
+import { getBookingById } from "@/lib/services/bookings";
+import { getCourtDisplayInfo } from "@/lib/services/courts";
+import { calculateAmountPaid } from "@/lib/services/bookingFee";
+import { formatVenueRange } from "@/lib/bookingTime";
+import { isCreditOnly } from "@/lib/paymentState";
 import { logServerError } from "@/lib/errors";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/supabase/types";
 
 /**
  * Receives a Supabase Database Webhook fired on INSERT to `notifications`,
@@ -78,10 +85,16 @@ export async function POST(request: Request): Promise<Response> {
     const href = notificationHref(notification);
     const link = href.startsWith("http") ? href : `${siteUrl}${href}`;
 
+    // A receipt when we can build one honestly, the generic template
+    // otherwise. Never let a failed lookup here turn into a failed email —
+    // same fail-open posture as everything else in this route.
+    const receiptHtml =
+      notification.type === "booking_confirmed" ? await tryBuildBookingReceiptEmail(supabase, notification.link_url, link) : null;
+
     const sent = await sendEmail({
       to: data.user.email,
       subject: notification.title,
-      html: renderNotificationEmail({ title: notification.title, message: displayMessage(notification.message), link }),
+      html: receiptHtml ?? renderNotificationEmail({ title: notification.title, message: displayMessage(notification.message), link }),
     });
 
     return NextResponse.json({ received: true, emailed: sent });
@@ -109,11 +122,115 @@ type SupabaseInsertWebhookPayload = {
 };
 
 /**
- * One generic template for every notification type, deliberately — see
- * NotificationBell.tsx's own comment on the DB emitting more types than
- * any single union lists. A per-type template system is a real feature
- * this pass isn't building; title + message + a link back into the app
- * covers every type that exists today without guessing at 12 designs.
+ * A real receipt for a booking_confirmed notification — confirmation
+ * code, court, venue, date/time, amount paid — instead of the generic
+ * title+message template every other notification type gets.
+ *
+ * Returns null on ANY failure to look the booking up (not found, court or
+ * venue missing, malformed link_url): the caller falls back to the
+ * generic template rather than losing the email entirely. A receipt that
+ * can't be built honestly should not become no email at all.
+ *
+ * Reuses calculateAmountPaid() and formatVenueRange() — the exact
+ * functions the in-app confirmation page uses — deliberately. This app
+ * already shipped a bug once from reimplementing venue-timezone
+ * formatting ("a 5PM Manila booking printed 9AM"); the fix was never
+ * "write the timezone math more carefully," it was "there is exactly one
+ * function that does this." A second implementation here would be the
+ * same mistake in a new place.
+ */
+async function tryBuildBookingReceiptEmail(
+  supabase: SupabaseClient<Database>,
+  linkUrl: string | null,
+  fallbackLink: string
+): Promise<string | null> {
+  const bookingId = linkUrl?.match(/^\/bookings\/([0-9a-f-]{36})\/confirmation$/i)?.[1];
+  if (!bookingId) return null;
+
+  try {
+    const booking = await getBookingById(supabase, bookingId);
+    if (!booking) return null;
+
+    const display = await getCourtDisplayInfo(supabase, booking.court_id);
+    if (!display) return null;
+
+    return renderBookingReceiptEmail({
+      confirmationCode: booking.confirmation_code,
+      courtName: display.courtName,
+      venueName: display.venueName,
+      when: formatVenueRange(booking.start_time, booking.end_time, display.venueTimezone),
+      amountPaid: formatMoney(calculateAmountPaid(booking), booking.currency),
+      paidWithCredits: isCreditOnly(booking),
+      link: fallbackLink,
+    });
+  } catch (error) {
+    logServerError("notificationWebhook.buildReceipt", error);
+    return null;
+  }
+}
+
+function formatMoney(amountMinorUnits: number, currency: string): string {
+  const symbol = currency === "PHP" ? "₱" : `${currency} `;
+  return `${symbol}${(amountMinorUnits / 100).toFixed(2)}`;
+}
+
+function renderBookingReceiptEmail(input: {
+  confirmationCode: string;
+  courtName: string;
+  venueName: string;
+  when: string;
+  amountPaid: string;
+  paidWithCredits: boolean;
+  link: string;
+}): string {
+  const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:24px;background:#f5f1ea;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <table role="presentation" width="100%" style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;">
+      <tr><td style="padding:24px;">
+        <p style="margin:0 0 4px;font-size:13px;font-weight:600;letter-spacing:0.02em;color:#ea580c;">AIR/RALLY</p>
+        <h1 style="margin:0 0 4px;font-size:20px;line-height:1.3;color:#1f2937;">You&#39;re on court.</h1>
+        <p style="margin:0 0 20px;font-size:14px;color:#6b7280;">${input.paidWithCredits ? "Paid with AIR/Rally Credits." : "Paid in full."} Show this code at the venue.</p>
+
+        <div style="margin:0 0 20px;padding:16px;background:#f3f4f6;border-radius:12px;text-align:center;">
+          <p style="margin:0 0 4px;font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6b7280;text-transform:uppercase;">Confirmation code</p>
+          <p style="margin:0;font-size:26px;font-weight:700;letter-spacing:0.06em;color:#1f2937;font-family:monospace;">${escape(input.confirmationCode)}</p>
+        </div>
+
+        <table role="presentation" width="100%" style="margin:0 0 20px;font-size:14px;color:#1f2937;">
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;">Venue</td>
+            <td style="padding:6px 0;text-align:right;font-weight:600;">${escape(input.venueName)}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;">Court</td>
+            <td style="padding:6px 0;text-align:right;font-weight:600;">${escape(input.courtName)}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;">Date &amp; time</td>
+            <td style="padding:6px 0;text-align:right;font-weight:600;font-family:monospace;">${escape(input.when)}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:#6b7280;">Amount paid</td>
+            <td style="padding:6px 0;text-align:right;font-weight:600;font-family:monospace;">${escape(input.amountPaid)}</td>
+          </tr>
+        </table>
+
+        <a href="${input.link}" style="display:inline-block;padding:10px 20px;background:#ea580c;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">View booking</a>
+      </td></tr>
+    </table>
+  </body>
+</html>`;
+}
+
+/**
+ * The fallback for every notification type EXCEPT booking_confirmed
+ * (which gets the real receipt above) — see NotificationBell.tsx's own
+ * comment on the DB emitting more types than any single union lists.
+ * A dedicated template per type is a real feature this pass isn't
+ * building for the other eleven; title + message + a link back into the
+ * app covers all of them without guessing at designs nothing asked for.
  */
 function renderNotificationEmail(input: { title: string; message: string; link: string }): string {
   const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
