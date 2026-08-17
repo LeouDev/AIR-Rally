@@ -44,3 +44,23 @@ export function formatVenueRange(startIso: string, endIso: string, timeZone: str
   const to = formatVenueTime(endIso, timeZone);
   return `${date} · ${from} – ${to}`;
 }
+
+/**
+ * A short, human label for the venue's timezone — "GMT+8", "EDT" — for the
+ * "Venue time (…)" note that sits beside a rendered slot.
+ *
+ * Derived, never hardcoded. Two screens previously carried a literal "(PHT)",
+ * which is right for every venue in the launch market and quietly wrong for
+ * the first one outside it — the same failure mode as an omitted timeZone,
+ * just in the label instead of the number.
+ *
+ * `short` rather than `shortGeneric`: it reflects the offset actually in
+ * effect on that date, so a DST-observing venue is not labelled with its
+ * standard-time name during summer.
+ */
+export function venueTimeZoneLabel(iso: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(
+    new Date(iso)
+  );
+  return parts.find((part) => part.type === "timeZoneName")?.value ?? timeZone;
+}

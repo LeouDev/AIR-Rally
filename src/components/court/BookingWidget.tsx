@@ -19,6 +19,7 @@ import type { PublicProfile } from "@/lib/supabase/types";
 import { SLOT_INCREMENT_MINUTES, MIN_DURATION_MINUTES, MAX_DURATION_MINUTES, MAX_BOOKING_WINDOW_DAYS } from "@/lib/booking-config";
 import { calculateBookingCharge } from "@/lib/services/bookingFee";
 import type { AvailableSlot, Court } from "@/lib/supabase/types";
+import { formatVenueDate, formatVenueTime } from "@/lib/bookingTime";
 
 const VISIBLE_DAYS = 14;
 
@@ -33,10 +34,6 @@ function formatDuration(minutes: number): string {
   if (hours === 0) return `${mins} min`;
   if (mins === 0) return `${hours} hr${hours > 1 ? "s" : ""}`;
   return `${hours} hr ${mins} min`;
-}
-
-function formatLocalTime(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 }
 
 function formatDayLabel(date: Date): { top: string; bottom: string } {
@@ -314,7 +311,7 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
                 onClick={() => handleSlotClick(slot)}
                 className="rounded-lg border border-border px-2 py-2 text-xs font-medium text-foreground transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
-                {formatLocalTime(slot.slot_start, venueTimezone)}
+                {formatVenueTime(slot.slot_start, venueTimezone)}
               </button>
             ))}
           </div>
@@ -340,13 +337,13 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Date</dt>
                   <dd className="font-medium text-foreground">
-                    {new Intl.DateTimeFormat("en-US", { timeZone: venueTimezone, dateStyle: "medium" }).format(new Date(selectedSlot.slot_start))}
+                    {formatVenueDate(selectedSlot.slot_start, venueTimezone)}
                   </dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Time</dt>
                   <dd className="font-medium text-foreground">
-                    {formatLocalTime(selectedSlot.slot_start, venueTimezone)} – {formatLocalTime(selectedSlot.slot_end, venueTimezone)}
+                    {formatVenueTime(selectedSlot.slot_start, venueTimezone)} – {formatVenueTime(selectedSlot.slot_end, venueTimezone)}
                   </dd>
                 </div>
                 <div className="flex justify-between">

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { formatVenueRange } from "@/lib/bookingTime";
+import { formatVenueRange, venueTimeZoneLabel } from "@/lib/bookingTime";
 import type { BookingWithDetails } from "@/lib/services/bookings";
 
 /**
@@ -45,7 +45,9 @@ export function UpcomingBookingCard({ booking }: { booking: BookingWithDetails }
           <p className="font-mono text-[0.9375rem]/[1.375rem] font-medium text-foreground">
             {formatVenueRange(booking.start_time, booking.end_time, booking.venueTimezone)}
           </p>
-          <p className="text-xs/4 text-muted-foreground">Venue time (PHT)</p>
+          <p className="text-xs/4 text-muted-foreground">
+            Venue time ({venueTimeZoneLabel(booking.start_time, booking.venueTimezone)})
+          </p>
         </div>
 
         <div className="flex items-center justify-between gap-3">

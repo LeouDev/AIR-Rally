@@ -13,12 +13,9 @@ import { getAvailableSlotsAction } from "@/lib/actions/availability";
 import { getRescheduleDialogDataAction, createRescheduleAction } from "@/lib/actions/reschedule";
 import type { AvailableSlot } from "@/lib/supabase/types";
 import type { RescheduleOptions } from "@/lib/services/reschedules";
+import { formatVenueTime } from "@/lib/bookingTime";
 
 const VISIBLE_DAYS = 14;
-
-function formatLocalTime(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).format(new Date(iso));
-}
 
 function formatDayLabel(date: Date): { top: string; bottom: string } {
   if (isToday(date)) return { top: "Today", bottom: format(date, "MMM d") };
@@ -253,7 +250,7 @@ export function RescheduleButton({ bookingId }: RescheduleButtonProps) {
                           : "border-border text-foreground hover:border-primary/40"
                       )}
                     >
-                      {formatLocalTime(slot.slot_start, options.venueTimezone)}
+                      {formatVenueTime(slot.slot_start, options.venueTimezone)}
                     </button>
                   ))}
                 </div>

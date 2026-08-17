@@ -37,6 +37,16 @@ describe("UpcomingBookingCard", () => {
     expect(screen.getByText("Wed, Aug 19 · 6:00 AM – 7:00 AM")).toBeInTheDocument();
   });
 
+  it("labels the zone it actually rendered, rather than assuming the launch market", () => {
+    const { unmount } = render(<UpcomingBookingCard booking={booking()} />);
+    expect(screen.getByText("Venue time (GMT+8)")).toBeInTheDocument();
+    unmount();
+
+    render(<UpcomingBookingCard booking={booking({ venueTimezone: "America/New_York" })} />);
+    expect(screen.getByText("Venue time (EDT)")).toBeInTheDocument();
+    expect(screen.queryByText(/PHT/)).not.toBeInTheDocument();
+  });
+
   it("links a confirmed booking to My Bookings", () => {
     render(<UpcomingBookingCard booking={booking()} />);
     expect(screen.getByRole("link")).toHaveAttribute("href", "/bookings");

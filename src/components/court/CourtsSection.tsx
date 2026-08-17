@@ -1,5 +1,4 @@
 import Image from "next/image";
-import { Badge } from "@/components/ui/badge";
 import { CourtSurface, deterministicSurfaceColor } from "@/components/court/CourtSurface";
 import { cn } from "@/lib/utils";
 import type { Court } from "@/lib/supabase/types";
@@ -72,8 +71,8 @@ export function CourtsSection({
   return (
     <div className="flex flex-col gap-4">
       {courts.map((court) => (
-        <div key={court.id} className="flex gap-4 rounded-2xl border border-border bg-card p-4">
-          <div className="relative size-20 shrink-0 overflow-hidden rounded-xl">
+        <div key={court.id} className="flex gap-3.5 rounded-lg bg-card p-3.5 shadow-card">
+          <div className="relative size-20 shrink-0 overflow-hidden rounded-md">
             {court.imageUrl ? (
               <Image src={court.imageUrl} alt={court.name} fill sizes="80px" className="object-cover" />
             ) : (
@@ -82,24 +81,24 @@ export function CourtsSection({
           </div>
           <div className="flex flex-1 flex-col gap-2">
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <h3 className="font-semibold text-foreground">{court.name}</h3>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="secondary" className="text-xs">
-                    {court.indoor_outdoor === "indoor" ? "Indoor" : "Outdoor"}
-                  </Badge>
-                  {court.surface_type && (
-                    <Badge variant="secondary" className="text-xs">
-                      {court.surface_type}
-                    </Badge>
-                  )}
-                </div>
+              <div className="min-w-0">
+                <h3 className="text-base/[1.375rem] font-semibold text-foreground">{court.name}</h3>
+                {/* Surface and type read as plain facts, not as filter chips —
+                    nothing here is selectable, and badges implied it was. */}
+                <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
+                  {[court.indoor_outdoor === "indoor" ? "Indoor" : "Outdoor", court.surface_type]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
               </div>
-              <p className="shrink-0 text-sm font-semibold text-foreground">
-                ₱{court.hourly_price} <span className="font-normal text-muted-foreground">/ hour</span>
+              <p className="shrink-0 font-mono text-base/[1.375rem] font-semibold text-foreground">
+                ₱{court.hourly_price}
+                <span className="font-sans text-xs/4 font-normal text-muted-foreground">/hr</span>
               </p>
             </div>
-            {court.description && <p className="text-sm text-muted-foreground">{court.description}</p>}
+            {court.description && (
+              <p className="text-[0.8125rem]/[1.125rem] text-subtle">{court.description}</p>
+            )}
             <CourtAvailabilityStrip slots={availabilityByCourt[court.id] ?? []} />
           </div>
         </div>

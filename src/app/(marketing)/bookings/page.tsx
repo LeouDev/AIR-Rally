@@ -15,7 +15,7 @@ import { listRefundsForBookings } from "@/lib/services/refunds";
 import { listReschedulesForOriginalBookings } from "@/lib/services/reschedules";
 import { listReviewableBookings } from "@/lib/services/reviews";
 import { RESCHEDULE_CUTOFF_HOURS } from "@/lib/booking-config";
-import { formatVenueRange } from "@/lib/bookingTime";
+import { formatVenueRange, venueTimeZoneLabel } from "@/lib/bookingTime";
 import type { BookingStatus, BookingReschedule } from "@/lib/supabase/types";
 
 // Real per-viewer bookings — never statically cached.
@@ -142,7 +142,9 @@ export default async function BookingsPage() {
                   {booking.confirmation_code}
                 </span>
               </p>
-              <p className="text-xs/4 text-muted-foreground">Venue time (PHT)</p>
+              <p className="text-xs/4 text-muted-foreground">
+                Venue time ({venueTimeZoneLabel(booking.start_time, booking.venueTimezone)})
+              </p>
             </div>
             {(() => {
               const refunds = refundsByBooking.get(booking.id);

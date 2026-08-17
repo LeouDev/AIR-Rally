@@ -1,4 +1,9 @@
-import { formatVenueDate, formatVenueTime, formatVenueRange } from "@/lib/bookingTime";
+import {
+  formatVenueDate,
+  formatVenueTime,
+  formatVenueRange,
+  venueTimeZoneLabel,
+} from "@/lib/bookingTime";
 
 /**
  * 2026-08-19T10:00:00Z is 6:00 PM in Manila (UTC+8) and 3:00 AM the same day
@@ -43,5 +48,22 @@ describe("bookingTime", () => {
     expect(formatVenueTime(START, "Asia/Manila")).toBe("6:00 PM");
     expect(formatVenueTime(START, "America/New_York")).toBe("6:00 AM");
     expect(formatVenueDate(START, "Pacific/Kiritimati")).toBe("Thu, Aug 20");
+  });
+});
+
+describe("venueTimeZoneLabel", () => {
+  it("labels the venue's zone, not the device's", () => {
+    expect(venueTimeZoneLabel(START, MANILA)).toBe("GMT+8");
+    expect(venueTimeZoneLabel(START, "America/New_York")).toBe("EDT");
+  });
+
+  it("reflects the offset in effect on that date, so a DST venue is not mislabelled", () => {
+    const january = "2026-01-15T10:00:00.000Z";
+    expect(venueTimeZoneLabel(january, "America/New_York")).toBe("EST");
+    expect(venueTimeZoneLabel(START, "America/New_York")).toBe("EDT");
+  });
+
+  it("falls back to the IANA name rather than inventing one", () => {
+    expect(venueTimeZoneLabel(START, "UTC")).toBeTruthy();
   });
 });
