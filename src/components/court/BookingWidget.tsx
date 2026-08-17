@@ -351,33 +351,41 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
                   <dd className="font-medium text-foreground">{formatDuration(durationMinutes)}</dd>
                 </div>
               </dl>
+              {/* Money is mono and right-aligned so the three figures form a
+                  column the eye can add up. Only the platform/customer split
+                  appears here — the venue/platform revenue split stored on the
+                  booking is never customer-facing. */}
               {feeBreakdown ? (
-                <div className="flex flex-col gap-2 rounded-lg bg-accent px-3 py-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-accent-foreground">Court ({formatDuration(durationMinutes)})</span>
-                    <span className="text-sm text-accent-foreground">₱{estimatedTotal}</span>
+                <div className="flex flex-col gap-2 rounded-lg bg-muted px-3.5 py-3">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-sm/5 text-subtle">Court ({formatDuration(durationMinutes)})</span>
+                    <span className="font-mono text-sm/5 text-foreground">₱{(feeBreakdown.courtAmount / 100).toFixed(2)}</span>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-baseline justify-between gap-4">
                     {/* "Online payment fee", never "service fee" or "booking
                         fee" — this is PayMongo's charge for collecting the
                         payment, passed through in full. The other labels
                         imply AIR/Rally keeps it. */}
-                    <span className="text-sm text-accent-foreground">Online payment fee</span>
-                    <span className="text-sm text-accent-foreground">₱{(feeBreakdown.processingFeeAmount / 100).toFixed(2)}</span>
+                    <span className="text-sm/5 text-subtle">Online payment fee</span>
+                    <span className="font-mono text-sm/5 text-foreground">₱{(feeBreakdown.processingFeeAmount / 100).toFixed(2)}</span>
                   </div>
-                  <div className="flex items-center justify-between border-t border-accent-foreground/15 pt-2">
-                    <span className="text-sm font-medium text-accent-foreground">Total</span>
-                    <span className="text-lg font-semibold text-accent-foreground">₱{(feeBreakdown.totalChargedAmount / 100).toFixed(2)}</span>
+                  <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
+                    <span className="text-[0.9375rem]/5 font-semibold text-foreground">Total</span>
+                    <span className="font-mono text-xl/7 font-semibold text-foreground">₱{(feeBreakdown.totalChargedAmount / 100).toFixed(2)}</span>
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center justify-between rounded-lg bg-accent px-3 py-2.5">
-                  <span className="text-sm font-medium text-accent-foreground">Total</span>
-                  <span className="text-lg font-semibold text-accent-foreground">₱{estimatedTotal}</span>
+                <div className="flex items-baseline justify-between gap-4 rounded-lg bg-muted px-3.5 py-3">
+                  <span className="text-[0.9375rem]/5 font-semibold text-foreground">Total</span>
+                  <span className="font-mono text-xl/7 font-semibold text-foreground">₱{estimatedTotal}</span>
                 </div>
               )}
 
-              {feeBreakdown && <p className="text-xs text-muted-foreground">Book with AIR/Rally Credits and this fee doesn&apos;t apply.</p>}
+              {feeBreakdown && (
+                <p className="text-xs/4 text-muted-foreground">
+                  Book with AIR/Rally Credits and this fee doesn&apos;t apply.
+                </p>
+              )}
 
               <PlayerPicker
                 selected={players}
