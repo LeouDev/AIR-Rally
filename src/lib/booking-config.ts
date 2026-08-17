@@ -82,3 +82,17 @@ export const RESCHEDULE_CUTOFF_HOURS = 24;
  * customer bears no responsibility for it.
  */
 export const CANCELLATION_CREDIT_CUTOFF_HOURS = 48;
+
+/**
+ * How long after a booking is created a not-yet-paid PayMongo checkout is
+ * still treated as possibly in flight, rather than abandoned.
+ *
+ * UNVERIFIED ASSUMPTION, unlike PROCESSING_FEE_PERCENT above: this project
+ * has only ever confirmed PayMongo's `paid` payment status against a real
+ * response (see reconcilePaymongoPendingBooking() in lib/services/bookings.ts).
+ * It has not verified how long a QR Ph payment can take to settle, or
+ * PayMongo's exact status vocabulary for an attempt that has not yet
+ * succeeded. 10 minutes is a reasonable guess, not a measured figure —
+ * re-verify with a real payment before trusting it at the edges.
+ */
+export const PAYMONGO_PAYMENT_IN_FLIGHT_WINDOW_MINUTES = 10;

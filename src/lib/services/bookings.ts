@@ -7,6 +7,7 @@ import {
   MIN_LEAD_TIME_MINUTES,
   MAX_BOOKING_WINDOW_DAYS,
   DEFAULT_CURRENCY,
+  PAYMONGO_PAYMENT_IN_FLIGHT_WINDOW_MINUTES,
 } from "@/lib/booking-config";
 import { retrievePayMongoCheckoutSession } from "@/lib/services/paymongo";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
@@ -787,6 +788,19 @@ export async function confirmPaymongoBookingPayment(
   return data ?? false;
 }
 
+/** What reconcilePaymongoPendingBooking() learned, for the caller to render the right waiting screen. */
+export type ReconcilePaymongoResult = {
+  booking: Booking;
+  /**
+   * True when PayMongo shows a payment attempt that hasn't resolved to
+   * "paid" yet, but also isn't known to have failed — i.e. money may
+   * genuinely still be in flight, so the caller should say "processing"
+   * rather than "book again". See derivePaymentState() in
+   * lib/paymentState.ts, which is what actually consumes this.
+   */
+  paymentInFlight: boolean;
+};
+
 /**
  * Twin of reconcilePendingBooking() — the confirmation page calls this
  * one instead when booking.payment_provider === "paymongo". No external
@@ -795,20 +809,31 @@ export async function confirmPaymongoBookingPayment(
  * checkout-creation time, so this reads it directly rather than trusting
  * anything from the URL.
  */
-export async function reconcilePaymongoPendingBooking(supabase: Client, bookingId: string): Promise<Booking> {
+export async function reconcilePaymongoPendingBooking(supabase: Client, bookingId: string): Promise<ReconcilePaymongoResult> {
   const booking = await getBookingById(supabase, bookingId);
   if (!booking) {
     throw new BookingError("booking_not_found", "We couldn't find that booking.");
   }
   if (booking.status !== "pending" || booking.payment_provider !== "paymongo" || !booking.paymongo_checkout_session_id) {
-    return booking;
+    return { booking, paymentInFlight: false };
   }
 
   const session = await retrievePayMongoCheckoutSession(booking.paymongo_checkout_session_id);
   const paymentIntent = session.attributes.payment_intent;
-  const paidPayment = paymentIntent?.attributes.payments.find((p) => p.attributes.status === "paid");
+  const payments = paymentIntent?.attributes.payments ?? [];
+  const paidPayment = payments.find((p) => p.attributes.status === "paid");
   if (!paymentIntent || !paidPayment) {
-    return booking;
+    // Only "paid" is a status this project has verified against a real
+    // PayMongo response — "failed" is assumed by the same convention
+    // (paid/failed being the two terminal states of a payment attempt),
+    // not confirmed. Anything that isn't a known-terminal failure counts
+    // as possibly still settling, but only within a bounded recent
+    // window — otherwise a genuinely stuck or long-abandoned checkout
+    // would tell the customer to keep waiting forever.
+    const hasNonFailedAttempt = payments.some((p) => p.attributes.status !== "failed");
+    const minutesSinceCreated = (Date.now() - new Date(booking.created_at).getTime()) / 60_000;
+    const paymentInFlight = hasNonFailedAttempt && minutesSinceCreated <= PAYMONGO_PAYMENT_IN_FLIGHT_WINDOW_MINUTES;
+    return { booking, paymentInFlight };
   }
 
   const confirmed = await confirmPaymongoBookingPayment(supabase, {
@@ -852,5 +877,9 @@ export async function reconcilePaymongoPendingBooking(supabase: Client, bookingI
   }
 
   const refreshed = await getBookingById(supabase, bookingId);
-  return refreshed ?? booking;
+  // PayMongo reported a paid payment either way, whether or not our own
+  // confirm RPC accepted it (see the alarm case above) — a customer who
+  // has paid must never be told to book again while that's being sorted
+  // out, even in the rare case this booking is still 'pending'.
+  return { booking: refreshed ?? booking, paymentInFlight: true };
 }

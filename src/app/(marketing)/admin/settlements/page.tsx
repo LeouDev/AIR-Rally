@@ -89,6 +89,13 @@ export default async function AdminSettlementsPage({ searchParams }: { searchPar
           <p className="mt-1 text-xs text-muted-foreground">Pending + payable, not yet paid out.</p>
         </div>
         <div className="rounded-2xl border border-border bg-card p-6">
+          <dt className="text-xs text-muted-foreground">Total collected</dt>
+          <dd className="mt-1 text-2xl font-semibold text-foreground">
+            {formatSettlementMoney(summary.totalCollectedAmount, summary.currency)}
+          </dd>
+          <p className="mt-1 text-xs text-muted-foreground">Real cash received via PayMongo on these bookings, 100%.</p>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-6">
           <dt className="text-xs text-muted-foreground">Pending</dt>
           <dd className="mt-1 text-2xl font-semibold text-foreground">
             {formatSettlementMoney(summary.pendingAmount, summary.currency)}

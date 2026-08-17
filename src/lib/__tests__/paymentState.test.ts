@@ -20,6 +20,17 @@ describe("derivePaymentState", () => {
     // payment is being confirmed.
     expect(derivePaymentState({ status: "pending", paid_at: null })).toBe("awaiting_payment");
   });
+
+  it("treats an in-flight PayMongo attempt as settling even though paid_at is still null", () => {
+    // paid_at only ever gets set in the same update that confirms a
+    // booking, so it alone could never distinguish "just paid, webhook
+    // hasn't landed" from "abandoned" — this is the actual fix for that.
+    expect(derivePaymentState({ status: "pending", paid_at: null }, { paymentInFlight: true })).toBe("settling");
+  });
+
+  it("still reads as awaiting_payment when paymentInFlight is explicitly false", () => {
+    expect(derivePaymentState({ status: "pending", paid_at: null }, { paymentInFlight: false })).toBe("awaiting_payment");
+  });
 });
 
 describe("isCreditOnly", () => {

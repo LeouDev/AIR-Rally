@@ -65,6 +65,11 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
   // technically let the row through.
   if (!booking || booking.user_id !== user.id) notFound();
 
+  // Whether PayMongo shows a payment attempt that hasn't resolved yet —
+  // the signal that tells derivePaymentState() to say "processing"
+  // instead of "book again" below. Only ever set by the reconcile call.
+  let paymentInFlight = false;
+
   // Redirect arrives before webhook: reconcile with the real payment
   // provider directly rather than showing a false "still pending" state
   // the user would have to guess needs a manual refresh for no reason.
@@ -81,7 +86,9 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
       // PayMongo and requires a payment with status 'paid' before it
       // confirms anything. Rendering the page still uses the RLS-scoped
       // client — only the verified confirmation is privileged.
-      booking = await reconcilePaymongoPendingBooking(createServiceRoleClient(), bookingId);
+      const reconciled = await reconcilePaymongoPendingBooking(createServiceRoleClient(), bookingId);
+      booking = reconciled.booking;
+      paymentInFlight = reconciled.paymentInFlight;
     } catch (error) {
       logServerError("bookings.confirmation.reconcile", error);
       // Reconciliation failing doesn't change what we show — the page
@@ -121,7 +128,7 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
       ? (await listReschedulesForBooking(supabase, booking.id)).find((r) => r.new_booking_id === booking.id && r.status === "completed")
       : undefined;
 
-  const paymentState = derivePaymentState(booking);
+  const paymentState = derivePaymentState(booking, { paymentInFlight });
   const creditOnly = isCreditOnly(booking);
 
   if (paymentState === "cancelled") {

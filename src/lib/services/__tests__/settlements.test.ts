@@ -18,14 +18,22 @@ import { createMockSupabase, createRpcMockSupabase, postgrestError } from "../..
 
 type Row = {
   venue_amount: number;
+  paymongo_amount?: number;
   cash_position?: number;
   settlement_status: string;
   currency: string;
 };
 
-/** A ₱500 booking under the 5% fee: ₱25 platform, ₱475 venue. */
+/** A ₱500 booking under the 5% fee, all cash: ₱25 platform, ₱475 venue, ₱500 collected. */
 function row(overrides: Partial<Row> = {}): Row {
-  return { venue_amount: 47500, cash_position: 2500, settlement_status: "pending", currency: "PHP", ...overrides };
+  return {
+    venue_amount: 47500,
+    paymongo_amount: 50000,
+    cash_position: 2500,
+    settlement_status: "pending",
+    currency: "PHP",
+    ...overrides,
+  };
 }
 
 describe("getOwnerSettlementSummary", () => {
@@ -187,6 +195,21 @@ describe("getAdminSettlementSummary", () => {
   it("counts on-hold settlements so they can be surfaced for review", async () => {
     const supabase = createMockSupabase({ data: [row({ settlement_status: "on_hold" })], error: null });
     await expect(getAdminSettlementSummary(supabase)).resolves.toMatchObject({ onHoldCount: 1 });
+  });
+
+  // The new "how much did we actually collect" figure — real PayMongo cash,
+  // never derived from venue_amount or cash_position.
+  it("totals real cash collected across live settlements only", async () => {
+    const supabase = createMockSupabase({
+      data: [
+        row({ settlement_status: "pending", paymongo_amount: 50000 }), // all cash
+        row({ settlement_status: "payable", paymongo_amount: 10000, cash_position: -37500 }), // mixed
+        row({ settlement_status: "reversed", paymongo_amount: 50000 }), // no longer live — excluded
+      ],
+      error: null,
+    });
+
+    await expect(getAdminSettlementSummary(supabase)).resolves.toMatchObject({ totalCollectedAmount: 60000 });
   });
 });
 
