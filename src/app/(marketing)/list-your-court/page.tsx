@@ -51,17 +51,48 @@ export default async function ListYourCourtPage() {
    */
   if (user && venues.length > 0) {
     return (
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-12 sm:px-6 lg:px-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Your venues</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {venues.length} {venues.length === 1 ? "venue" : "venues"} on your account.
+      <div>
+        <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-12 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">Your venues</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {venues.length} {venues.length === 1 ? "venue" : "venues"} on your account.
+              </p>
+            </div>
+            <CreateVenueDialog />
+          </div>
+          <OwnerVenueGrid venues={venues} />
+        </div>
+
+        {/* The pitch still runs, just underneath. No "Get Started" button
+            down here — it scrolled to a venue list this owner has already
+            walked past, and the action they'd actually want (add another
+            venue) is the button at the top. */}
+        <section className="bg-secondary text-secondary-foreground">
+          <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 px-4 py-14 text-center sm:px-6 lg:px-8">
+            <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Growing with AIR/Rally</h2>
+            <p className="max-w-xl text-secondary-foreground/80">
+              The marketplace built specifically for pickleball venues — reach more players and simplify how you manage
+              bookings.
             </p>
           </div>
-          <CreateVenueDialog />
-        </div>
-        <OwnerVenueGrid venues={venues} />
+        </section>
+
+        <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:px-8">
+          <SectionHeader eyebrow="For venue owners" title="Everything you need to grow your venue" align="center" />
+          <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
+            {BENEFITS.map(({ icon: Icon, title, description }) => (
+              <div key={title} className="flex flex-col items-start gap-3 rounded-2xl border border-border bg-card p-6">
+                <div className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
+                  <Icon className="size-5" aria-hidden="true" />
+                </div>
+                <h3 className="text-base font-semibold text-foreground">{title}</h3>
+                <p className="text-sm text-muted-foreground">{description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     );
   }
