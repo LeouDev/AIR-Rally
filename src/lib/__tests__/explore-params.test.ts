@@ -1,4 +1,9 @@
-import { parseExploreFilters, filtersToSearchParams } from "@/lib/explore-params";
+import {
+  parseExploreFilters,
+  filtersToSearchParams,
+  describeActiveFilters,
+  CLEAR_ALL_FILTERS,
+} from "@/lib/explore-params";
 
 describe("parseExploreFilters", () => {
   it("returns an all-undefined filter set for empty search params", () => {
@@ -107,5 +112,64 @@ describe("filtersToSearchParams", () => {
   it("omits `indoor` for the default 'both' value, `sort` for 'recommended', and `page` for page 1 — keeps the URL clean", () => {
     const params = filtersToSearchParams({ indoorOutdoor: "both", sort: "recommended", page: 1 });
     expect(params.toString()).toBe("");
+  });
+});
+
+describe("describeActiveFilters", () => {
+  const amenityNames = new Map([
+    ["a1", "Showers"],
+    ["a2", "Night Lighting"],
+  ]);
+
+  it("returns nothing for a filter set that only carries text search, sort, and page", () => {
+    expect(describeActiveFilters({ q: "riverside", sort: "rating", page: 2 })).toEqual([]);
+  });
+
+  it("describes each active filter once, with a patch that removes only that one", () => {
+    const chips = describeActiveFilters(
+      { indoorOutdoor: "indoor", minPrice: 100, minRating: 4.5, amenityIds: ["a1", "a2"] },
+      amenityNames
+    );
+
+    expect(chips.map((c) => c.label)).toEqual(["Indoor", "Over ₱100", "4.5+", "Showers", "Night Lighting"]);
+    expect(chips.find((c) => c.label === "Showers")?.clear).toEqual({ amenityIds: ["a2"] });
+    expect(chips.find((c) => c.label === "Indoor")?.clear).toEqual({ indoorOutdoor: undefined });
+  });
+
+  it("collapses a min/max pair into one chip that clears both bounds together", () => {
+    const chips = describeActiveFilters({ minPrice: 90, maxPrice: 250 });
+    expect(chips).toHaveLength(1);
+    expect(chips[0].label).toBe("₱90 – ₱250");
+    expect(chips[0].clear).toEqual({ minPrice: undefined, maxPrice: undefined });
+  });
+
+  it("clears lat/lng alongside the radius, since the distance filter is all-or-nothing", () => {
+    const chips = describeActiveFilters({ lat: 10.3, lng: 123.8, radiusKm: 5 });
+    expect(chips[0].clear).toEqual({ lat: undefined, lng: undefined, radiusKm: undefined });
+  });
+
+  it("skips an amenity id with no known name rather than rendering a raw uuid", () => {
+    expect(describeActiveFilters({ amenityIds: ["deleted-id"] }, amenityNames)).toEqual([]);
+  });
+
+  it("CLEAR_ALL_FILTERS empties every chip while leaving search and sort alone", () => {
+    const filters = {
+      q: "riverside",
+      sort: "rating" as const,
+      indoorOutdoor: "indoor" as const,
+      minPrice: 100,
+      minRating: 4.5,
+      surfaceType: "Concrete",
+      lat: 10.3,
+      lng: 123.8,
+      radiusKm: 5,
+      availableOn: "2026-08-19",
+      amenityIds: ["a1"],
+    };
+    const cleared = { ...filters, ...CLEAR_ALL_FILTERS };
+
+    expect(describeActiveFilters(cleared, amenityNames)).toEqual([]);
+    expect(cleared.q).toBe("riverside");
+    expect(cleared.sort).toBe("rating");
   });
 });

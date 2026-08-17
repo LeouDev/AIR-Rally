@@ -11,8 +11,7 @@ import { MarketplaceSearchInput } from "@/components/search/MarketplaceSearchInp
 import { ExploreLayout } from "@/components/search/ExploreLayout";
 import { ExplorePagination } from "@/components/search/ExplorePagination";
 import { CourtCard } from "@/components/court/CourtCard";
-import { EmptyState } from "@/components/shared/EmptyState";
-import { SearchX } from "lucide-react";
+import { NoResultsState } from "@/components/search/NoResultsState";
 
 export const metadata: Metadata = {
   title: "Explore Courts",
@@ -58,11 +57,7 @@ export default async function ExplorePage({ searchParams }: ExplorePageProps) {
         ))}
       </div>
     ) : (
-      <EmptyState
-        icon={SearchX}
-        title="No courts match your search"
-        description="Try a different search term, or widen your filters to see more results."
-      />
+      <NoResultsState amenities={amenities} />
     );
 
   return (

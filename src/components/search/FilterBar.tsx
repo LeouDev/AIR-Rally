@@ -8,9 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { SelectionChip } from "@/components/shared/SelectionChip";
 import { cn } from "@/lib/utils";
 import { useExploreFilters } from "@/lib/hooks/useExploreFilters";
+import { CLEAR_ALL_FILTERS, describeActiveFilters } from "@/lib/explore-params";
 import type { Amenity } from "@/lib/supabase/types";
+
+/** Uppercase, tracked section label — the one heading style inside the sheet. */
+const SECTION_LABEL = "text-xs/4 font-semibold tracking-[0.12em] text-muted-foreground uppercase";
 
 const COURT_TYPES: { value: "any" | "indoor" | "outdoor"; label: string; icon: typeof Home }[] = [
   { value: "any", label: "Any", icon: Layers },
@@ -41,6 +46,7 @@ export function FilterBar({ amenities, surfaceTypes, className }: FilterBarProps
 
 function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps) {
   const { filters, applyFilters } = useExploreFilters();
+  const amenityNames = new Map(amenities.map((amenity) => [amenity.id, amenity.name]));
 
   const [minPriceInput, setMinPriceInput] = useState(filters.minPrice?.toString() ?? "");
   const [maxPriceInput, setMaxPriceInput] = useState(filters.maxPrice?.toString() ?? "");
@@ -84,49 +90,25 @@ function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps)
     );
   }
 
-  const hasActiveFilters = Boolean(
-    filters.indoorOutdoor ||
-      filters.minPrice !== undefined ||
-      filters.maxPrice !== undefined ||
-      filters.minRating ||
-      (filters.amenityIds && filters.amenityIds.length > 0) ||
-      filters.surfaceType ||
-      filters.radiusKm !== undefined ||
-      filters.availableOn ||
-      filters.availableAt
-  );
+  const activeChips = describeActiveFilters(filters, amenityNames);
+  const priceSummary =
+    filters.minPrice === undefined && filters.maxPrice === undefined
+      ? "Any"
+      : `₱${filters.minPrice ?? 0} – ${filters.maxPrice !== undefined ? `₱${filters.maxPrice}` : "any"}`;
 
   return (
-    <div className={cn("flex flex-col gap-6", className)}>
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-foreground">Filters</h2>
-        {hasActiveFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() =>
-              applyFilters({
-                indoorOutdoor: undefined,
-                minPrice: undefined,
-                maxPrice: undefined,
-                minRating: undefined,
-                amenityIds: undefined,
-                surfaceType: undefined,
-                lat: undefined,
-                lng: undefined,
-                radiusKm: undefined,
-                availableOn: undefined,
-                availableAt: undefined,
-              })
-            }
-          >
+    <div className={cn("flex flex-col gap-5", className)}>
+      <div className="flex items-center justify-between lg:hidden">
+        <h2 className={SECTION_LABEL}>Filters</h2>
+        {activeChips.length > 0 && (
+          <Button variant="link" size="sm" className="px-0" onClick={() => applyFilters(CLEAR_ALL_FILTERS)}>
             Reset
           </Button>
         )}
       </div>
 
       <div className="flex flex-col gap-2.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase">Court type</Label>
+        <Label className={SECTION_LABEL}>Court type</Label>
         <div className="flex gap-2">
           {COURT_TYPES.map(({ value, label, icon: Icon }) => {
             const active = value === "any" ? !filters.indoorOutdoor : filters.indoorOutdoor === value;
@@ -137,10 +119,10 @@ function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps)
                 aria-pressed={active}
                 onClick={() => applyFilters({ indoorOutdoor: value === "any" ? undefined : value })}
                 className={cn(
-                  "flex flex-1 flex-col items-center gap-1 rounded-xl border px-3 py-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                  "flex h-11 flex-1 items-center justify-center gap-1.5 rounded-lg text-[0.9375rem]/5 transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/25",
                   active
-                    ? "border-primary bg-accent text-accent-foreground"
-                    : "border-border text-muted-foreground hover:border-primary/40"
+                    ? "bg-secondary font-semibold text-secondary-foreground"
+                    : "border-[1.5px] border-border bg-card font-medium text-foreground hover:border-placeholder"
                 )}
               >
                 <Icon className="size-4" aria-hidden="true" />
@@ -154,9 +136,10 @@ function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps)
       <Separator />
 
       <div className="flex flex-col gap-2.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase">
-          Price per hour (₱)
-        </Label>
+        <div className="flex items-baseline justify-between gap-3">
+          <Label className={SECTION_LABEL}>Price per hour</Label>
+          <span className="font-mono text-sm/5 text-foreground">{priceSummary}</span>
+        </div>
         <div className="flex items-center gap-2">
           <Input
             type="number"
@@ -180,79 +163,69 @@ function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps)
 
       <Separator />
 
-      <div className="flex flex-col gap-2.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase">
-          Minimum rating
-        </Label>
-        <div className="flex gap-2">
-          {RATINGS.map((rating) => (
-            <button
-              key={rating}
-              type="button"
-              aria-pressed={(filters.minRating ?? 0) === rating}
-              onClick={() => applyFilters({ minRating: rating || undefined })}
-              className={cn(
-                "flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                (filters.minRating ?? 0) === rating
-                  ? "border-primary bg-accent text-accent-foreground"
-                  : "border-border text-muted-foreground hover:border-primary/40"
-              )}
-            >
-              {rating === 0 ? "Any" : `${rating}+`}
-            </button>
-          ))}
+      <div className="flex flex-col gap-4 sm:flex-row">
+        <div className="flex flex-1 flex-col gap-2.5">
+          <Label className={SECTION_LABEL}>Min rating</Label>
+          <div className="flex gap-2">
+            {RATINGS.map((rating) => (
+              <SelectionChip
+                key={rating}
+                selected={(filters.minRating ?? 0) === rating}
+                onClick={() => applyFilters({ minRating: rating || undefined })}
+                className="flex-1 justify-center"
+              >
+                {rating === 0 ? "Any" : `★ ${rating}+`}
+              </SelectionChip>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-1 flex-col gap-2.5">
+          <Label className={SECTION_LABEL}>Distance</Label>
+          <Select value={filters.radiusKm !== undefined ? String(filters.radiusKm) : ANY_OPTION} onValueChange={applyRadius}>
+            <SelectTrigger className="w-full" aria-label="Distance from your location">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ANY_OPTION}>Any distance</SelectItem>
+              {RADII_KM.map((km) => (
+                <SelectItem key={km} value={String(km)}>
+                  Within {km} km
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
       <Separator />
 
       <div className="flex flex-col gap-2.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase">Surface</Label>
+        <Label className={SECTION_LABEL}>Surface</Label>
         {surfaceTypes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No surface types to filter by yet.</p>
+          <p className="text-sm text-subtle">No surface types to filter by yet.</p>
         ) : (
-          <Select
-            value={filters.surfaceType ?? ANY_OPTION}
-            onValueChange={(value) => applyFilters({ surfaceType: value === ANY_OPTION ? undefined : value })}
-          >
-            <SelectTrigger className="w-full" aria-label="Surface type">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ANY_OPTION}>Any surface</SelectItem>
-              {surfaceTypes.map((surface) => (
-                <SelectItem key={surface} value={surface}>
+          <div className="flex flex-wrap gap-2">
+            {surfaceTypes.map((surface) => {
+              const selected = filters.surfaceType === surface;
+              return (
+                <SelectionChip
+                  key={surface}
+                  selected={selected}
+                  onClick={() => applyFilters({ surfaceType: selected ? undefined : surface })}
+                >
                   {surface}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                </SelectionChip>
+              );
+            })}
+          </div>
         )}
       </div>
 
       <Separator />
 
       <div className="flex flex-col gap-2.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase">Distance from me</Label>
-        <Select value={filters.radiusKm !== undefined ? String(filters.radiusKm) : ANY_OPTION} onValueChange={applyRadius}>
-          <SelectTrigger className="w-full" aria-label="Distance from your location">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ANY_OPTION}>Any distance</SelectItem>
-            {RADII_KM.map((km) => (
-              <SelectItem key={km} value={String(km)}>
-                Within {km} km
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <Separator />
-
-      <div className="flex flex-col gap-2.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase">Open on</Label>
+        <Label className={SECTION_LABEL}>Open on</Label>
         <div className="flex items-center gap-2">
           <Input
             type="date"
@@ -268,7 +241,7 @@ function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps)
             onChange={(e) => applyFilters({ availableAt: e.target.value || undefined })}
           />
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs/4 text-muted-foreground">
           Shows venues open then — check the court page for live availability.
         </p>
       </div>
@@ -276,26 +249,19 @@ function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps)
       <Separator />
 
       <div className="flex flex-col gap-2.5">
-        <Label className="text-xs font-medium text-muted-foreground uppercase">Amenities</Label>
+        <Label className={SECTION_LABEL}>Amenities</Label>
         {amenities.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No amenities to filter by yet.</p>
+          <p className="text-sm text-subtle">No amenities to filter by yet.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {amenities.slice(0, 8).map((amenity) => (
-              <button
+            {amenities.map((amenity) => (
+              <SelectionChip
                 key={amenity.id}
-                type="button"
-                aria-pressed={(filters.amenityIds ?? []).includes(amenity.id)}
+                selected={(filters.amenityIds ?? []).includes(amenity.id)}
                 onClick={() => toggleAmenity(amenity.id)}
-                className={cn(
-                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                  (filters.amenityIds ?? []).includes(amenity.id)
-                    ? "border-primary bg-accent text-accent-foreground"
-                    : "border-border text-muted-foreground hover:border-primary/40"
-                )}
               >
                 {amenity.name}
-              </button>
+              </SelectionChip>
             ))}
           </div>
         )}

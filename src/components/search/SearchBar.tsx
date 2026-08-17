@@ -61,8 +61,11 @@ export function SearchBar({ className, variant = "hero" }: SearchBarProps) {
   return (
     <div
       className={cn(
-        "flex w-full flex-col gap-2 rounded-2xl border border-border bg-card p-2 shadow-sm sm:flex-row sm:items-center sm:gap-0 sm:rounded-full",
-        variant === "hero" && "sm:p-2",
+        // 16px card radius and the card shadow — no border. The card is white
+        // on cream, which already separates it; a border on top of that reads
+        // as a second edge.
+        "flex w-full flex-col gap-2 rounded-xl bg-card p-1.5 shadow-card sm:flex-row sm:items-center sm:gap-0",
+        variant === "hero" && "sm:p-1.5",
         className
       )}
     >
@@ -77,7 +80,7 @@ export function SearchBar({ className, variant = "hero" }: SearchBarProps) {
           onChange={(e) => setLocation(e.target.value)}
           placeholder={detectedCity ?? LOCATION_PLACEHOLDER}
           aria-label="Where"
-          className="w-full min-w-0 border-none bg-transparent p-0 text-sm font-medium text-foreground shadow-none outline-none placeholder:font-normal placeholder:text-muted-foreground focus-visible:ring-0"
+          className="w-full min-w-0 border-none bg-transparent p-0 text-[0.9375rem]/5 font-medium text-foreground shadow-none outline-none placeholder:font-normal placeholder:text-placeholder focus-visible:ring-0"
         />
       </Field>
 
@@ -118,7 +121,7 @@ export function SearchBar({ className, variant = "hero" }: SearchBarProps) {
       <Button
         onClick={handleSearch}
         size="lg"
-        className="mt-1 h-12 gap-2 rounded-full px-6 text-base sm:mt-0 sm:ml-2"
+        className="mt-1 shrink-0 sm:mt-0 sm:ml-1.5"
       >
         <Search className="size-4" />
         Find Courts
@@ -139,10 +142,12 @@ function Field({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-2.5 px-4 py-2.5 sm:px-5", className)}>
+    <div className={cn("flex items-center gap-2.5 px-3 py-2.5", className)}>
       <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <div className="flex min-w-0 flex-col">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-[0.6875rem]/[0.875rem] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
+          {label}
+        </span>
         {children}
       </div>
     </div>
@@ -150,5 +155,5 @@ function Field({
 }
 
 function Divider() {
-  return <div className="hidden h-8 w-px shrink-0 bg-border sm:block" aria-hidden="true" />;
+  return <div className="hidden h-9 w-px shrink-0 bg-hairline sm:block" aria-hidden="true" />;
 }

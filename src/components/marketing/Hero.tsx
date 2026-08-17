@@ -5,6 +5,13 @@ import { SearchBar } from "@/components/search/SearchBar";
 import { CourtSurface } from "@/components/court/CourtSurface";
 import { HeroSecondaryCTA } from "@/components/marketing/HeroSecondaryCTA";
 
+const QUICK_FILTERS = [
+  { label: "Under ₱150", href: "/explore?maxPrice=150" },
+  { label: "Indoor", href: "/explore?indoor=indoor" },
+  { label: "Outdoor", href: "/explore?indoor=outdoor" },
+  { label: "Top rated", href: "/explore?minRating=4.5" },
+];
+
 export function Hero() {
   return (
     <section className="relative overflow-hidden bg-gradient-to-b from-accent/60 via-background to-background">
@@ -60,8 +67,24 @@ export function Hero() {
         </div>
       </div>
 
-      <div className="relative z-10 mx-auto -mt-16 max-w-4xl px-4 sm:px-6 lg:px-8">
+      <div className="relative z-10 mx-auto -mt-16 flex max-w-4xl flex-col gap-4 px-4 sm:px-6 lg:px-8">
         <SearchBar />
+
+        {/* The four decisions people actually arrive with, one tap each. Every
+            chip is a real link into Explore, so they are shareable and work
+            without JS — not client-side state that Explore then has to be
+            told about separately. */}
+        <div className="flex flex-wrap gap-2">
+          {QUICK_FILTERS.map(({ label, href }) => (
+            <Link
+              key={label}
+              href={href}
+              className="inline-flex min-h-9 items-center rounded-full border-[1.5px] border-border bg-card px-3.5 py-2 text-sm/5 font-medium text-foreground transition-colors hover:border-placeholder focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/25"
+            >
+              {label}
+            </Link>
+          ))}
+        </div>
       </div>
     </section>
   );

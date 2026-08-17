@@ -86,3 +86,110 @@ export function filtersToSearchParams(filters: MarketplaceFilters): URLSearchPar
   if (filters.page && filters.page > 1) params.set("page", String(filters.page));
   return params;
 }
+
+/**
+ * One removable filter, as shown in the chip row above the results.
+ *
+ * `clear` is the exact patch that drops just this filter, so the chip's ✕,
+ * the "N filters" badge, and Reset all read from one description of what is
+ * active. They used to be three separate hand-maintained conditions, which is
+ * how a filter can end up counted but not removable (or vice versa).
+ */
+export type ActiveFilterChip = {
+  key: string;
+  label: string;
+  clear: Partial<MarketplaceFilters>;
+};
+
+/** The patch that clears every filter at once, leaving text search and sort. */
+export const CLEAR_ALL_FILTERS: Partial<MarketplaceFilters> = {
+  indoorOutdoor: undefined,
+  minPrice: undefined,
+  maxPrice: undefined,
+  minRating: undefined,
+  amenityIds: undefined,
+  surfaceType: undefined,
+  lat: undefined,
+  lng: undefined,
+  radiusKm: undefined,
+  availableOn: undefined,
+  availableAt: undefined,
+};
+
+function formatPriceRange(min: number | undefined, max: number | undefined): string {
+  if (min !== undefined && max !== undefined) return `₱${min} – ₱${max}`;
+  if (min !== undefined) return `Over ₱${min}`;
+  return `Under ₱${max}`;
+}
+
+/**
+ * `amenityNames` maps amenity id -> display name; ids with no entry are
+ * skipped rather than rendered as a raw uuid, which is what a stale
+ * bookmarked URL pointing at a deleted amenity would otherwise produce.
+ */
+export function describeActiveFilters(
+  filters: MarketplaceFilters,
+  amenityNames: ReadonlyMap<string, string> = new Map()
+): ActiveFilterChip[] {
+  const chips: ActiveFilterChip[] = [];
+
+  if (filters.indoorOutdoor) {
+    chips.push({
+      key: "indoorOutdoor",
+      label: filters.indoorOutdoor === "indoor" ? "Indoor" : "Outdoor",
+      clear: { indoorOutdoor: undefined },
+    });
+  }
+
+  if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
+    chips.push({
+      key: "price",
+      label: formatPriceRange(filters.minPrice, filters.maxPrice),
+      clear: { minPrice: undefined, maxPrice: undefined },
+    });
+  }
+
+  if (filters.minRating) {
+    chips.push({
+      key: "minRating",
+      label: `${filters.minRating}+`,
+      clear: { minRating: undefined },
+    });
+  }
+
+  if (filters.surfaceType) {
+    chips.push({
+      key: "surfaceType",
+      label: filters.surfaceType,
+      clear: { surfaceType: undefined },
+    });
+  }
+
+  if (filters.radiusKm !== undefined) {
+    chips.push({
+      key: "radiusKm",
+      label: `Within ${filters.radiusKm} km`,
+      clear: { lat: undefined, lng: undefined, radiusKm: undefined },
+    });
+  }
+
+  if (filters.availableOn) {
+    chips.push({
+      key: "availableOn",
+      label: filters.availableAt ? `${filters.availableOn} ${filters.availableAt}` : filters.availableOn,
+      clear: { availableOn: undefined, availableAt: undefined },
+    });
+  }
+
+  for (const id of filters.amenityIds ?? []) {
+    const name = amenityNames.get(id);
+    if (!name) continue;
+    chips.push({
+      key: `amenity:${id}`,
+      label: name,
+      clear: { amenityIds: (filters.amenityIds ?? []).filter((other) => other !== id) },
+    });
+  }
+
+  return chips;
+}
