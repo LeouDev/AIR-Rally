@@ -6,6 +6,7 @@ import { ProfileActionsMenu } from "@/components/profile/ProfileActionsMenu";
 import { ProfileHeader } from "@/components/profile/ProfileHeader";
 import { getCurrentUserWithProfile } from "@/lib/supabase/auth";
 import { getProfileStats } from "@/lib/services/profiles";
+import { getFollowCounts } from "@/lib/services/follows";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/supabase/types";
 
@@ -55,11 +56,16 @@ export default async function ProfilePage() {
 
 async function ProfileWithStats({ profile, email }: { profile: Profile; email: string }) {
   const supabase = await createClient();
-  const stats = await getProfileStats(supabase, profile.id, profile.created_at);
+  const [stats, followCounts] = await Promise.all([
+    getProfileStats(supabase, profile.id, profile.created_at),
+    // Same counts COURT/Side shows on the public profile, so the two can
+    // never disagree about how many followers someone has.
+    getFollowCounts(supabase, profile.id),
+  ]);
 
   return (
     <div className="flex flex-col gap-8">
-      <ProfileHeader profile={profile} email={email} stats={stats} />
+      <ProfileHeader profile={profile} email={email} stats={stats} followCounts={followCounts} />
       <ProfileActionsMenu profile={profile} email={email} />
     </div>
   );
