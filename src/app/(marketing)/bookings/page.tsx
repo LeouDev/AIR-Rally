@@ -15,6 +15,7 @@ import { listRefundsForBookings } from "@/lib/services/refunds";
 import { listReschedulesForOriginalBookings } from "@/lib/services/reschedules";
 import { listReviewableBookings } from "@/lib/services/reviews";
 import { RESCHEDULE_CUTOFF_HOURS } from "@/lib/booking-config";
+import { formatVenueRange } from "@/lib/bookingTime";
 import type { BookingStatus, BookingReschedule } from "@/lib/supabase/types";
 
 // Real per-viewer bookings — never statically cached.
@@ -40,12 +41,7 @@ function formatMoney(amountMinorUnits: number, currency: string): string {
 }
 
 function formatWhen(booking: BookingWithDetails): string {
-  const start = new Date(booking.start_time);
-  const end = new Date(booking.end_time);
-  const dateStr = new Intl.DateTimeFormat("en-US", { timeZone: booking.venueTimezone, dateStyle: "medium" }).format(start);
-  const startStr = new Intl.DateTimeFormat("en-US", { timeZone: booking.venueTimezone, hour: "numeric", minute: "2-digit" }).format(start);
-  const endStr = new Intl.DateTimeFormat("en-US", { timeZone: booking.venueTimezone, hour: "numeric", minute: "2-digit" }).format(end);
-  return `${dateStr}, ${startStr} – ${endStr}`;
+  return formatVenueRange(booking.start_time, booking.end_time, booking.venueTimezone);
 }
 
 function isCancellable(booking: BookingWithDetails): boolean {
