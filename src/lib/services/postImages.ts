@@ -59,3 +59,25 @@ export async function uploadPostImages(supabase: Client, userId: string, files: 
 export function getPostImageUrl(supabase: Client, path: string): string {
   return supabase.storage.from(POST_IMAGES_BUCKET).getPublicUrl(path).data.publicUrl;
 }
+
+/**
+ * The same URL, without constructing a Supabase client.
+ *
+ * PostCard was calling getPostImageUrl(createClient(), path) inline —
+ * building an entire Supabase client per image, per render, purely to
+ * concatenate a string. In a scrolling feed with several photos per post
+ * that is real work repeated for nothing. The bucket is public, so its
+ * object URL is a fixed shape off the project URL. Mirrors
+ * clubImagePublicUrl().
+ *
+ * Returns null rather than throwing when the env var is missing: a photo
+ * that can't resolve should be skipped, never take the feed down.
+ */
+export function postImagePublicUrl(path: string | null): string | null {
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!base) return null;
+  return `${base}/storage/v1/object/public/${POST_IMAGES_BUCKET}/${path}`;
+}

@@ -11,8 +11,7 @@ import { ReportButton } from "@/components/trust/ReportButton";
 import type { PostWithAuthor } from "@/lib/services/posts";
 import type { ClubMentionMap } from "@/lib/services/clubs";
 import type { PublicProfile } from "@/lib/supabase/types";
-import { createClient } from "@/lib/supabase/client";
-import { getPostImageUrl } from "@/lib/services/postImages";
+import { postImagePublicUrl } from "@/lib/services/postImages";
 import { cn } from "@/lib/utils";
 
 export function initialsFrom(name: string) {
@@ -177,7 +176,8 @@ export function PostCard({
           )}
         >
           {post.image_paths.map((path) => {
-            const url = getPostImageUrl(createClient(), path);
+            const url = postImagePublicUrl(path);
+            if (!url) return null;
             const single = post.image_paths.length === 1;
             return (
               // next/image handles these: next.config's remotePatterns
