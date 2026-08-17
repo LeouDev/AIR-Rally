@@ -191,6 +191,22 @@ export type AdminSettlementSummary = {
    */
   creditFundedExposure: number;
   reversedCount: number;
+  /**
+   * Real PayMongo cash still held from bookings whose settlement was
+   * reversed — sum of paymongo_amount on 'reversed' rows only.
+   *
+   * A reversal withdraws the VENUE's entitlement; it does not undo the
+   * original charge. QR Ph payments cannot be refunded through PayMongo's
+   * API, so a cancelled booking's cash was never returned to the customer
+   * either. AIR/Rally therefore keeps the entire amount collected — not
+   * just its usual platform fee — which is exactly what this figure is.
+   *
+   * Deliberately excludes 'on_hold' rows: those reverse a SETTLED
+   * settlement, meaning the cash already left for the venue, so AIR/Rally
+   * does not hold it. Credit-funded reversed bookings correctly contribute
+   * 0 here — no real cash was ever collected for the credit portion.
+   */
+  retainedFromReversedAmount: number;
   onHoldCount: number;
 };
 
@@ -219,6 +235,7 @@ export async function getAdminSettlementSummary(supabase: Client): Promise<Admin
     totalCollectedAmount: 0,
     creditFundedExposure: 0,
     reversedCount: 0,
+    retainedFromReversedAmount: 0,
     onHoldCount: 0,
   };
 
@@ -233,6 +250,7 @@ export async function getAdminSettlementSummary(supabase: Client): Promise<Admin
       summary.payableCount += 1;
     } else if (row.settlement_status === "reversed") {
       summary.reversedCount += 1;
+      summary.retainedFromReversedAmount += row.paymongo_amount;
     } else if (row.settlement_status === "on_hold") {
       summary.onHoldCount += 1;
     }
