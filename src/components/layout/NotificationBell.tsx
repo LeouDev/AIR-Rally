@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
 import { Bell, CalendarCheck, CalendarX, Star, Users, Coins, ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
 import { listNotifications, getUnreadCount } from "@/lib/services/notifications";
@@ -35,9 +34,16 @@ const ICONS: Record<string, typeof Bell> = {
  * Fully client-side, like AuthNavSection/UserMenu — fetches its own
  * unread count on mount and its own recent-notifications list each time
  * the popover opens, rather than receiving server-fetched initial props.
- * No Realtime subscription and no deep-linking per notification in this
- * pass — deliberately deferred per the Phase 5.3 brief ("do not
- * overbuild"; email/push can come later).
+ *
+ * Opening the popover marks everything in it read, matching Facebook and
+ * Instagram's bell: the badge is "you have unseen activity," not a running
+ * total you clear item by item. There is deliberately no separate "Mark
+ * all read" button anymore — by the time anyone could click it, opening
+ * the popover has already done the same thing, which made the button a
+ * no-op waiting to be clicked.
+ *
+ * No Realtime subscription in this pass, and no email/push — see
+ * lib/services/notifications.ts and the Phase 5.3 brief.
  */
 export function NotificationBell({ userId }: NotificationBellProps) {
   const [unreadCount, setUnreadCount] = useState(0);
@@ -65,16 +71,35 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     try {
       const supabase = createClient();
       const rows = await listNotifications(supabase, userId);
-      setNotifications(rows);
-      setUnreadCount(rows.filter((n) => n.read_at === null).length);
+      const hadUnread = rows.some((n) => n.read_at === null);
+
+      // Opening the bell IS "marking as seen" — the badge clears
+      // immediately, optimistically, the same instant the list renders.
+      const readAt = new Date().toISOString();
+      const shown = hadUnread ? rows.map((n) => (n.read_at === null ? { ...n, read_at: readAt } : n)) : rows;
+      setNotifications(shown);
+      setUnreadCount(0);
+      setIsLoading(false);
+
+      if (hadUnread) {
+        const result = await markAllNotificationsReadAction();
+        if (!result.success) {
+          // Revert — the badge should never claim "read" when the write
+          // didn't actually happen.
+          setNotifications(rows);
+          setUnreadCount(rows.filter((n) => n.read_at === null).length);
+        }
+      }
     } catch {
       setNotifications([]);
-    } finally {
       setIsLoading(false);
     }
   }
 
   async function handleMarkRead(notification: Notification) {
+    // Opening the bell already marked every row read — this only still
+    // does something for a notification reached from /notifications
+    // (which fetches its own list independently of this component).
     if (notification.read_at !== null) return;
 
     const readAt = new Date().toISOString();
@@ -85,21 +110,6 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     if (!result.success) {
       setNotifications((prev) => prev?.map((n) => (n.id === notification.id ? { ...n, read_at: null } : n)) ?? prev);
       setUnreadCount((prev) => prev + 1);
-    }
-  }
-
-  async function handleMarkAllRead() {
-    if (!notifications || unreadCount === 0) return;
-
-    const previous = notifications;
-    const readAt = new Date().toISOString();
-    setNotifications((prev) => prev?.map((n) => (n.read_at === null ? { ...n, read_at: readAt } : n)) ?? prev);
-    setUnreadCount(0);
-
-    const result = await markAllNotificationsReadAction();
-    if (!result.success) {
-      setNotifications(previous);
-      setUnreadCount(previous.filter((n) => n.read_at === null).length);
     }
   }
 
@@ -125,11 +135,6 @@ export function NotificationBell({ userId }: NotificationBellProps) {
       <PopoverContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between border-b border-border px-3 py-2">
           <p className="text-sm font-medium text-foreground">Notifications</p>
-          {unreadCount > 0 && (
-            <Button variant="ghost" size="sm" className="h-auto px-2 py-1 text-xs" onClick={handleMarkAllRead}>
-              Mark all read
-            </Button>
-          )}
         </div>
 
         <div className="max-h-80 overflow-y-auto">
