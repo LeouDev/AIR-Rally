@@ -5,6 +5,7 @@ import { CheckCircle2, Clock, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { getBookingById, reconcilePaymongoPendingBooking } from "@/lib/services/bookings";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
@@ -53,7 +54,16 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
   // URL — that id is already on the booking row itself.
   if (booking.status === "pending") {
     try {
-      booking = await reconcilePaymongoPendingBooking(supabase, bookingId);
+      // Service role, because confirm_paymongo_booking_payment() is
+      // granted to service_role only since migration 20260810000047.
+      // Two things make that safe here, and both must stay true: the
+      // `booking.user_id !== user.id` check above has already run, so
+      // this only ever reconciles the viewer's own booking; and
+      // reconcilePaymongoPendingBooking() retrieves the session from
+      // PayMongo and requires a payment with status 'paid' before it
+      // confirms anything. Rendering the page still uses the RLS-scoped
+      // client — only the verified confirmation is privileged.
+      booking = await reconcilePaymongoPendingBooking(createServiceRoleClient(), bookingId);
     } catch (error) {
       logServerError("bookings.confirmation.reconcile", error);
       // Reconciliation failing doesn't change what we show — the page

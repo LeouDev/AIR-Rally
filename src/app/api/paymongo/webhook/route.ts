@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { constructPayMongoWebhookEvent, PayMongoError, type PayMongoMerchantActivationEventData } from "@/lib/services/paymongo";
 import { confirmPaymongoBookingPayment } from "@/lib/services/bookings";
 import { syncVenuePaymongoActivation } from "@/lib/services/venues";
@@ -67,7 +68,13 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const supabase = await createClient();
+    // Service role, not the request-scoped client: since migration
+    // 20260810000047 confirm_paymongo_booking_payment() is granted to
+    // service_role only. A webhook carries no user session anyway, so the
+    // old createClient() here was acting as `anon` — which is precisely
+    // the grant that made the RPC a free-booking exploit from a browser.
+    // The authority for this call is the verified webhook signature above.
+    const supabase = createServiceRoleClient();
     const confirmed = await confirmPaymongoBookingPayment(supabase, {
       bookingId,
       paymongoCheckoutSessionId: checkoutSession.id,

@@ -7,6 +7,7 @@ import { confirmPaymongoBookingPayment } from "../../../../../lib/services/booki
 import { syncVenuePaymongoActivation } from "../../../../../lib/services/venues";
 import { maybeCompleteReschedule } from "../../../../../lib/services/reschedules";
 import { createClient } from "../../../../../lib/supabase/server";
+import { createServiceRoleClient } from "../../../../../lib/supabase/serviceRole";
 
 // Relative paths for jest.mock — see MEMORY.md (air-rally-jest-mock-colon-path-bug).
 jest.mock("../../../../../lib/services/paymongo", () => {
@@ -27,10 +28,16 @@ jest.mock("../../../../../lib/services/bookings", () => ({ confirmPaymongoBookin
 jest.mock("../../../../../lib/services/venues", () => ({ syncVenuePaymongoActivation: jest.fn() }));
 jest.mock("../../../../../lib/services/reschedules", () => ({ maybeCompleteReschedule: jest.fn() }));
 jest.mock("../../../../../lib/supabase/server", () => ({ createClient: jest.fn() }));
+// The booking-confirmation half of this route runs as service_role, because
+// confirm_paymongo_booking_payment() is granted to service_role only since
+// migration 20260810000047. The merchant-activation half still uses the
+// request-scoped client, so both are mocked.
+jest.mock("../../../../../lib/supabase/serviceRole", () => ({ createServiceRoleClient: jest.fn() }));
 
 const mockConstructEvent = constructPayMongoWebhookEvent as jest.MockedFunction<typeof constructPayMongoWebhookEvent>;
 const mockConfirmPayment = confirmPaymongoBookingPayment as jest.MockedFunction<typeof confirmPaymongoBookingPayment>;
 const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
+const mockCreateServiceRoleClient = createServiceRoleClient as jest.MockedFunction<typeof createServiceRoleClient>;
 const mockSyncActivation = syncVenuePaymongoActivation as jest.MockedFunction<typeof syncVenuePaymongoActivation>;
 const mockMaybeCompleteReschedule = maybeCompleteReschedule as jest.MockedFunction<typeof maybeCompleteReschedule>;
 
@@ -70,6 +77,8 @@ beforeEach(() => {
   mockConfirmPayment.mockReset();
   mockCreateClient.mockReset();
   mockCreateClient.mockResolvedValue({} as never);
+  mockCreateServiceRoleClient.mockReset();
+  mockCreateServiceRoleClient.mockReturnValue({} as never);
   mockSyncActivation.mockReset();
   mockMaybeCompleteReschedule.mockReset();
   mockMaybeCompleteReschedule.mockResolvedValue(false);
@@ -146,6 +155,25 @@ describe("POST /api/paymongo/webhook", () => {
     expect(response.status).toBe(200);
     const json = await response.json();
     expect(json).toEqual({ received: true, confirmed: false, rescheduleCompleted: false });
+  });
+
+  // Security regression guard. confirm_paymongo_booking_payment() is granted
+  // to service_role only (migration 20260810000047) because it confirms a
+  // booking as paid without checking payment itself. A webhook has no user
+  // session, so the request-scoped client here acts as `anon` — the exact
+  // grant that made confirming a booking without paying possible from a
+  // browser, proven on staging by
+  // scripts/verify-staging-payment-confirmation-authz.ts. If a refactor
+  // swaps this back, real payments stop confirming and the hole reopens.
+  it("confirms the booking with the service-role client, never the request-scoped one", async () => {
+    mockConstructEvent.mockReturnValue(PAID_EVENT);
+    mockConfirmPayment.mockResolvedValue(true);
+
+    await POST(fakeRequest("{}"));
+
+    expect(mockCreateServiceRoleClient).toHaveBeenCalled();
+    const serviceClient = mockCreateServiceRoleClient.mock.results[0].value;
+    expect(mockConfirmPayment).toHaveBeenCalledWith(serviceClient, expect.anything());
   });
 
   it("completes a reschedule when maybeCompleteReschedule reports the difference-checkout session actually matched one", async () => {
