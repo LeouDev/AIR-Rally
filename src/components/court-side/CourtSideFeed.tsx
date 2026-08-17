@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Image as ImageIcon, AtSign, Smile, Users, X } from "lucide-react";
 import { toast } from "sonner";
@@ -8,8 +9,6 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PostCard, initialsFrom } from "@/components/court-side/PostCard";
-import { FollowListDialog } from "@/components/court-side/FollowListDialog";
-import { ShareDialog } from "@/components/court-side/ShareDialog";
 import { createClient } from "@/lib/supabase/client";
 import { listFeedPosts, listLikedPostIds, listResharedPostIds, type FeedPost } from "@/lib/services/posts";
 import { searchPublicProfiles } from "@/lib/services/profiles";
@@ -22,6 +21,20 @@ import { listFollowerProfiles, listFollowingProfiles } from "@/lib/services/foll
 import { toggleEventJoinAction } from "@/lib/actions/events";
 import type { EventWithDetails } from "@/lib/services/events";
 import type { PublicProfile } from "@/lib/supabase/types";
+
+// Both dialogs sit behind a click and render nothing until opened, so
+// they don't belong in the chunk that has to arrive before the feed is
+// usable — ShareDialog in particular drags in the whole ShareIcons set.
+// `ssr: false` is deliberate rather than incidental: a closed dialog
+// contributes no markup, so server-rendering it produces nothing to
+// hydrate and only adds weight to the initial payload.
+const FollowListDialog = dynamic(
+  () => import("@/components/court-side/FollowListDialog").then((m) => m.FollowListDialog),
+  { ssr: false }
+);
+const ShareDialog = dynamic(() => import("@/components/court-side/ShareDialog").then((m) => m.ShareDialog), {
+  ssr: false,
+});
 
 const FEED_TABS = ["For you", "Following", "Near you"] as const;
 
