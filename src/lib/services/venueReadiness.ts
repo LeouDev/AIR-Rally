@@ -149,33 +149,29 @@ export async function getVenueReadiness(supabase: Client, venueId: string): Prom
     actionHref: venue.status === "active" ? null : actionHref,
   });
 
-  // 7. PayMongo onboarding. Unconditional since the Stripe path was
-  // removed — PayMongo is the only payment provider, so a venue that
-  // cannot receive through it cannot be paid at all.
+  // 7. Payout destination — the bank account AIR/Rally sends earnings to.
   //
-  // This used to be gated on ACTIVE_PAYMENT_PROVIDER === "paymongo", which
-  // became a deployment landmine once Stripe was gone: an environment that
-  // simply never set that variable would tell every venue owner PayMongo
-  // "isn't required" and mark the venue ready when it was not.
-  const paymongoStatus = venue.paymongo_activation_status;
+  // This replaced a "PayMongo payouts" item that asked owners to complete
+  // PayMongo child-merchant onboarding. PayMongo never confirmed that
+  // capability was available to this platform and recommended
+  // collect-then-disburse instead, so the item was asking owners to finish
+  // something that could not pay them. A bank account can.
+  const { data: paymentAccount, error: accountError } = await supabase
+    .from("venue_payment_accounts")
+    .select("bank_name, bank_account_number")
+    .eq("venue_id", venueId)
+    .maybeSingle();
+  if (accountError) throw accountError;
+
+  const hasPayoutDestination = Boolean(paymentAccount?.bank_name && paymentAccount?.bank_account_number);
   items.push({
-    key: "paymongo_onboarding",
-    label: "PayMongo payouts",
-    status:
-      paymongoStatus === "activated"
-        ? "complete"
-        : paymongoStatus === "pending" || paymongoStatus === "under_review"
-          ? "pending_verification"
-          : "action_required",
-    detail:
-      paymongoStatus === "activated"
-        ? "PayMongo is connected — this venue can receive its share of split payments automatically."
-        : paymongoStatus === "pending" || paymongoStatus === "under_review"
-          ? "PayMongo verification is in progress."
-          : paymongoStatus === "declined"
-            ? (venue.paymongo_declined_reason ?? "PayMongo declined this account during review.")
-            : "Connect PayMongo so this venue can receive payouts.",
-    actionHref: paymongoStatus === "activated" ? null : actionHref,
+    key: "payout_destination",
+    label: "Payout details",
+    status: hasPayoutDestination ? "complete" : "action_required",
+    detail: hasPayoutDestination
+      ? "Your bank account is on file — this venue can be included in a payout run."
+      : "Add the bank account where AIR/Rally should send your earnings.",
+    actionHref: hasPayoutDestination ? null : "/list-your-court/settings",
   });
 
   const isReady = items.every((item) => item.status === "complete" || item.status === "not_applicable");

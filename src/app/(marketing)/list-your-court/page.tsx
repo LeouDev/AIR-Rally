@@ -40,6 +40,32 @@ export default async function ListYourCourtPage() {
   const user = await getCurrentUser();
   const venues = user ? await listVenuesByOwnerWithSummary(await createClient(), user.id) : [];
 
+  /**
+   * An owner who already has venues is here to manage them, not to be sold
+   * the product again. They previously had to scroll past a full-height
+   * hero and a three-card benefits grid to reach their own venues, which
+   * is the wrong order for the person who already said yes.
+   *
+   * Prospects — signed out, or signed in with nothing listed yet — still
+   * get the pitch, because for them it is the point of the page.
+   */
+  if (user && venues.length > 0) {
+    return (
+      <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-12 sm:px-6 lg:px-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Your venues</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {venues.length} {venues.length === 1 ? "venue" : "venues"} on your account.
+            </p>
+          </div>
+          <CreateVenueDialog />
+        </div>
+        <OwnerVenueGrid venues={venues} />
+      </div>
+    );
+  }
+
   return (
     <div>
       <section className="bg-secondary text-secondary-foreground">

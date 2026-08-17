@@ -45,36 +45,42 @@ const ACTIVE_COURT: Court = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
+/** The payout destination added in migration 20260810000053. */
+const NO_BANK = { bank_name: null, bank_account_number: null };
+const WITH_BANK = { bank_name: "BANCO DE ORO UNIBANK, INC.", bank_account_number: "001234567890" };
+
 describe("getVenueReadiness", () => {
   // PayMongo is the only payment provider since the Stripe path was
   // removed, so a venue that hasn't connected it cannot be paid — and must
   // not be reported as ready. This used to depend on ACTIVE_PAYMENT_PROVIDER
   // being set; an environment that never set it would have called this
   // venue ready while it had no way to receive money.
-  it("is NOT ready when PayMongo has never been connected", async () => {
+  it("is NOT ready when no payout destination has been added", async () => {
     const supabase = createTableMockSupabase({
       venues: { data: READY_VENUE, error: null },
       courts: { data: [ACTIVE_COURT], error: null },
       venue_operating_hours: { data: null, error: null, count: 2 },
+      venue_payment_accounts: { data: NO_BANK, error: null },
     });
 
     const result = await getVenueReadiness(supabase, "venue-1");
 
     expect(result.isReady).toBe(false);
-    expect(result.items.find((i) => i.key === "paymongo_onboarding")?.status).toBe("action_required");
+    expect(result.items.find((i) => i.key === "payout_destination")?.status).toBe("action_required");
   });
 
-  it("reports fully ready once PayMongo is activated and everything else is done", async () => {
+  it("reports fully ready once payout details are on file and everything else is done", async () => {
     const supabase = createTableMockSupabase({
       venues: { data: { ...READY_VENUE, paymongo_activation_status: "activated" }, error: null },
       courts: { data: [ACTIVE_COURT], error: null },
       venue_operating_hours: { data: null, error: null, count: 2 },
+      venue_payment_accounts: { data: WITH_BANK, error: null },
     });
 
     const result = await getVenueReadiness(supabase, "venue-1");
 
     expect(result.isReady).toBe(true);
-    expect(result.items.find((i) => i.key === "paymongo_onboarding")?.status).toBe("complete");
+    expect(result.items.find((i) => i.key === "payout_destination")?.status).toBe("complete");
   });
 
   it("flags missing operating hours as action_required and marks the venue not ready", async () => {
@@ -82,6 +88,7 @@ describe("getVenueReadiness", () => {
       venues: { data: READY_VENUE, error: null },
       courts: { data: [ACTIVE_COURT], error: null },
       venue_operating_hours: { data: null, error: null, count: 0 },
+      venue_payment_accounts: { data: NO_BANK, error: null },
     });
 
     const result = await getVenueReadiness(supabase, "venue-1");
@@ -95,6 +102,7 @@ describe("getVenueReadiness", () => {
       venues: { data: READY_VENUE, error: null },
       courts: { data: [{ ...ACTIVE_COURT, status: "inactive" }], error: null },
       venue_operating_hours: { data: null, error: null, count: 1 },
+      venue_payment_accounts: { data: NO_BANK, error: null },
     });
 
     const result = await getVenueReadiness(supabase, "venue-1");
@@ -109,6 +117,7 @@ describe("getVenueReadiness", () => {
       venues: { data: READY_VENUE, error: null },
       courts: { data: [{ ...ACTIVE_COURT, hourly_price: 0 }], error: null },
       venue_operating_hours: { data: null, error: null, count: 1 },
+      venue_payment_accounts: { data: NO_BANK, error: null },
     });
 
     const result = await getVenueReadiness(supabase, "venue-1");
@@ -121,6 +130,7 @@ describe("getVenueReadiness", () => {
       venues: { data: { ...READY_VENUE, status: "draft" }, error: null },
       courts: { data: [ACTIVE_COURT], error: null },
       venue_operating_hours: { data: null, error: null, count: 1 },
+      venue_payment_accounts: { data: NO_BANK, error: null },
     });
 
     const result = await getVenueReadiness(supabase, "venue-1");
@@ -129,31 +139,33 @@ describe("getVenueReadiness", () => {
     expect(result.isReady).toBe(false);
   });
 
-  it("requires PayMongo activation only when PayMongo is the active provider", async () => {
+  it("still requires a payout destination even when everything else is done", async () => {
     process.env.ACTIVE_PAYMENT_PROVIDER = "paymongo";
     const supabase = createTableMockSupabase({
       venues: { data: READY_VENUE, error: null }, // paymongo_activation_status: "unlinked"
       courts: { data: [ACTIVE_COURT], error: null },
       venue_operating_hours: { data: null, error: null, count: 1 },
+      venue_payment_accounts: { data: NO_BANK, error: null },
     });
 
     const result = await getVenueReadiness(supabase, "venue-1");
 
-    expect(result.items.find((i) => i.key === "paymongo_onboarding")?.status).toBe("action_required");
+    expect(result.items.find((i) => i.key === "payout_destination")?.status).toBe("action_required");
     expect(result.isReady).toBe(false);
   });
 
-  it("is ready when PayMongo is active and the venue is fully activated", async () => {
+  it("is ready when the venue is approved and has a payout destination", async () => {
     process.env.ACTIVE_PAYMENT_PROVIDER = "paymongo";
     const supabase = createTableMockSupabase({
       venues: { data: { ...READY_VENUE, paymongo_activation_status: "activated" }, error: null },
       courts: { data: [ACTIVE_COURT], error: null },
       venue_operating_hours: { data: null, error: null, count: 1 },
+      venue_payment_accounts: { data: WITH_BANK, error: null },
     });
 
     const result = await getVenueReadiness(supabase, "venue-1");
 
-    expect(result.items.find((i) => i.key === "paymongo_onboarding")?.status).toBe("complete");
+    expect(result.items.find((i) => i.key === "payout_destination")?.status).toBe("complete");
     expect(result.isReady).toBe(true);
   });
 
@@ -162,6 +174,7 @@ describe("getVenueReadiness", () => {
       venues: { data: { ...READY_VENUE, description: "" }, error: null },
       courts: { data: [ACTIVE_COURT], error: null },
       venue_operating_hours: { data: null, error: null, count: 1 },
+      venue_payment_accounts: { data: NO_BANK, error: null },
     });
 
     const result = await getVenueReadiness(supabase, "venue-1");

@@ -9,7 +9,7 @@ import { VenueOperatingHoursEditor } from "@/components/owner/VenueOperatingHour
 import { VenueReadinessChecklist } from "@/components/owner/VenueReadinessChecklist";
 import { CourtsManager } from "@/components/owner/CourtsManager";
 import { VenuePhotosCard } from "@/components/owner/VenuePhotosCard";
-import { PaymongoOnboardingCard } from "@/components/owner/PaymongoOnboardingCard";
+import { SubmitVenueForReview } from "@/components/owner/SubmitVenueForReview";
 import { VenueEarningsCard } from "@/components/owner/VenueEarningsCard";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -103,15 +103,18 @@ export default async function ManageVenuePage({
         </div>
       </div>
 
+      {/* First, not last: for a draft venue this is the single thing the
+          owner needs to do next, and it was missing entirely — a venue
+          could be completed with no way to send it for approval. */}
+      <SubmitVenueForReview
+        venueId={venueId}
+        status={venue.status}
+        blockingItems={readiness.items.filter((i) => i.status === "action_required").map((i) => i.label)}
+      />
       <VenueReadinessChecklist readiness={readiness} />
       <VenueEarningsCard earnings={earnings} />
       <VenueForm mode="edit" venueId={venueId} initialValues={initialValues} />
       <VenuePhotosCard venueId={venueId} images={venueImages} />
-      <PaymongoOnboardingCard
-        venueId={venueId}
-        activationStatus={venue.paymongo_activation_status}
-        declinedReason={venue.paymongo_declined_reason}
-      />
       <VenueAmenitiesEditor venueId={venueId} allAmenities={allAmenities} initialSelectedIds={selectedAmenityIds} />
       <VenueOperatingHoursEditor venueId={venueId} initialHours={operatingHours} />
       <CourtsManager venueId={venueId} courts={courts} images={images} />
