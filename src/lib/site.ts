@@ -21,5 +21,5 @@ export async function getSiteUrl(): Promise<string> {
     // headers() throws outside a request context (e.g. at build time).
   }
 
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "https://airrally.app";
+  return process.env.NEXT_PUBLIC_SITE_URL ?? "https://air-rally.com";
 }

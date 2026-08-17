@@ -149,36 +149,34 @@ export async function getVenueReadiness(supabase: Client, venueId: string): Prom
     actionHref: venue.status === "active" ? null : actionHref,
   });
 
-  // 7. PayMongo onboarding — only enforced when PayMongo is actually the
-  // active payment provider (see ARCHITECTURE.md's PayMongo Platforms
-  // section). A venue that only ever takes Stripe payments must never be
-  // blocked on a PayMongo-specific requirement.
-  const paymongoIsActiveProvider = process.env.ACTIVE_PAYMENT_PROVIDER === "paymongo";
-  if (paymongoIsActiveProvider) {
-    const status = venue.paymongo_activation_status;
-    items.push({
-      key: "paymongo_onboarding",
-      label: "PayMongo payouts",
-      status: status === "activated" ? "complete" : status === "pending" || status === "under_review" ? "pending_verification" : "action_required",
-      detail:
-        status === "activated"
-          ? "PayMongo is connected — this venue can receive its share of split payments automatically."
-          : status === "pending" || status === "under_review"
-            ? "PayMongo verification is in progress."
-            : status === "declined"
-              ? (venue.paymongo_declined_reason ?? "PayMongo declined this account during review.")
-              : "Connect PayMongo so this venue can receive payouts.",
-      actionHref: status === "activated" ? null : actionHref,
-    });
-  } else {
-    items.push({
-      key: "paymongo_onboarding",
-      label: "PayMongo payouts",
-      status: "not_applicable",
-      detail: "Stripe is the active payment provider — PayMongo onboarding isn't required.",
-      actionHref: null,
-    });
-  }
+  // 7. PayMongo onboarding. Unconditional since the Stripe path was
+  // removed — PayMongo is the only payment provider, so a venue that
+  // cannot receive through it cannot be paid at all.
+  //
+  // This used to be gated on ACTIVE_PAYMENT_PROVIDER === "paymongo", which
+  // became a deployment landmine once Stripe was gone: an environment that
+  // simply never set that variable would tell every venue owner PayMongo
+  // "isn't required" and mark the venue ready when it was not.
+  const paymongoStatus = venue.paymongo_activation_status;
+  items.push({
+    key: "paymongo_onboarding",
+    label: "PayMongo payouts",
+    status:
+      paymongoStatus === "activated"
+        ? "complete"
+        : paymongoStatus === "pending" || paymongoStatus === "under_review"
+          ? "pending_verification"
+          : "action_required",
+    detail:
+      paymongoStatus === "activated"
+        ? "PayMongo is connected — this venue can receive its share of split payments automatically."
+        : paymongoStatus === "pending" || paymongoStatus === "under_review"
+          ? "PayMongo verification is in progress."
+          : paymongoStatus === "declined"
+            ? (venue.paymongo_declined_reason ?? "PayMongo declined this account during review.")
+            : "Connect PayMongo so this venue can receive payouts.",
+    actionHref: paymongoStatus === "activated" ? null : actionHref,
+  });
 
   const isReady = items.every((item) => item.status === "complete" || item.status === "not_applicable");
 

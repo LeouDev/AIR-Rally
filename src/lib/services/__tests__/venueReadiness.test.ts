@@ -45,15 +45,13 @@ const ACTIVE_COURT: Court = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
-const originalProvider = process.env.ACTIVE_PAYMENT_PROVIDER;
-afterEach(() => {
-  if (originalProvider === undefined) delete process.env.ACTIVE_PAYMENT_PROVIDER;
-  else process.env.ACTIVE_PAYMENT_PROVIDER = originalProvider;
-});
-
 describe("getVenueReadiness", () => {
-  it("reports fully ready when every requirement is met and Stripe (not PayMongo) is active", async () => {
-    delete process.env.ACTIVE_PAYMENT_PROVIDER;
+  // PayMongo is the only payment provider since the Stripe path was
+  // removed, so a venue that hasn't connected it cannot be paid — and must
+  // not be reported as ready. This used to depend on ACTIVE_PAYMENT_PROVIDER
+  // being set; an environment that never set it would have called this
+  // venue ready while it had no way to receive money.
+  it("is NOT ready when PayMongo has never been connected", async () => {
     const supabase = createTableMockSupabase({
       venues: { data: READY_VENUE, error: null },
       courts: { data: [ACTIVE_COURT], error: null },
@@ -62,9 +60,21 @@ describe("getVenueReadiness", () => {
 
     const result = await getVenueReadiness(supabase, "venue-1");
 
+    expect(result.isReady).toBe(false);
+    expect(result.items.find((i) => i.key === "paymongo_onboarding")?.status).toBe("action_required");
+  });
+
+  it("reports fully ready once PayMongo is activated and everything else is done", async () => {
+    const supabase = createTableMockSupabase({
+      venues: { data: { ...READY_VENUE, paymongo_activation_status: "activated" }, error: null },
+      courts: { data: [ACTIVE_COURT], error: null },
+      venue_operating_hours: { data: null, error: null, count: 2 },
+    });
+
+    const result = await getVenueReadiness(supabase, "venue-1");
+
     expect(result.isReady).toBe(true);
-    expect(result.items.find((i) => i.key === "paymongo_onboarding")?.status).toBe("not_applicable");
-    expect(result.items.every((i) => i.status === "complete" || i.status === "not_applicable")).toBe(true);
+    expect(result.items.find((i) => i.key === "paymongo_onboarding")?.status).toBe("complete");
   });
 
   it("flags missing operating hours as action_required and marks the venue not ready", async () => {
