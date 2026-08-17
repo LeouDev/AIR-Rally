@@ -18,8 +18,19 @@ function isProtectedPath(pathname: string) {
  * routes are treated as inaccessible (redirect to login) rather than
  * throwing — a misconfigured deployment should fail closed, not open.
  */
-export async function updateSession(request: NextRequest) {
-  let response = NextResponse.next({ request });
+export async function updateSession(request: NextRequest, security?: { nonce: string; csp: string }) {
+  // Next reads the nonce off the REQUEST's Content-Security-Policy header
+  // during SSR and stamps it onto the framework and page scripts it
+  // renders. Setting it only on the response would produce a policy whose
+  // nonce matches nothing, blocking the app's own JavaScript.
+  const requestHeaders = new Headers(request.headers);
+  if (security) {
+    requestHeaders.set("x-nonce", security.nonce);
+    requestHeaders.set("Content-Security-Policy", security.csp);
+  }
+  const withNonce = { headers: requestHeaders };
+
+  let response = NextResponse.next({ request: withNonce });
 
   const env = (() => {
     try {
@@ -43,7 +54,10 @@ export async function updateSession(request: NextRequest) {
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
+        // Rebuilt with the same nonce-carrying headers — dropping them here
+        // would silently strip the nonce from any request that refreshes a
+        // cookie, which is most signed-in navigations.
+        response = NextResponse.next({ request: withNonce });
         cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
       },
     },
