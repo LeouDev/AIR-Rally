@@ -18,6 +18,7 @@ import { PlayerPicker } from "@/components/court/PlayerPicker";
 import type { PublicProfile } from "@/lib/supabase/types";
 import { SLOT_INCREMENT_MINUTES, MIN_DURATION_MINUTES, MAX_DURATION_MINUTES, MAX_BOOKING_WINDOW_DAYS } from "@/lib/booking-config";
 import { calculateBookingCharge } from "@/lib/services/bookingFee";
+import { splitBookingPayment } from "@/lib/services/credits";
 import type { AvailableSlot, Court } from "@/lib/supabase/types";
 import { formatVenueDate, formatVenueTime } from "@/lib/bookingTime";
 
@@ -56,6 +57,17 @@ type BookingWidgetProps = {
    * NEXT_PUBLIC_ — a client-readable kill switch is not a kill switch.
    */
   passOnFees?: boolean;
+  /**
+   * The viewer's AIR/Rally Credits balance, in minor units, so the confirm
+   * dialog can show the credit checkout will actually apply.
+   *
+   * Without it the dialog quoted the full court price and a fee computed on
+   * that price, while checkout applied credit and grossed up the REMAINDER —
+   * so a customer holding credit saw a total higher than PayMongo went on to
+   * charge them. Observed live: a ₱1200 booking with ₱400 of credit showed
+   * ₱1218.27 here and ₱812.18 at PayMongo.
+   */
+  creditBalance?: number;
 };
 
 /**
@@ -69,7 +81,7 @@ type BookingWidgetProps = {
  * that's decided server-side in lib/actions/checkout.ts regardless of
  * what this component displays.
  */
-export function BookingWidget({ venueName, venueTimezone, courts, phone, email, isAuthenticated, passOnFees = false }: BookingWidgetProps) {
+export function BookingWidget({ venueName, venueTimezone, courts, phone, email, isAuthenticated, passOnFees = false, creditBalance = 0 }: BookingWidgetProps) {
   const router = useRouter();
   const pathname = usePathname();
 
@@ -187,7 +199,17 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
   // balance is known, so a customer paying partly in credit sees a fee
   // slightly higher than they are actually charged — the safe direction,
   // and the credits line below tells them why it will shrink.
-  const feeBreakdown = passOnFees && estimatedTotal !== null ? calculateBookingCharge(estimatedTotal * 100) : null;
+  // Mirrors what checkout does server-side, in the same order: apply credit
+  // first, then gross up only what PayMongo will actually collect. Display
+  // only — lib/actions/checkout.ts recomputes the authoritative figures from
+  // the real balance and the real price, exactly as before.
+  const courtMinorUnits = estimatedTotal !== null ? estimatedTotal * 100 : 0;
+  const { creditApplied, amountDue } = splitBookingPayment({
+    priceAmount: courtMinorUnits,
+    availableCredit: Math.max(0, creditBalance),
+  });
+  const feeBreakdown = passOnFees && estimatedTotal !== null ? calculateBookingCharge(amountDue) : null;
+  const dialogTotal = amountDue + (feeBreakdown?.processingFeeAmount ?? 0);
 
   return (
     <div className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-5">
@@ -359,8 +381,17 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
                 <div className="flex flex-col gap-2 rounded-lg bg-muted px-3.5 py-3">
                   <div className="flex items-baseline justify-between gap-4">
                     <span className="text-sm/5 text-subtle">Court ({formatDuration(durationMinutes)})</span>
-                    <span className="font-mono text-sm/5 text-foreground">₱{(feeBreakdown.courtAmount / 100).toFixed(2)}</span>
+                    <span className="font-mono text-sm/5 text-foreground">₱{(courtMinorUnits / 100).toFixed(2)}</span>
                   </div>
+                  {creditApplied > 0 && (
+                    // The line that was missing. Checkout applies this credit
+                    // and charges only the remainder, so omitting it quoted a
+                    // total the customer was never going to be charged.
+                    <div className="flex items-baseline justify-between gap-4">
+                      <span className="text-sm/5 text-subtle">AIR/Rally Credits</span>
+                      <span className="font-mono text-sm/5 text-success">−₱{(creditApplied / 100).toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="flex items-baseline justify-between gap-4">
                     {/* "Online payment fee", never "service fee" or "booking
                         fee" — this is PayMongo's charge for collecting the
@@ -371,13 +402,13 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
                   </div>
                   <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
                     <span className="text-[0.9375rem]/5 font-semibold text-foreground">Total</span>
-                    <span className="font-mono text-xl/7 font-semibold text-foreground">₱{(feeBreakdown.totalChargedAmount / 100).toFixed(2)}</span>
+                    <span className="font-mono text-xl/7 font-semibold text-foreground">₱{(dialogTotal / 100).toFixed(2)}</span>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-baseline justify-between gap-4 rounded-lg bg-muted px-3.5 py-3">
                   <span className="text-[0.9375rem]/5 font-semibold text-foreground">Total</span>
-                  <span className="font-mono text-xl/7 font-semibold text-foreground">₱{estimatedTotal}</span>
+                  <span className="font-mono text-xl/7 font-semibold text-foreground">₱{(dialogTotal / 100).toFixed(2)}</span>
                 </div>
               )}
 

@@ -18,6 +18,7 @@ import { deterministicSurfaceColor } from "@/components/court/CourtSurface";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { willPassOnFeesAtCheckout } from "@/lib/services/feeDisplay";
+import { getUserCreditBalance } from "@/lib/services/credits";
 import { getVenueDetail, listOperatingHours } from "@/lib/services/venues";
 import { listReviewsByVenue, getReviewEligibility } from "@/lib/services/reviews";
 import { listAmenities } from "@/lib/services/amenities";
@@ -90,6 +91,14 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
   // dialog must not itemise a fee that assertPassOnFeesSupported() would
   // refuse to let checkout produce.
   const passOnFees = willPassOnFeesAtCheckout();
+
+  // The viewer's wallet balance, so the confirm dialog can show the credit
+  // it will actually apply. Without it the dialog quoted the full court
+  // price and a fee computed on that price, while checkout applied credit
+  // and grossed up the REMAINDER — so a customer with credit saw a total
+  // higher than PayMongo then charged them. Read under the viewer's own
+  // RLS; it is their own wallet.
+  const creditBalance = user ? (await getUserCreditBalance(supabase, user.id)).balance : 0;
 
   const TypeIcon = COURT_TYPE_ICON[venue.indoor_outdoor];
   const galleryImages = venue.images.map((image) => ({
@@ -243,6 +252,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
               email={venue.email}
               isAuthenticated={user !== null}
               passOnFees={passOnFees}
+              creditBalance={creditBalance}
             />
           </div>
         </div>
@@ -258,6 +268,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           email={venue.email}
           isAuthenticated={user !== null}
           passOnFees={passOnFees}
+          creditBalance={creditBalance}
         />
       )}
     </div>
