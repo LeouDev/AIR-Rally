@@ -35,6 +35,54 @@ export async function listOwnerPaymentAccounts(supabase: Client): Promise<(Venue
   }));
 }
 
+/**
+ * Sets where a venue's earnings should be sent.
+ *
+ * Deliberately updates by venue_id and lets RLS decide whether this caller
+ * owns it — no ownership check here, matching the rest of the service
+ * layer. The column-level GRANT means only the bank fields can move even
+ * if this function were passed something else, and the guard trigger
+ * reverts protected columns regardless (migration 20260810000053).
+ *
+ * `bank_details_updated_at` is stamped here rather than by a trigger so
+ * the value reflects when the OWNER last confirmed their details, which is
+ * what matters when a transfer bounces and someone asks how current these
+ * were.
+ */
+export async function updateVenueBankDetails(
+  supabase: Client,
+  venueId: string,
+  details: { bankName: string; bankAccountName: string; bankAccountNumber: string }
+): Promise<void> {
+  const { error } = await supabase
+    .from("venue_payment_accounts")
+    .update({
+      bank_name: details.bankName,
+      bank_account_name: details.bankAccountName,
+      bank_account_number: details.bankAccountNumber,
+      bank_details_updated_at: new Date().toISOString(),
+    })
+    .eq("venue_id", venueId);
+  if (error) throw error;
+}
+
+/** True when a venue has a complete destination and could appear in a payout run. */
+export function hasBankDetails(account: Pick<VenuePaymentAccount, "bank_name" | "bank_account_number">): boolean {
+  return Boolean(account.bank_name && account.bank_account_number);
+}
+
+/**
+ * Last four digits only, for display back to the owner.
+ *
+ * A full account number never needs to be re-shown: the owner already
+ * knows it, and rendering it puts it in page source, screenshots and
+ * support screen-shares for no benefit.
+ */
+export function maskAccountNumber(accountNumber: string | null): string | null {
+  if (!accountNumber || accountNumber.length < 4) return null;
+  return `••••${accountNumber.slice(-4)}`;
+}
+
 /** Every venue's payout readiness, optionally narrowed to one status. Admin-only via RLS. */
 export async function listAllPaymentAccounts(
   supabase: Client,

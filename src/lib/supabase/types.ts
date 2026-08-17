@@ -371,6 +371,15 @@ export type VenuePaymentAccount = {
   status: VenuePaymentAccountStatus;
   status_reason: string | null;
   verified_at: string | null;
+  /**
+   * The payout destination (migration 20260810000053). All three together
+   * or all null — the database rejects a half-filled destination. Only the
+   * owning venue and admins can read these; only the owner can write them.
+   */
+  bank_name: string | null;
+  bank_account_name: string | null;
+  bank_account_number: string | null;
+  bank_details_updated_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -478,6 +487,19 @@ export type ClubMember = {
   role: ClubMemberRole;
   status: ClubMemberStatus;
   created_at: string;
+};
+
+/**
+ * Where AIR/Rally sends a venue's earnings. These three fields map exactly
+ * onto the first three columns of PayMongo's PESONet transfer template.
+ * All three or none — a half-filled destination is rejected by the
+ * database, because it looks configured and fails at upload.
+ */
+export type VenueBankDetails = {
+  bank_name: string | null;
+  bank_account_name: string | null;
+  bank_account_number: string | null;
+  bank_details_updated_at: string | null;
 };
 
 export type ReportTargetType = "post" | "comment" | "club" | "event" | "user";
@@ -911,7 +933,19 @@ export type Database = {
       /** Read-only to every client role — written only by triggers. */
       booking_settlements: TableDef<BookingSettlement, never, never>;
       /** Read-only to clients — mirrored by trigger, changed via set_venue_payment_account_status(). */
-      venue_payment_accounts: TableDef<VenuePaymentAccount, never, never>;
+      /**
+       * Insert stays `never` — rows are created for every venue by the
+       * mirroring trigger. Update is narrowed to exactly the four columns
+       * the database GRANTs to `authenticated` (migration 20260810000053),
+       * so the type mirrors the privilege: status, verified_at and the
+       * PayMongo id are not expressible here, and are reverted by the
+       * guard trigger even if they were.
+       */
+      venue_payment_accounts: TableDef<
+        VenuePaymentAccount,
+        never,
+        Partial<Pick<VenuePaymentAccount, "bank_name" | "bank_account_name" | "bank_account_number" | "bank_details_updated_at">>
+      >;
       /** Read-only to clients — written by backend service code only. */
       payout_transfers: TableDef<PayoutTransfer, never, never>;
       /** Created through create_payout_batch(); status moves via the admin RPCs. */

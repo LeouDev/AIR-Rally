@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { CheckCircle2, Clock, AlertTriangle, Link2Off } from "lucide-react";
 import { requireSignedIn } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { listOwnerPaymentAccounts, describePaymentAccountStatus } from "@/lib/services/venuePaymentAccounts";
+import {
+  listOwnerPaymentAccounts,
+  describePaymentAccountStatus,
+  hasBankDetails,
+  maskAccountNumber,
+} from "@/lib/services/venuePaymentAccounts";
+import { BankDetailsForm } from "@/components/owner/BankDetailsForm";
 import type { VenuePaymentAccountStatus } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
@@ -77,22 +82,30 @@ export default async function OwnerSettingsPage() {
                           <span className="font-medium text-foreground">Reason:</span> {account.status_reason}
                         </p>
                       )}
-                      {account.status === "verified" && account.paymongo_account_id && (
-                        <p className="mt-2 text-xs text-muted-foreground">PayMongo account: connected</p>
-                      )}
                     </div>
 
-                    {/* Links to the REAL onboarding flow that already exists on
-                        the venue page, rather than a second placeholder button
-                        that would do less than what is already built. */}
-                    {(account.status === "not_connected" || account.status === "restricted") && (
-                      <Link
-                        href={`/list-your-court/${account.venue_id}`}
-                        className="shrink-0 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-                      >
-                        {account.status === "restricted" ? "Review setup" : "Set up payment account"}
-                      </Link>
+                    {hasBankDetails(account) ? (
+                      <span className="shrink-0 rounded-full border border-success/40 bg-success/5 px-3 py-1 text-xs font-medium text-success">
+                        Payout details on file
+                      </span>
+                    ) : (
+                      <span className="shrink-0 rounded-full border border-warning/40 bg-warning/5 px-3 py-1 text-xs font-medium text-warning">
+                        Payout details needed
+                      </span>
                     )}
+                  </div>
+
+                  {/* The bank destination replaces the old PayMongo account
+                      setup link. PayMongo child-merchant onboarding was never
+                      confirmed as available to this platform, and a bank
+                      account is what actually gets a venue paid. */}
+                  <div className="mt-5 border-t border-border pt-5">
+                    <BankDetailsForm
+                      venueId={account.venue_id}
+                      bankName={account.bank_name}
+                      bankAccountName={account.bank_account_name}
+                      maskedAccountNumber={maskAccountNumber(account.bank_account_number)}
+                    />
                   </div>
                 </li>
               );
@@ -101,8 +114,8 @@ export default async function OwnerSettingsPage() {
         )}
 
         <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-          Automatic payouts are not live yet. A verified account means you are ready for them; until then, transfers are arranged
-          manually.
+          Payouts are arranged manually for now and sent over PESONet on banking days. Adding your details here is what puts your
+          venue in a payout run.
         </p>
       </section>
     </div>
