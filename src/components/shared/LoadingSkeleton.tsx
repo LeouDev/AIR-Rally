@@ -19,7 +19,7 @@ export function FeedSkeleton({ count = 4 }: { count?: number }) {
   return (
     <div className="flex flex-col gap-3">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="rounded-2xl border border-border bg-card p-4">
+        <div key={i} className="rounded-xl bg-card p-4 shadow-card">
           <div className="flex items-center gap-2.5">
             <Skeleton className="size-10 shrink-0 rounded-full" />
             <div className="flex flex-1 flex-col gap-1.5">
@@ -47,7 +47,7 @@ export function ListSkeleton({ count = 5 }: { count?: number }) {
   return (
     <div className="flex flex-col gap-3">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
+        <div key={i} className="flex flex-col gap-2 rounded-xl bg-card p-4 shadow-card">
           <Skeleton className="h-4 w-1/2" />
           <Skeleton className="h-3.5 w-2/3" />
           <Skeleton className="h-3 w-1/4" />
@@ -95,17 +95,19 @@ export function PageSkeleton({ children }: { children?: React.ReactNode }) {
   );
 }
 
+/**
+ * Mirrors CourtCard's geometry exactly — same radius, same shadow, same 16:10
+ * media box — so nothing jumps when the data lands. The staggered delays keep
+ * the bars from pulsing in unison, which reads as a single flashing block.
+ */
 export function CourtCardSkeleton() {
   return (
-    <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card">
-      <Skeleton className="aspect-[4/3] w-full rounded-none" />
-      <div className="flex flex-col gap-2 p-4">
-        <Skeleton className="h-4 w-3/4" />
-        <Skeleton className="h-3.5 w-1/2" />
-        <div className="mt-2 flex items-center justify-between">
-          <Skeleton className="h-3.5 w-16" />
-          <Skeleton className="h-3.5 w-20" />
-        </div>
+    <div className="flex flex-col overflow-hidden rounded-xl bg-card shadow-card">
+      <Skeleton className="aspect-[16/10] w-full rounded-none" />
+      <div className="flex flex-col gap-2.5 px-3.5 pt-3 pb-3.5">
+        <Skeleton className="h-[15px] w-[70%]" />
+        <Skeleton className="h-3 w-[48%] [animation-delay:150ms]" />
+        <Skeleton className="h-3 w-[34%] [animation-delay:300ms]" />
       </div>
     </div>
   );

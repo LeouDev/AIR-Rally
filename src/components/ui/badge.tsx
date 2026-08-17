@@ -4,25 +4,38 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+// Two shapes live here. `size="status"` is the uppercase, tracked lozenge that
+// states what a booking *is* (Confirmed / Pending / Cancelled / Completed);
+// `size="default"` is the sentence-case pill that adds a fact next to it
+// ("Starts in 3 hours", "Open now · closes 8pm").
 const badgeVariants = cva(
-  "group/badge inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!",
+  "group/badge inline-flex w-fit shrink-0 items-center justify-center gap-1.5 rounded-full border border-transparent whitespace-nowrap transition-colors focus-visible:ring-4 focus-visible:ring-ring/25 aria-invalid:border-destructive [&>svg]:pointer-events-none [&>svg]:size-3.5",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        default: "bg-primary text-primary-foreground [a]:hover:bg-primary-pressed",
         secondary:
-          "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
+          "bg-secondary text-secondary-foreground [a]:hover:bg-navy-raised",
+        success: "bg-success-soft text-success-soft-foreground",
+        warning: "bg-warning-soft text-warning-soft-foreground",
         destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
+          "bg-destructive-soft text-destructive-soft-foreground focus-visible:ring-destructive/25",
+        neutral: "bg-neutral-soft text-neutral-soft-foreground",
+        muted: "bg-muted text-foreground",
         outline:
-          "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
-        ghost:
-          "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
+          "border-[1.5px] border-border text-foreground [a]:hover:bg-muted",
+        ghost: "hover:bg-muted",
         link: "text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "px-3 py-1.5 text-[0.8125rem]/[1.125rem] font-medium",
+        status:
+          "px-3 py-[5px] text-xs/4 font-semibold tracking-[0.06em] uppercase",
       },
     },
     defaultVariants: {
       variant: "default",
+      size: "default",
     },
   }
 )
@@ -30,6 +43,7 @@ const badgeVariants = cva(
 function Badge({
   className,
   variant = "default",
+  size = "default",
   asChild = false,
   ...props
 }: React.ComponentProps<"span"> &
@@ -40,7 +54,8 @@ function Badge({
     <Comp
       data-slot="badge"
       data-variant={variant}
-      className={cn(badgeVariants({ variant }), className)}
+      data-size={size}
+      className={cn(badgeVariants({ variant, size }), className)}
       {...props}
     />
   )

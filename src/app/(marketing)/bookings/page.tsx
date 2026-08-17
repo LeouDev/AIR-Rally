@@ -16,17 +16,16 @@ import { listReschedulesForOriginalBookings } from "@/lib/services/reschedules";
 import { listReviewableBookings } from "@/lib/services/reviews";
 import { RESCHEDULE_CUTOFF_HOURS } from "@/lib/booking-config";
 import type { BookingStatus, BookingReschedule } from "@/lib/supabase/types";
-import { cn } from "@/lib/utils";
 
 // Real per-viewer bookings — never statically cached.
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Bookings" };
 
-const STATUS_STYLES: Record<BookingStatus, string> = {
-  pending: "bg-warning/15 text-warning",
-  confirmed: "bg-success/15 text-success",
-  cancelled: "bg-muted text-muted-foreground",
+const STATUS_VARIANTS: Record<BookingStatus, "warning" | "success" | "destructive"> = {
+  pending: "warning",
+  confirmed: "success",
+  cancelled: "destructive",
 };
 
 const STATUS_LABELS: Record<BookingStatus, string> = {
@@ -116,20 +115,39 @@ export default async function BookingsPage() {
   function renderBooking(booking: BookingWithDetails) {
     const startsIn = startsInLabel(booking.start_time, now);
     return (
-      <li key={booking.id} className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
+      <li key={booking.id} className="flex flex-col gap-3 rounded-xl bg-card p-3.5 shadow-card">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-2.5">
+            {/* Status first, then the fact that qualifies it. What the booking
+                *is* and when it starts are the two things worth reading before
+                the venue name. */}
             <div className="flex flex-wrap items-center gap-2">
-              <p className="font-medium text-foreground">{booking.venueName}</p>
-              <Badge className={cn("border-transparent", STATUS_STYLES[booking.status])}>{STATUS_LABELS[booking.status]}</Badge>
-              {startsIn && <Badge className="border-transparent bg-primary/15 text-primary">{startsIn}</Badge>}
+              <Badge variant={STATUS_VARIANTS[booking.status]} size="status">
+                {STATUS_LABELS[booking.status]}
+              </Badge>
+              {startsIn && <Badge variant="warning">{startsIn}</Badge>}
             </div>
-            <p className="text-sm text-muted-foreground">
-              {booking.courtName} · {formatWhen(booking)}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {formatMoney(booking.price_amount, booking.currency)} · Confirmation {booking.confirmation_code}
-            </p>
+            <div className="flex flex-col gap-0.5">
+              <p className="text-[1.0625rem]/[1.375rem] font-semibold text-foreground">{booking.venueName}</p>
+              <p className="text-sm/5 text-muted-foreground">{booking.courtName}</p>
+            </div>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-hairline pt-2.5">
+              <p className="font-mono text-[0.9375rem]/[1.375rem] font-medium text-foreground">
+                {formatWhen(booking)}
+              </p>
+              <p className="font-mono text-base/[1.375rem] font-semibold text-foreground">
+                {formatMoney(booking.price_amount, booking.currency)}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+              <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
+                Code{" "}
+                <span className="font-mono tracking-[0.06em] text-foreground">
+                  {booking.confirmation_code}
+                </span>
+              </p>
+              <p className="text-xs/4 text-muted-foreground">Venue time (PHT)</p>
+            </div>
             {(() => {
               const refunds = refundsByBooking.get(booking.id);
               const latestRefund = refunds?.[0];

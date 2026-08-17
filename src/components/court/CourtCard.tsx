@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { MapPin, Sun, Home, Layers } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Rating } from "@/components/court/Rating";
+import { MapPin, Star } from "lucide-react";
 import { FavoriteButton } from "@/components/court/FavoriteButton";
 import { CourtCardGallery } from "@/components/court/CourtCardGallery";
 import { deterministicSurfaceColor } from "@/components/court/CourtSurface";
@@ -44,7 +42,6 @@ type CourtCardProps = {
 
 export function CourtCard({ venue, isFavorited = false }: CourtCardProps) {
   const isIndoor = venue.indoorOutdoor === "indoor";
-  const isOutdoor = venue.indoorOutdoor === "outdoor";
 
   // Cover photo first, then each court's own photo — one swipeable
   // gallery instead of a cover photo plus a separate thumbnail strip.
@@ -63,64 +60,73 @@ export function CourtCard({ venue, isFavorited = false }: CourtCardProps) {
   return (
     <Link
       href={`/courts/${venue.id}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-all duration-200 hover:-translate-y-1 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="group flex flex-col overflow-hidden rounded-xl bg-card shadow-card transition-transform duration-200 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/25"
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden">
+      <div className="relative aspect-[16/10] w-full overflow-hidden">
         <div className="relative size-full transition-transform duration-300 group-hover:scale-105">
           <CourtCardGallery images={galleryImages} fallbackSurfaceColor={deterministicSurfaceColor(venue.id)} indoor={isIndoor} />
         </div>
-        <div className="absolute top-3 left-3">
-          <Badge variant="secondary" className="gap-1 bg-background/90 text-foreground backdrop-blur">
-            {isIndoor ? <Home className="size-3" /> : isOutdoor ? <Sun className="size-3" /> : <Layers className="size-3" />}
-            {venue.indoorOutdoor === "both" ? "Indoor & Outdoor" : isIndoor ? "Indoor" : "Outdoor"}
-          </Badge>
-        </div>
+        {/* Open-now sits on the photo, not under the title: whether you can play
+            tonight decides the tap, so it should be readable before the name. */}
+        {venue.openStatus && (
+          <div className="absolute top-3 left-3">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full bg-card/92 px-2.5 py-1 text-xs/4 font-medium backdrop-blur-sm",
+                venue.openStatus.isOpenNow ? "text-foreground" : "text-subtle"
+              )}
+            >
+              <span
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  venue.openStatus.isOpenNow ? "bg-success" : "bg-destructive"
+                )}
+                aria-hidden="true"
+              />
+              {venue.openStatus.label}
+            </span>
+          </div>
+        )}
         <div className="absolute top-3 right-3">
           <FavoriteButton venueId={venue.id} venueName={venue.name} initialFavorited={isFavorited} />
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-2 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="text-base font-semibold text-foreground group-hover:text-primary">
+      <div className="flex flex-1 flex-col gap-1.5 px-3.5 pt-3 pb-3.5">
+        <div className="flex items-start gap-2">
+          <h3 className="flex-1 text-[1.0625rem]/[1.375rem] font-semibold text-foreground">
             {venue.name}
           </h3>
-          <Rating value={venue.averageRating} reviewCount={venue.reviewCount} />
+          {venue.reviewCount > 0 ? (
+            <span className="flex shrink-0 items-center gap-1 text-sm/5 font-medium text-foreground">
+              <Star className="size-3.5 fill-primary text-primary" aria-hidden="true" />
+              {venue.averageRating.toFixed(1)}
+            </span>
+          ) : (
+            <span className="shrink-0 text-[0.8125rem]/5 text-muted-foreground">New</span>
+          )}
         </div>
         {venue.city && (
-          <p className="flex items-center gap-1 text-sm text-muted-foreground">
+          <p className="flex items-center gap-1 text-sm/5 text-muted-foreground">
             <MapPin className="size-3.5 shrink-0" aria-hidden="true" />
             {venue.city}
           </p>
         )}
-        {venue.openStatus && (
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span
-              className={cn("size-1.5 shrink-0 rounded-full", venue.openStatus.isOpenNow ? "bg-success" : "bg-muted-foreground/40")}
-              aria-hidden="true"
-            />
-            {venue.openStatus.label}
-          </p>
-        )}
-        <div className="mt-auto flex items-center justify-between pt-2">
-          <p className="text-sm text-muted-foreground">
-            {venue.startingPrice !== null ? (
-              <>
-                <span className="text-base font-semibold text-foreground">₱{venue.startingPrice}</span> / hour
-              </>
-            ) : (
-              "Pricing unavailable"
-            )}
-            {venue.activeCourtCount > 0 && (
-              <span className="ml-1.5 text-xs text-muted-foreground">
-                · {venue.activeCourtCount} court{venue.activeCourtCount === 1 ? "" : "s"}
-              </span>
-            )}
-          </p>
-          <span className="text-sm font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
-            View court →
-          </span>
-        </div>
+        <p className="mt-0.5 text-sm/5 text-muted-foreground">
+          {venue.startingPrice !== null ? (
+            <>
+              <span className="font-mono text-base/6 font-semibold text-foreground">
+                ₱{venue.startingPrice}
+              </span>{" "}
+              / hour
+            </>
+          ) : (
+            <span>Pricing unavailable</span>
+          )}
+          {venue.activeCourtCount > 0 && (
+            <> · {venue.activeCourtCount} court{venue.activeCourtCount === 1 ? "" : "s"}</>
+          )}
+        </p>
       </div>
     </Link>
   );
