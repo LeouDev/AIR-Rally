@@ -292,6 +292,8 @@ export type CreditTransaction = {
   transaction_type: CreditTransactionType;
   /** Booking id where relevant, otherwise null. */
   reference_id: string | null;
+  /** The admin who made a manual adjustment. Null for system rows (booking payments, cancellation compensation) and every row predating migration 20260810000057. */
+  actor_id: string | null;
   description: string | null;
   created_at: string;
 };
@@ -1150,6 +1152,28 @@ export type Database = {
        * if the amount exceeds the price, or if the balance is short.
        * Returns the resulting balance.
        */
+      /** Admin-only manual credit adjustment — is_admin() checked inside the function, not by the grant. See migration 20260810000057. */
+      admin_adjust_credit: {
+        Args: {
+          p_user_id: string;
+          p_amount: number;
+          p_reason: string;
+        };
+        Returns: number;
+      };
+      /** Total unspent credit across all wallets — the outstanding liability. Admin-only. */
+      admin_total_outstanding_credit: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      /** One user's credit ledger, newest first. Admin-only. */
+      admin_list_credit_transactions: {
+        Args: {
+          p_user_id: string;
+          p_limit?: number;
+        };
+        Returns: CreditTransaction[];
+      };
       apply_credit_to_booking: {
         Args: {
           p_booking_id: string;

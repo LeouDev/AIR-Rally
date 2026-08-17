@@ -75,6 +75,12 @@ export default async function AdminDashboardPage() {
       pending: pendingApplications.length,
     },
     {
+      href: "/admin/credits",
+      icon: Wallet,
+      title: "Credits",
+      description: "Grant or deduct AIR/Rally Credits, and see what is outstanding.",
+    },
+    {
       href: "/admin/payments",
       icon: CreditCard,
       title: "Payments",
@@ -145,7 +151,10 @@ export default async function AdminDashboardPage() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="font-semibold text-foreground">{title}</h2>
-                {pending > 0 && (
+                {/* Credits carries no count — it is a tool, not a queue.
+                    The file's own rule: a badge on a zero is noise, and a
+                    badge on a section with nothing to action is worse. */}
+                {(pending ?? 0) > 0 && (
                   <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-semibold text-warning">{pending}</span>
                 )}
               </div>

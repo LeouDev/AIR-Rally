@@ -273,6 +273,64 @@ export async function issueCancellationCredit(params: {
 }
 
 /**
+ * Manually grants (positive) or deducts (negative) credit, as an admin.
+ *
+ * Takes the CALLER'S client, deliberately — not the service-role client the
+ * rest of this module uses. admin_adjust_credit() checks is_admin() inside
+ * itself, which resolves auth.uid(); a service-role call carries no
+ * auth.uid() and is refused by design. Passing the wrong client here fails
+ * closed, which is the direction that matters.
+ *
+ * Every guard lives in the RPC rather than here: admin-only, non-empty
+ * reason, non-zero amount, and a deduction that cannot take the balance
+ * below zero. See supabase/migrations/20260810000057.
+ *
+ * Returns the resulting balance.
+ */
+export async function adminAdjustCredit(
+  supabase: Client,
+  input: { userId: string; amount: number; reason: string }
+): Promise<number> {
+  if (!Number.isInteger(input.amount) || input.amount === 0) {
+    throw new Error("Adjustment must be a non-zero whole number of centavos.");
+  }
+  if (!input.reason.trim()) {
+    throw new Error("A reason is required for every credit adjustment.");
+  }
+
+  const { data, error } = await supabase.rpc("admin_adjust_credit", {
+    p_user_id: input.userId,
+    p_amount: input.amount,
+    p_reason: input.reason.trim(),
+  });
+  if (error) throw error;
+  return data ?? 0;
+}
+
+/**
+ * Total unspent credit across every wallet, in integer minor units.
+ *
+ * This is the outstanding LIABILITY. Credits never expire, so it only
+ * grows until it is spent, and it needs somewhere visible to live.
+ * Admin-only, checked inside the RPC.
+ */
+export async function getTotalOutstandingCredit(supabase: Client): Promise<number> {
+  const { data, error } = await supabase.rpc("admin_total_outstanding_credit");
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
+/** One user's full ledger, newest first, for an admin. Admin-only, checked inside the RPC. */
+export async function listCreditTransactionsAsAdmin(supabase: Client, userId: string, limit = 50): Promise<CreditTransaction[]> {
+  const { data, error } = await supabase.rpc("admin_list_credit_transactions", {
+    p_user_id: userId,
+    p_limit: limit,
+  });
+  if (error) throw error;
+  return (data ?? []) as CreditTransaction[];
+}
+
+/**
  * How much of a booking a wallet can cover, and what is left for
  * PayMongo. Pure, so checkout never has to trust a client-supplied
  * split — the server recomputes it from the real balance and the real
