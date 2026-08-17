@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SearchBar } from "../SearchBar";
+import { SearchBar, LOCATION_PLACEHOLDER } from "../SearchBar";
 import { reverseGeocodeCity } from "../../../lib/services/geocoding";
 
 // jest.mock must use a relative path here, not the `@/` alias — see
@@ -43,7 +43,7 @@ describe("SearchBar", () => {
   it("renders a free-text location field with a generic placeholder when geolocation is unavailable", () => {
     mockGeolocation("unsupported");
     render(<SearchBar />);
-    expect(screen.getByLabelText("Where")).toHaveAttribute("placeholder", "City, municipality, or barangay");
+    expect(screen.getByLabelText("Where")).toHaveAttribute("placeholder", LOCATION_PLACEHOLDER);
   });
 
   it("upgrades the placeholder to the visitor's detected city on a granted geolocation permission", async () => {
@@ -60,7 +60,7 @@ describe("SearchBar", () => {
     render(<SearchBar />);
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screen.getByLabelText("Where")).toHaveAttribute("placeholder", "City, municipality, or barangay");
+    expect(screen.getByLabelText("Where")).toHaveAttribute("placeholder", LOCATION_PLACEHOLDER);
     expect(mockReverseGeocodeCity).not.toHaveBeenCalled();
   });
 

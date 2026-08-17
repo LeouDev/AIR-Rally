@@ -97,7 +97,7 @@ function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps)
       : `₱${filters.minPrice ?? 0} – ${filters.maxPrice !== undefined ? `₱${filters.maxPrice}` : "any"}`;
 
   return (
-    <div className={cn("flex flex-col gap-5", className)}>
+    <div className={cn("@container flex flex-col gap-5", className)}>
       <div className="flex items-center justify-between lg:hidden">
         <h2 className={SECTION_LABEL}>Filters</h2>
         {activeChips.length > 0 && (
@@ -109,7 +109,7 @@ function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps)
 
       <div className="flex flex-col gap-2.5">
         <Label className={SECTION_LABEL}>Court type</Label>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 @xs:flex-row">
           {COURT_TYPES.map(({ value, label, icon: Icon }) => {
             const active = value === "any" ? !filters.indoorOutdoor : filters.indoorOutdoor === value;
             return (
@@ -163,7 +163,7 @@ function FilterBarFields({ amenities, surfaceTypes, className }: FilterBarProps)
 
       <Separator />
 
-      <div className="flex flex-col gap-4 sm:flex-row">
+      <div className="flex flex-col gap-4 @xs:flex-row">
         <div className="flex flex-1 flex-col gap-2.5">
           <Label className={SECTION_LABEL}>Min rating</Label>
           <div className="flex gap-2">

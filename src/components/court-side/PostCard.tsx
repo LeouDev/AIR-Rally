@@ -109,12 +109,12 @@ export function PostCard({
   const isOwnPost = post.user_id === currentUserId;
 
   return (
-    <article className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+    <article className="rounded-xl bg-card p-3.5 shadow-card">
       {/* Above the author, not beside them: this line explains why the post
           is in the feed at all, which the reader needs before they read
           whose post it is. */}
       {resharer && (
-        <p className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <p className="mb-2.5 flex items-center gap-1.5 text-xs/4 text-muted-foreground">
           <Repeat2 className="size-3.5 shrink-0" aria-hidden="true" />
           <Link href={`/court-side/${resharer.id}`} className="hover:underline">
             {resharer.display_name || "A player"}
@@ -131,11 +131,11 @@ export function PostCard({
             </AvatarFallback>
           </Avatar>
         </Link>
-        <div className="min-w-0 flex-1 text-sm leading-tight">
+        <div className="min-w-0 flex-1 text-[0.9375rem]/5">
           <Link href={`/court-side/${post.user_id}`} className="font-semibold text-foreground hover:underline">
             {authorName}
           </Link>
-          <span className="ml-1 text-muted-foreground">
+          <span className="ml-1 text-[0.8125rem]/[1.125rem] text-muted-foreground">
             · {new Date(post.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
           </span>
         </div>
@@ -166,7 +166,9 @@ export function PostCard({
         {!isOwnPost && <ReportButton targetType="post" targetId={post.id} targetLabel="post" />}
       </div>
 
-      <p className="mt-3 text-sm leading-relaxed text-foreground">{highlightMentions(post.content, clubMentions)}</p>
+      <p className="mt-3 text-[0.9375rem]/[1.375rem] text-foreground text-pretty">
+        {highlightMentions(post.content, clubMentions)}
+      </p>
 
       {post.image_paths.length > 0 && (
         <div
@@ -201,11 +203,15 @@ export function PostCard({
         </div>
       )}
 
-      <div className="mt-3 flex items-center gap-5 border-t border-border pt-3">
+      {/* The feed is quieter than the marketplace: the only orange on this
+          card is the action YOU took. A like and a reshare you haven't made
+          stay muted, so a screen of posts has no colour competing for the
+          tap — and the one you did make is unmistakable. */}
+      <div className="mt-3 flex items-center gap-5 border-t border-hairline pt-2.5">
         <button
           type="button"
           onClick={() => onToggleComments(post.id)}
-          className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+          className="flex items-center gap-1.5 text-sm/5 font-medium text-muted-foreground transition-colors hover:text-foreground"
         >
           <MessageCircle className="size-4" aria-hidden="true" />
           {post.comment_count}
@@ -215,8 +221,8 @@ export function PostCard({
           onClick={() => onToggleReshare(post.id)}
           aria-pressed={reshared}
           className={cn(
-            "flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground",
-            reshared && "text-success"
+            "flex items-center gap-1.5 text-sm/5 font-medium transition-colors",
+            reshared ? "text-primary" : "text-muted-foreground hover:text-foreground"
           )}
         >
           <Repeat2 className="size-4" aria-hidden="true" />
@@ -225,9 +231,10 @@ export function PostCard({
         <button
           type="button"
           onClick={() => onToggleLike(post.id)}
+          aria-pressed={liked}
           className={cn(
-            "flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground",
-            liked && "text-destructive"
+            "flex items-center gap-1.5 text-sm/5 font-medium transition-colors",
+            liked ? "text-primary" : "text-muted-foreground hover:text-foreground"
           )}
         >
           <Heart className={cn("size-4", liked && "fill-current")} aria-hidden="true" />
@@ -236,7 +243,7 @@ export function PostCard({
         <button
           type="button"
           onClick={onShare}
-          className="ml-auto text-muted-foreground hover:text-foreground"
+          className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
           aria-label="Share"
         >
           <Share2 className="size-4" aria-hidden="true" />
