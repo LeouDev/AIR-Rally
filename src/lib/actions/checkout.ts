@@ -1,6 +1,13 @@
 "use server";
 
-import { createBooking, cancelBooking, attachPaymongoCheckoutSession, setBookingProcessingFee, BookingError } from "@/lib/services/bookings";
+import {
+  createBooking,
+  cancelBooking,
+  attachPaymongoCheckoutSession,
+  setBookingProcessingFee,
+  setBookingMarketplaceSplit,
+  BookingError,
+} from "@/lib/services/bookings";
 import { createPayMongoCheckoutSession, PayMongoError } from "@/lib/services/paymongo";
 import { getUserCreditBalance, splitBookingPayment, applyCreditToBooking, confirmCreditOnlyBooking } from "@/lib/services/credits";
 import { calculateMarketplaceSplit } from "@/lib/services/commission";
@@ -148,6 +155,29 @@ export async function createCheckoutSessionAction(
         ? { ...calculateMarketplaceSplit(amountDue), venuePaymongoAccountId: display.venuePaymongoAccountId }
         : undefined;
 
+    // Snapshotted BEFORE the Checkout Session exists, for the same reason
+    // the processing fee is: once a session is live the customer can pay
+    // it, and a snapshot written after that leaves a window where a real,
+    // really-split payment has no local record of where it was routed.
+    // Nothing recovers that after the fact — PayMongo has already moved the
+    // money by then.
+    //
+    // This must go through the RPC. All three columns are guarded by
+    // prevent_booking_tampering(), which reverts silently rather than
+    // raising, so the plain update this used to ride along with left them
+    // NULL and reported success (verified on staging — see
+    // scripts/verify-staging-marketplace-split-snapshot.ts).
+    if (marketplaceSplit) {
+      const splitRecorded = await setBookingMarketplaceSplit(booking.id, {
+        platformFeeAmount: marketplaceSplit.platformFeeAmount,
+        venueAmount: marketplaceSplit.venueAmount,
+        paymongoVenueAccountId: marketplaceSplit.venuePaymongoAccountId,
+      });
+      if (!splitRecorded) {
+        throw new BookingError("marketplace_split_not_recorded", "We couldn't start checkout. Please try again.");
+      }
+    }
+
     // PayMongo Checkout Sessions have no confirmed equivalent of Stripe's
     // {CHECKOUT_SESSION_ID} redirect-time placeholder — the confirmation
     // page instead reads the session id straight off the booking row,
@@ -174,16 +204,7 @@ export async function createCheckoutSessionAction(
       },
     });
 
-    await attachPaymongoCheckoutSession(
-      supabase,
-      booking.id,
-      session.id,
-      marketplaceSplit && {
-        platformFeeAmount: marketplaceSplit.platformFeeAmount,
-        venueAmount: marketplaceSplit.venueAmount,
-        paymongoVenueAccountId: marketplaceSplit.venuePaymongoAccountId,
-      }
-    );
+    await attachPaymongoCheckoutSession(supabase, booking.id, session.id);
 
     return { success: true, data: { url: session.url, bookingId: booking.id, creditApplied, amountDue } };
   } catch (error) {

@@ -676,11 +676,20 @@ export type Booking = {
   /**
    * PayMongo Platforms marketplace split (see ARCHITECTURE.md's PayMongo
    * Platforms section). Immutable snapshot computed once, server-side, at
-   * booking creation from price_amount — never from a post-processing-fee
+   * checkout-session-creation time — never from a post-processing-fee
    * amount, never recalculated. Null for bookings that predate the
    * marketplace split or that use the non-split payment path (Stripe, or
-   * a PayMongo venue that isn't onboarded yet). platform_fee_amount +
-   * venue_amount always sums exactly to price_amount when both are set.
+   * a PayMongo venue that isn't onboarded yet).
+   *
+   * Written ONLY by set_booking_marketplace_split() — all three columns are
+   * guarded by prevent_booking_tampering() and a plain update silently
+   * reverts, even as service_role. See migration 20260810000056.
+   *
+   * The two sum to the amount PayMongo was asked to COLLECT, which equals
+   * price_amount on a straightforward booking but not always: credit-funded
+   * checkout splits price_amount minus the credit applied, and a reschedule
+   * difference splits only the difference while attaching the snapshot to a
+   * replacement booking priced at the full new price.
    */
   platform_fee_amount: number | null;
   venue_amount: number | null;
@@ -1044,6 +1053,22 @@ export type Database = {
         Args: {
           p_booking_id: string;
           p_amount: number;
+        };
+        Returns: boolean;
+      };
+      /**
+       * Records the PayMongo marketplace split snapshot. service_role only —
+       * all three columns are guarded by prevent_booking_tampering(), which
+       * reverts silently, so this is the ONLY path that can write them (a
+       * plain update, even as service_role, is a no-op). Returns false if the
+       * booking isn't pending or the split exceeds its price.
+       */
+      set_booking_marketplace_split: {
+        Args: {
+          p_booking_id: string;
+          p_platform_fee_amount: number;
+          p_venue_amount: number;
+          p_paymongo_venue_account_id: string;
         };
         Returns: boolean;
       };

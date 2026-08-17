@@ -1,7 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Booking, BookingReschedule, Court } from "@/lib/supabase/types";
 import { RESCHEDULE_CUTOFF_HOURS } from "@/lib/booking-config";
-import { createBooking, cancelBooking, getBookingById, attachPaymongoCheckoutSession, BookingError } from "@/lib/services/bookings";
+import {
+  createBooking,
+  cancelBooking,
+  getBookingById,
+  attachPaymongoCheckoutSession,
+  setBookingMarketplaceSplit,
+  BookingError,
+} from "@/lib/services/bookings";
 import { createPayMongoCheckoutSession, retrievePayMongoCheckoutSession } from "@/lib/services/paymongo";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
 import { getVenueDetail } from "@/lib/services/venues";
@@ -261,6 +268,25 @@ async function createDifferenceCheckout(
       ? { ...calculateMarketplaceSplit(params.amount), venuePaymongoAccountId: display.venuePaymongoAccountId }
       : undefined;
 
+  // Recorded before the session exists, and through the service_role-only
+  // RPC — the three split columns are guarded by
+  // prevent_booking_tampering(), so the plain update this used to ride
+  // along with silently left them NULL. See migration 20260810000056.
+  //
+  // The snapshot lands on the REPLACEMENT booking but splits only the price
+  // difference, which is all PayMongo is asked to collect here. That is why
+  // the RPC bounds the split by price_amount rather than requiring equality.
+  if (marketplaceSplit) {
+    const splitRecorded = await setBookingMarketplaceSplit(params.replacement.id, {
+      platformFeeAmount: marketplaceSplit.platformFeeAmount,
+      venueAmount: marketplaceSplit.venueAmount,
+      paymongoVenueAccountId: marketplaceSplit.venuePaymongoAccountId,
+    });
+    if (!splitRecorded) {
+      throw new RescheduleError("checkout_session_creation_failed", "We couldn't finish this reschedule — please try again.");
+    }
+  }
+
   const session = await createPayMongoCheckoutSession({
     booking: params.replacement,
     venueName,
@@ -274,16 +300,7 @@ async function createDifferenceCheckout(
     },
   });
 
-  await attachPaymongoCheckoutSession(
-    supabase,
-    params.replacement.id,
-    session.id,
-    marketplaceSplit && {
-      platformFeeAmount: marketplaceSplit.platformFeeAmount,
-      venueAmount: marketplaceSplit.venueAmount,
-      paymongoVenueAccountId: marketplaceSplit.venuePaymongoAccountId,
-    }
-  );
+  await attachPaymongoCheckoutSession(supabase, params.replacement.id, session.id);
 
   return session.url;
 }

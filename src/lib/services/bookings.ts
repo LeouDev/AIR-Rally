@@ -48,7 +48,13 @@ export type BookingErrorReason =
    * checkout was abandoned rather than charging a total the webhook's
    * amount check would reject — see lib/actions/checkout.ts.
    */
-  | "processing_fee_not_recorded";
+  | "processing_fee_not_recorded"
+  /**
+   * The marketplace split snapshot could not be recorded, so checkout was
+   * abandoned rather than routing a real split at PayMongo with no local
+   * record of where the money went — see lib/actions/checkout.ts.
+   */
+  | "marketplace_split_not_recorded";
 
 /**
  * Typed domain error for every booking-creation/cancellation failure mode
@@ -342,32 +348,73 @@ export async function listMyBookingsWithDetails(supabase: Client, userId: string
 
 /**
  * Twin of attachCheckoutSession() — also records which provider this
- * booking is actually going through. `marketplaceSplit`, when given,
- * stores the audit snapshot of what was actually sent to PayMongo's
- * split_payment (see ARCHITECTURE.md's PayMongo Platforms section for why
- * these three columns are owner-writable here rather than bypass-only:
- * they're a record of what happened, never re-read to decide what a live
- * checkout session's real split is).
+ * booking is actually going through. Neither column it writes is guarded
+ * by prevent_booking_tampering(), so the caller's own client is enough.
+ *
+ * The marketplace split snapshot deliberately does NOT travel with this
+ * update; it goes through setBookingMarketplaceSplit() below, which must
+ * be called BEFORE the checkout session exists. Passing it here is what
+ * used to make it vanish silently.
  */
 export async function attachPaymongoCheckoutSession(
   supabase: Client,
   bookingId: string,
-  paymongoCheckoutSessionId: string,
-  marketplaceSplit?: { platformFeeAmount: number; venueAmount: number; paymongoVenueAccountId: string }
+  paymongoCheckoutSessionId: string
 ): Promise<void> {
   const { error } = await supabase
     .from("bookings")
     .update({
       payment_provider: "paymongo",
       paymongo_checkout_session_id: paymongoCheckoutSessionId,
-      ...(marketplaceSplit && {
-        platform_fee_amount: marketplaceSplit.platformFeeAmount,
-        venue_amount: marketplaceSplit.venueAmount,
-        paymongo_venue_account_id: marketplaceSplit.paymongoVenueAccountId,
-      }),
     })
     .eq("id", bookingId);
   if (error) throw error;
+}
+
+/**
+ * Records the audit snapshot of the marketplace split actually sent to
+ * PayMongo's split_payment. SERVER ONLY.
+ *
+ * Goes through the service_role-only RPC rather than an ordinary update,
+ * for exactly the reason setBookingProcessingFee() does — and this one was
+ * a live latent bug rather than a precaution. platform_fee_amount /
+ * venue_amount / paymongo_venue_account_id are all guarded by
+ * prevent_booking_tampering(): 20260810000011 removed those three clauses
+ * on purpose, and 20260810000038 silently copied them back while
+ * re-declaring the function for an unrelated column. The guard reverts
+ * instead of raising, so the previous update returned NO error and left
+ * all three NULL — verified against staging as both the booking's owner
+ * and service_role (scripts/verify-staging-marketplace-split-snapshot.ts).
+ * The RPC sets the bypass GUC; see supabase/migrations/20260810000056.
+ *
+ * Returns false when the booking is no longer pending or the split exceeds
+ * its price. Callers must treat that as a failed checkout: these figures
+ * feed admin reconciliation and owner earnings reporting, so routing a
+ * real split at PayMongo with no local record of it is not recoverable
+ * after the fact.
+ */
+export async function setBookingMarketplaceSplit(
+  bookingId: string,
+  split: { platformFeeAmount: number; venueAmount: number; paymongoVenueAccountId: string }
+): Promise<boolean> {
+  if (!Number.isInteger(split.platformFeeAmount) || split.platformFeeAmount < 0) {
+    throw new Error("Platform fee must be a non-negative whole number of centavos.");
+  }
+  if (!Number.isInteger(split.venueAmount) || split.venueAmount < 0) {
+    throw new Error("Venue amount must be a non-negative whole number of centavos.");
+  }
+  if (!split.paymongoVenueAccountId.trim()) {
+    throw new Error("A PayMongo venue account id is required to record a split.");
+  }
+
+  const { data, error } = await getBookingsServiceRoleClient().rpc("set_booking_marketplace_split", {
+    p_booking_id: bookingId,
+    p_platform_fee_amount: split.platformFeeAmount,
+    p_venue_amount: split.venueAmount,
+    p_paymongo_venue_account_id: split.paymongoVenueAccountId,
+  });
+  if (error) throw error;
+  return data ?? false;
 }
 
 /**

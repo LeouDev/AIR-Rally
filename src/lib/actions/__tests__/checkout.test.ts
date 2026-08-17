@@ -3,7 +3,7 @@
  */
 import { createCheckoutSessionAction } from "../checkout";
 import { getServerClient } from "../auth";
-import { createBooking, cancelBooking, attachPaymongoCheckoutSession, setBookingProcessingFee } from "../../services/bookings";
+import { createBooking, cancelBooking, attachPaymongoCheckoutSession, setBookingProcessingFee, setBookingMarketplaceSplit } from "../../services/bookings";
 import { createPayMongoCheckoutSession } from "../../services/paymongo";
 import { getUserCreditBalance, applyCreditToBooking, confirmCreditOnlyBooking } from "../../services/credits";
 import { getCourtDisplayInfo } from "../../services/courts";
@@ -19,6 +19,7 @@ jest.mock("../../services/bookings", () => {
     cancelBooking: jest.fn(),
     attachPaymongoCheckoutSession: jest.fn(),
     setBookingProcessingFee: jest.fn(),
+    setBookingMarketplaceSplit: jest.fn(),
   };
 });
 jest.mock("../../services/paymongo", () => {
@@ -42,6 +43,7 @@ const mockCreateBooking = createBooking as jest.MockedFunction<typeof createBook
 const mockCancelBooking = cancelBooking as jest.MockedFunction<typeof cancelBooking>;
 const mockAttachSession = attachPaymongoCheckoutSession as jest.MockedFunction<typeof attachPaymongoCheckoutSession>;
 const mockSetProcessingFee = setBookingProcessingFee as jest.MockedFunction<typeof setBookingProcessingFee>;
+const mockSetMarketplaceSplit = setBookingMarketplaceSplit as jest.MockedFunction<typeof setBookingMarketplaceSplit>;
 const mockCreateSession = createPayMongoCheckoutSession as jest.MockedFunction<typeof createPayMongoCheckoutSession>;
 const mockGetBalance = getUserCreditBalance as jest.MockedFunction<typeof getUserCreditBalance>;
 const mockApplyCredit = applyCreditToBooking as jest.MockedFunction<typeof applyCreditToBooking>;
@@ -345,6 +347,87 @@ describe("createCheckoutSessionAction — passed-on processing fee", () => {
     // Never create a session whose grossed-up total the webhook would then
     // reject — that is the stuck-on-pending outage this feature exists to
     // end, not a state to ship into.
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(mockCancelBooking).toHaveBeenCalledWith(expect.anything(), "user-1", "booking-1");
+  });
+});
+
+describe("createCheckoutSessionAction — marketplace split snapshot", () => {
+  const ORIGINAL_GATE = process.env.PAYMONGO_MARKETPLACE_SPLIT_ENABLED;
+
+  beforeEach(() => {
+    process.env.PAYMONGO_MARKETPLACE_SPLIT_ENABLED = "true";
+    mockGetBalance.mockResolvedValue({ balance: 0 });
+    mockSetMarketplaceSplit.mockResolvedValue(true);
+    mockGetCourtDisplay.mockResolvedValue({
+      venueName: "Rizal Pickleball Club",
+      courtName: "Court 1",
+      venuePaymongoActivationStatus: "activated",
+      venuePaymongoAccountId: "acct_venue_1",
+    } as never);
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_GATE === undefined) delete process.env.PAYMONGO_MARKETPLACE_SPLIT_ENABLED;
+    else process.env.PAYMONGO_MARKETPLACE_SPLIT_ENABLED = ORIGINAL_GATE;
+  });
+
+  it("records the split through the service_role RPC, not the session attach", async () => {
+    const result = await createCheckoutSessionAction(VALUES);
+
+    expect(result.success).toBe(true);
+    // The regression this guards: these three columns are reverted by
+    // prevent_booking_tampering(), so riding along with attachPaymongoCheckoutSession()'s
+    // update persisted nothing and reported success. See migration 20260810000056.
+    expect(mockSetMarketplaceSplit).toHaveBeenCalledWith("booking-1", {
+      platformFeeAmount: 2500,
+      venueAmount: 47500,
+      paymongoVenueAccountId: "acct_venue_1",
+    });
+    expect(mockAttachSession).toHaveBeenCalledWith(expect.anything(), "booking-1", "cs_test_1");
+  });
+
+  it("records the split BEFORE the checkout session can be paid", async () => {
+    await createCheckoutSessionAction(VALUES);
+
+    // Once a session is live the customer can pay it, and a snapshot
+    // written after that leaves a really-split payment with no local
+    // record of where the money was routed.
+    expect(mockSetMarketplaceSplit.mock.invocationCallOrder[0]).toBeLessThan(mockCreateSession.mock.invocationCallOrder[0]);
+  });
+
+  it("splits only what PayMongo actually collects when credit is applied", async () => {
+    mockGetBalance.mockResolvedValue({ balance: 30000 });
+    mockApplyCredit.mockResolvedValue(30000);
+
+    await createCheckoutSessionAction(VALUES);
+
+    // ₱200 is collected, so the split divides ₱200 — splitting the full
+    // ₱500 would promise the venue more than was received.
+    expect(mockSetMarketplaceSplit).toHaveBeenCalledWith("booking-1", {
+      platformFeeAmount: 1000,
+      venueAmount: 19000,
+      paymongoVenueAccountId: "acct_venue_1",
+    });
+  });
+
+  it("records nothing while the gate is off", async () => {
+    delete process.env.PAYMONGO_MARKETPLACE_SPLIT_ENABLED;
+
+    const result = await createCheckoutSessionAction(VALUES);
+
+    expect(result.success).toBe(true);
+    expect(mockSetMarketplaceSplit).not.toHaveBeenCalled();
+  });
+
+  it("abandons checkout and releases the booking when the split cannot be recorded", async () => {
+    mockSetMarketplaceSplit.mockResolvedValue(false);
+
+    const result = await createCheckoutSessionAction(VALUES);
+
+    expect(result.success).toBe(false);
+    // Never route a real split at PayMongo with no record of it — nothing
+    // recovers that once the money has moved.
     expect(mockCreateSession).not.toHaveBeenCalled();
     expect(mockCancelBooking).toHaveBeenCalledWith(expect.anything(), "user-1", "booking-1");
   });

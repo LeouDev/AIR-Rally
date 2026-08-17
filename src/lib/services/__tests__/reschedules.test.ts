@@ -21,6 +21,7 @@ jest.mock("../bookings", () => ({
   cancelBooking: jest.fn(),
   getBookingById: jest.fn(),
   attachPaymongoCheckoutSession: jest.fn(),
+  setBookingMarketplaceSplit: jest.fn(),
   BookingError: class BookingError extends Error {
     reason: string;
     constructor(reason: string, message: string) {
@@ -30,11 +31,12 @@ jest.mock("../bookings", () => ({
     }
   },
 }));
-import { createBooking, cancelBooking, getBookingById, attachPaymongoCheckoutSession, BookingError } from "../bookings";
+import { createBooking, cancelBooking, getBookingById, attachPaymongoCheckoutSession, setBookingMarketplaceSplit, BookingError } from "../bookings";
 const mockCreateBooking = createBooking as jest.MockedFunction<typeof createBooking>;
 const mockCancelBooking = cancelBooking as jest.MockedFunction<typeof cancelBooking>;
 const mockGetBookingById = getBookingById as jest.MockedFunction<typeof getBookingById>;
 const mockAttachPaymongoCheckoutSession = attachPaymongoCheckoutSession as jest.MockedFunction<typeof attachPaymongoCheckoutSession>;
+const mockSetBookingMarketplaceSplit = setBookingMarketplaceSplit as jest.MockedFunction<typeof setBookingMarketplaceSplit>;
 
 jest.mock("../refunds", () => ({
   requestRefund: jest.fn(),
@@ -182,6 +184,8 @@ beforeEach(() => {
   mockCancelBooking.mockReset();
   mockGetBookingById.mockReset();
   mockAttachPaymongoCheckoutSession.mockReset();
+  mockSetBookingMarketplaceSplit.mockReset();
+  mockSetBookingMarketplaceSplit.mockResolvedValue(true);
   mockRequestRefund.mockReset();
   mockCreatePayMongoCheckoutSession.mockReset();
   mockRetrievePayMongoCheckoutSession.mockReset();
@@ -536,7 +540,8 @@ describe("createReschedule — price increase", () => {
 
     expect(insertedPayload).toMatchObject({ price_difference: 20000 });
     expect(mockCreatePayMongoCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ chargeAmountOverride: 20000, marketplaceSplit: undefined }));
-    expect(mockAttachPaymongoCheckoutSession).toHaveBeenCalledWith(supabase, higherPriceReplacement.id, "cs_pm_diff_1", undefined);
+    expect(mockAttachPaymongoCheckoutSession).toHaveBeenCalledWith(supabase, higherPriceReplacement.id, "cs_pm_diff_1");
+    expect(mockSetBookingMarketplaceSplit).not.toHaveBeenCalled();
     expect(result).toMatchObject({ kind: "checkout_required", checkoutUrl: "https://checkout.paymongo.com/diff_1" });
   });
 
@@ -562,6 +567,43 @@ describe("createReschedule — price increase", () => {
     });
 
     expect(mockCreatePayMongoCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ marketplaceSplit: { platformFeeAmount: 1000, venuePaymongoAccountId: "acc_venue_1" } }));
+
+    // The snapshot must be recorded through the service_role-only RPC — a
+    // plain update rides the tamper guard and silently persists nothing
+    // (migration 20260810000056). It splits the 20000 DIFFERENCE, not the
+    // replacement's 70000 price.
+    expect(mockSetBookingMarketplaceSplit).toHaveBeenCalledWith(higherPriceReplacement.id, {
+      platformFeeAmount: 1000,
+      venueAmount: 19000,
+      paymongoVenueAccountId: "acc_venue_1",
+    });
+  });
+
+  it("aborts the reschedule when the marketplace split snapshot cannot be recorded", async () => {
+    const higherPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 70000, payment_provider: "paymongo" as const };
+    mockGetBookingById.mockResolvedValue({ ...ORIGINAL_BOOKING, payment_provider: "paymongo" });
+    mockCreateBooking.mockResolvedValue(higherPriceReplacement);
+    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court B", venueName: "Rally Court", venueTimezone: "Asia/Manila", venuePaymongoAccountId: "acc_venue_1", venuePaymongoActivationStatus: "activated" });
+    mockMarketplaceSplitEnabled.mockReturnValue(true);
+    mockSetBookingMarketplaceSplit.mockResolvedValue(false);
+    const supabase = createTableMockSupabase({
+      booking_refunds: NOT_FOUND,
+      booking_reschedules: [NOT_FOUND, NOT_FOUND, NOT_FOUND, { data: RESCHEDULE_ROW, error: null }],
+      courts: [COURT_ROW("venue-1"), COURT_ROW("venue-1")],
+    });
+
+    await expect(
+      createReschedule(supabase, "user-1", {
+        bookingId: ORIGINAL_BOOKING.id,
+        newCourtId: "court-2",
+        newStartTime: FAR_FUTURE_START,
+        newEndTime: FAR_FUTURE_END,
+        siteUrl: "https://air-rally.app",
+      })
+    ).rejects.toBeTruthy();
+
+    // No PayMongo session may exist for a split we could not record.
+    expect(mockCreatePayMongoCheckoutSession).not.toHaveBeenCalled();
   });
 
   it("leaves the reschedule row pending_payment (retryable) when difference-checkout creation fails", async () => {
