@@ -29,14 +29,11 @@ jest.mock("../paymongo", () => ({
 }));
 const mockRetrievePayMongoPayment = retrievePayMongoPayment as jest.MockedFunction<typeof retrievePayMongoPayment>;
 
-const originalStripeKey = process.env.STRIPE_SECRET_KEY;
 const originalPlatformAccountId = process.env.PAYMONGO_PLATFORM_ACCOUNT_ID;
 const originalFetch = global.fetch;
 const mockFetch = jest.fn();
 
 afterAll(() => {
-  if (originalStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
-  else process.env.STRIPE_SECRET_KEY = originalStripeKey;
   if (originalPlatformAccountId === undefined) delete process.env.PAYMONGO_PLATFORM_ACCOUNT_ID;
   else process.env.PAYMONGO_PLATFORM_ACCOUNT_ID = originalPlatformAccountId;
   global.fetch = originalFetch;
