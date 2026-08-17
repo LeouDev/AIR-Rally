@@ -1,5 +1,7 @@
 import type { SupabaseClient, PostgrestError } from "@supabase/supabase-js";
 import type { Database, Post, PostComment, PublicProfile } from "@/lib/supabase/types";
+import { POST_IMAGES_BUCKET } from "@/lib/services/postImages";
+import { logServerError } from "@/lib/errors";
 
 type Client = SupabaseClient<Database>;
 
@@ -10,6 +12,17 @@ function isUniqueViolation(error: PostgrestError): boolean {
 }
 
 export type PostWithAuthor = Post & { author: PublicProfile | null };
+
+/** A row as court_side_feed() returns it: a post plus the two feed-ordering fields. */
+type FeedRow = Post & { effective_at: string; resharer_id: string | null };
+
+/**
+ * A feed entry. `resharer` is non-null when this row is in the feed
+ * because someone reshared it, and drives the "reshared by" line. The same
+ * post can appear as both an original and a reshare — deliberately, see
+ * the migration's note.
+ */
+export type FeedPost = PostWithAuthor & { effective_at: string; resharer_id: string | null; resharer: PublicProfile | null };
 export type PostCommentWithAuthor = PostComment & { author: PublicProfile | null };
 
 const FEED_PAGE_SIZE = 20;
@@ -32,20 +45,51 @@ async function attachAuthors<T extends { user_id: string }>(
   return rows.map((row) => ({ ...row, author: authorsById.get(row.user_id) ?? null }));
 }
 
-/** Cursor-paginated by `created_at` (descending) — `cursor` is the last-seen row's `created_at`. */
+/**
+ * The COURT/Side feed, via the court_side_feed() RPC (migration
+ * 20260810000050) rather than a direct read of `posts`.
+ *
+ * The RPC unions posts with reshares so a reshare lifts a post back to the
+ * top with attribution — before it, pressing reshare incremented a counter
+ * and notified the author, and nothing else. It is SECURITY INVOKER, so
+ * RLS still applies exactly as it did to the direct query.
+ *
+ * The cursor is `effective_at` (the post's own time, or the reshare's when
+ * the row is a reshare) rather than `created_at`. That is invisible to
+ * callers: it is still an ISO timestamp from the last row, so loadMore is
+ * unchanged.
+ */
 export async function listFeedPosts(
   supabase: Client,
   { limit = FEED_PAGE_SIZE, cursor }: { limit?: number; cursor?: string } = {}
-): Promise<{ posts: PostWithAuthor[]; nextCursor: string | null }> {
-  let query = supabase.from("posts").select("*").order("created_at", { ascending: false }).limit(limit);
-  if (cursor) query = query.lt("created_at", cursor);
-
-  const { data, error } = await query;
+): Promise<{ posts: FeedPost[]; nextCursor: string | null }> {
+  const { data, error } = await supabase.rpc("court_side_feed", {
+    p_limit: limit,
+    p_cursor: cursor ?? undefined,
+  });
   if (error) throw error;
 
-  const posts = await attachAuthors(supabase, data);
-  const nextCursor = data.length === limit ? data[data.length - 1].created_at : null;
+  const rows = (data ?? []) as FeedRow[];
+  // Authors AND resharers, in one lookup — a reshare row needs both names.
+  const withAuthors = await attachAuthors(supabase, rows);
+  const resharerIds = rows.map((r) => r.resharer_id).filter((id): id is string => id !== null);
+  const resharers = await profilesByIds(supabase, resharerIds);
+
+  const posts: FeedPost[] = withAuthors.map((row) => ({
+    ...row,
+    resharer: row.resharer_id ? (resharers.get(row.resharer_id) ?? null) : null,
+  }));
+
+  const nextCursor = rows.length === limit ? rows[rows.length - 1].effective_at : null;
   return { posts, nextCursor };
+}
+
+/** Looks up profiles by id, empty-safe. Same view-not-embeddable reason as attachAuthors. */
+async function profilesByIds(supabase: Client, ids: string[]): Promise<Map<string, PublicProfile>> {
+  if (ids.length === 0) return new Map();
+  const { data, error } = await supabase.from("public_profiles").select("*").in("id", Array.from(new Set(ids)));
+  if (error) throw error;
+  return new Map((data ?? []).map((p) => [p.id, p]));
 }
 
 /** One user's own COURT/Side history — backs the "My/Rally" profile page. Same cursor shape as listFeedPosts. */
@@ -81,8 +125,38 @@ export async function createPost(
   return data;
 }
 
-/** RLS scopes this to the caller's own post (or an admin) — a mismatched id is a silent no-op, not an error. */
+/**
+ * Deletes a post and its uploaded images. RLS scopes this to the caller's
+ * own post (or an admin) — a mismatched id is a silent no-op, not an error.
+ *
+ * The storage objects have to be removed here rather than by a database
+ * trigger: Supabase storage is not reachable from Postgres, so a trigger
+ * on `posts` can cascade the rows but leaves every file behind forever.
+ * Both delete paths — the author's own delete and AdminDeletePostButton —
+ * already route through this function, so this is the one place that
+ * covers both.
+ *
+ * ORDER MATTERS: the row is read for its paths and the files removed
+ * BEFORE the row is deleted. The other order would lose the paths on any
+ * failure between the two, leaving files no longer referenced by anything
+ * and therefore impossible to find later.
+ *
+ * A storage failure is logged, not thrown. The user asked for the post to
+ * be gone; leaving it visible because a file could not be removed would be
+ * the wrong trade, and an orphaned object is recoverable while a post the
+ * author believes they deleted is not.
+ */
 export async function deletePost(supabase: Client, postId: string): Promise<void> {
+  const { data: post } = await supabase.from("posts").select("image_paths").eq("id", postId).maybeSingle();
+
+  const paths = post?.image_paths ?? [];
+  if (paths.length > 0) {
+    const { error: storageError } = await supabase.storage.from(POST_IMAGES_BUCKET).remove(paths);
+    if (storageError) {
+      logServerError("posts.deletePost.storage", storageError);
+    }
+  }
+
   const { error } = await supabase.from("posts").delete().eq("id", postId);
   if (error) throw error;
 }

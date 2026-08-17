@@ -11,7 +11,7 @@ import { PostCard, initialsFrom } from "@/components/court-side/PostCard";
 import { FollowListDialog } from "@/components/court-side/FollowListDialog";
 import { ShareDialog } from "@/components/court-side/ShareDialog";
 import { createClient } from "@/lib/supabase/client";
-import { listFeedPosts, listLikedPostIds, listResharedPostIds, type PostWithAuthor } from "@/lib/services/posts";
+import { listFeedPosts, listLikedPostIds, listResharedPostIds, type FeedPost } from "@/lib/services/posts";
 import { searchPublicProfiles } from "@/lib/services/profiles";
 import { searchClubs, clubMentionHandle, type ClubMentionMap } from "@/lib/services/clubs";
 import { uploadPostImages, MAX_POST_IMAGES } from "@/lib/services/postImages";
@@ -47,7 +47,7 @@ type CourtSideFeedProps = {
   displayName: string;
   avatarUrl: string | null;
   isAdmin: boolean;
-  initialPosts: PostWithAuthor[];
+  initialPosts: FeedPost[];
   initialNextCursor: string | null;
   initialLikedPostIds: string[];
   initialFollowingIds: string[];
@@ -83,7 +83,7 @@ export function CourtSideFeed({
   clubMentions,
 }: CourtSideFeedProps) {
   const [activeTab, setActiveTab] = useState<(typeof FEED_TABS)[number]>("For you");
-  const [posts, setPosts] = useState<PostWithAuthor[]>(initialPosts);
+  const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [loadingMore, setLoadingMore] = useState(false);
   const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set(initialLikedPostIds));
@@ -284,7 +284,16 @@ export function CourtSideFeed({
       return;
     }
     setPosts((current) => [
-      { ...result.data, author: { id: currentUserId, display_name: displayName, avatar_url: avatarUrl } },
+      {
+        ...result.data,
+        author: { id: currentUserId, display_name: displayName, avatar_url: avatarUrl },
+        // A post you just wrote is an original, not a reshare, and sorts
+        // at its own creation time — the same shape court_side_feed()
+        // would return for it on the next load.
+        effective_at: result.data.created_at,
+        resharer_id: null,
+        resharer: null,
+      },
       ...current,
     ]);
     setDraft("");
@@ -604,8 +613,12 @@ export function CourtSideFeed({
           <div className="mt-4 flex flex-col gap-3">
             {posts.map((post) => (
               <PostCard
-                key={post.id}
+                // Not post.id alone: the same post appears once as itself
+                // and once per reshare, so React would see duplicate keys
+                // and drop rows. resharer_id disambiguates them.
+                key={`${post.id}:${post.resharer_id ?? "original"}`}
                 post={post}
+                resharer={post.resharer}
                 currentUserId={currentUserId}
                 isAdmin={isAdmin}
                 liked={likedPostIds.has(post.id)}

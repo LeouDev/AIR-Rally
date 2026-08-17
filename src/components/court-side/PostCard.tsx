@@ -9,6 +9,7 @@ import { AdminDeletePostButton } from "@/components/admin/AdminDeletePostButton"
 import { ReportButton } from "@/components/trust/ReportButton";
 import type { PostWithAuthor } from "@/lib/services/posts";
 import type { ClubMentionMap } from "@/lib/services/clubs";
+import type { PublicProfile } from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
 import { getPostImageUrl } from "@/lib/services/postImages";
 import { cn } from "@/lib/utils";
@@ -72,6 +73,12 @@ type PostCardProps = {
   clubMentions?: ClubMentionMap;
   reshared: boolean;
   onToggleReshare: (postId: string) => void;
+  /**
+   * Set when this row is in the feed because someone reshared it, which
+   * drives the attribution line. Absent on a user's own profile, where
+   * every post is theirs by definition.
+   */
+  resharer?: PublicProfile | null;
 };
 
 /**
@@ -96,12 +103,25 @@ export function PostCard({
   clubMentions,
   reshared,
   onToggleReshare,
+  resharer,
 }: PostCardProps) {
   const authorName = post.author?.display_name || "Player";
   const isOwnPost = post.user_id === currentUserId;
 
   return (
     <article className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+      {/* Above the author, not beside them: this line explains why the post
+          is in the feed at all, which the reader needs before they read
+          whose post it is. */}
+      {resharer && (
+        <p className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Repeat2 className="size-3.5 shrink-0" aria-hidden="true" />
+          <Link href={`/court-side/${resharer.id}`} className="hover:underline">
+            {resharer.display_name || "A player"}
+          </Link>
+          {resharer.id === currentUserId ? " (you) reshared this" : " reshared this"}
+        </p>
+      )}
       <div className="flex items-center gap-2.5">
         <Link href={`/court-side/${post.user_id}`} className="shrink-0">
           <Avatar>

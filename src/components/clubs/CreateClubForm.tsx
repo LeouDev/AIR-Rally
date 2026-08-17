@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Image as ImageIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createClubAction } from "@/lib/actions/clubs";
 import { CLUB_SKILL_LEVELS, CLUB_TYPES, CLUB_VISIBILITIES, type CreateClubValues } from "@/lib/validations/club";
+import { createClient } from "@/lib/supabase/client";
+import { uploadClubImage, ALLOWED_CLUB_IMAGE_TYPES } from "@/lib/services/clubImages";
 
 const SKILL_LABELS: Record<(typeof CLUB_SKILL_LEVELS)[number], string> = {
   beginner: "Beginner",
@@ -33,6 +36,9 @@ const VISIBILITY_LABELS: Record<(typeof CLUB_VISIBILITIES)[number], string> = {
 export function CreateClubForm() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [values, setValues] = useState<CreateClubValues>({
     name: "",
     description: "",
@@ -46,15 +52,53 @@ export function CreateClubForm() {
     setValues((current) => ({ ...current, [key]: value }));
   }
 
+  function pickImage(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    // Held locally until submit, so abandoning the form never leaves an
+    // orphaned object in storage — same posture as the post composer.
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setImageFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+  }
+
+  function clearImage() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setImageFile(null);
+    setPreviewUrl(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (submitting) return;
     setSubmitting(true);
 
+    let imageUrl: string | undefined;
+    if (imageFile) {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setSubmitting(false);
+        toast.error("Sign in to create a club.");
+        return;
+      }
+      const upload = await uploadClubImage(supabase, user.id, imageFile);
+      if (upload.error || !upload.path) {
+        setSubmitting(false);
+        toast.error(upload.error ?? "Upload failed.");
+        return;
+      }
+      imageUrl = upload.path;
+    }
+
     const result = await createClubAction({
       ...values,
       description: values.description?.trim() || undefined,
       location: values.location?.trim() || undefined,
+      imageUrl,
     });
 
     if (!result.success) {
@@ -153,6 +197,44 @@ export function CreateClubForm() {
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="club-photo">Club photo (optional)</Label>
+        {previewUrl ? (
+          <div className="relative w-full max-w-sm overflow-hidden rounded-xl border border-border">
+            {/* Object URL, not a remote host — next/image would need the
+                Supabase storage host in next.config's allowlist. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={previewUrl} alt="" className="h-40 w-full object-cover" />
+            <button
+              type="button"
+              onClick={clearImage}
+              aria-label="Remove photo"
+              className="absolute top-2 right-2 grid size-7 place-items-center rounded-full bg-background/90 text-foreground shadow-sm hover:bg-background"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex h-24 w-full max-w-sm flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+          >
+            <ImageIcon className="size-5" aria-hidden="true" />
+            Add a photo
+          </button>
+        )}
+        <input
+          id="club-photo"
+          ref={fileInputRef}
+          type="file"
+          accept={ALLOWED_CLUB_IMAGE_TYPES.join(",")}
+          className="hidden"
+          onChange={(e) => pickImage(e.target.files)}
+        />
+        <p className="text-xs text-muted-foreground">JPEG, PNG or WebP, up to 5 MB.</p>
       </div>
 
       <div className="flex items-center gap-3">

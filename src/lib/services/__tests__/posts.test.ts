@@ -31,29 +31,68 @@ const POST_ROW: Post = {
   updated_at: "2026-08-12T00:00:00Z",
 };
 
+const RESHARER: PublicProfile = { id: "user-2", display_name: "Miguel Cruz", avatar_url: null };
+
+/** A row as court_side_feed() returns it — a post plus the two ordering fields. */
+function feedRow(overrides: Partial<Post> & { effective_at?: string; resharer_id?: string | null } = {}) {
+  return {
+    ...POST_ROW,
+    effective_at: POST_ROW.created_at,
+    resharer_id: null,
+    ...overrides,
+  };
+}
+
 describe("listFeedPosts", () => {
+  // Reads the court_side_feed() RPC rather than the posts table since
+  // migration 20260810000050 — that union is what makes a reshare surface
+  // in the feed at all.
   it("joins author info via public_profiles, not a profiles embed", async () => {
-    const supabase = createTableMockSupabase({
-      posts: { data: [POST_ROW], error: null },
-      public_profiles: { data: [AUTHOR], error: null },
-    });
+    const supabase = createTableMockSupabase(
+      { public_profiles: { data: [AUTHOR], error: null } },
+      { court_side_feed: { data: [feedRow()], error: null } }
+    );
     const { posts, nextCursor } = await listFeedPosts(supabase);
-    expect(posts).toEqual([{ ...POST_ROW, author: AUTHOR }]);
+    expect(posts).toEqual([
+      { ...POST_ROW, effective_at: POST_ROW.created_at, resharer_id: null, author: AUTHOR, resharer: null },
+    ]);
     expect(nextCursor).toBeNull();
   });
 
-  it("returns a nextCursor equal to the last row's created_at when a full page comes back", async () => {
-    const fullPage = Array.from({ length: 20 }, (_, i) => ({ ...POST_ROW, id: `post-${i}`, created_at: `2026-08-${10 + i}T00:00:00Z` }));
-    const supabase = createTableMockSupabase({
-      posts: { data: fullPage, error: null },
-      public_profiles: { data: [AUTHOR], error: null },
-    });
+  it("paginates on effective_at, so a reshare's position drives the cursor rather than the post's own age", async () => {
+    const fullPage = Array.from({ length: 20 }, (_, i) =>
+      feedRow({ id: `post-${i}`, effective_at: `2026-08-${10 + i}T00:00:00Z` })
+    );
+    const supabase = createTableMockSupabase(
+      { public_profiles: { data: [AUTHOR], error: null } },
+      { court_side_feed: { data: fullPage, error: null } }
+    );
     const { nextCursor } = await listFeedPosts(supabase);
-    expect(nextCursor).toBe(fullPage[19].created_at);
+    expect(nextCursor).toBe(fullPage[19].effective_at);
+  });
+
+  it("attaches the resharer so the card can say who put it in the feed", async () => {
+    const supabase = createTableMockSupabase(
+      { public_profiles: { data: [AUTHOR, RESHARER], error: null } },
+      { court_side_feed: { data: [feedRow({ resharer_id: RESHARER.id, effective_at: "2026-08-15T00:00:00Z" })], error: null } }
+    );
+    const { posts } = await listFeedPosts(supabase);
+    expect(posts[0].resharer).toEqual(RESHARER);
+    // The author is still the original poster — a reshare never reattributes.
+    expect(posts[0].author).toEqual(AUTHOR);
+  });
+
+  it("leaves resharer null on an original post", async () => {
+    const supabase = createTableMockSupabase(
+      { public_profiles: { data: [AUTHOR], error: null } },
+      { court_side_feed: { data: [feedRow()], error: null } }
+    );
+    const { posts } = await listFeedPosts(supabase);
+    expect(posts[0].resharer).toBeNull();
   });
 
   it("skips the author lookup entirely when there are no posts", async () => {
-    const supabase = createTableMockSupabase({ posts: { data: [], error: null } });
+    const supabase = createTableMockSupabase({}, { court_side_feed: { data: [], error: null } });
     const { posts } = await listFeedPosts(supabase);
     expect(posts).toEqual([]);
   });

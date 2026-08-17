@@ -946,6 +946,10 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      court_side_feed: {
+        Args: { p_limit?: number; p_cursor?: string };
+        Returns: (Post & { effective_at: string; resharer_id: string | null })[];
+      };
       get_available_slots: {
         Args: {
           p_court_id: string;

@@ -9,6 +9,7 @@ import { listEventsForClub } from "@/lib/services/events";
 import type { Club, CommunityEvent } from "@/lib/supabase/types";
 import { BackLink } from "@/components/shared/BackLink";
 import { ReportButton } from "@/components/trust/ReportButton";
+import { clubImagePublicUrl } from "@/lib/services/clubImages";
 
 // Per-viewer: RLS decides whether this club is even visible, and the
 // viewer's own role drives what renders.
@@ -60,6 +61,13 @@ export default async function ClubDetailPage({ params }: PageProps) {
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
       <BackLink href="/clubs" label="Back to clubs" />
+
+      {clubImagePublicUrl(club.image_url) && (
+        <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={clubImagePublicUrl(club.image_url)!} alt="" className="h-48 w-full object-cover sm:h-64" />
+        </div>
+      )}
 
       <header className="mt-4 flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">

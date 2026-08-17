@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Users, MapPin, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Club } from "@/lib/supabase/types";
+import { clubImagePublicUrl } from "@/lib/services/clubImages";
 
 const SKILL_LABELS: Record<Club["skill_level"], string> = {
   beginner: "Beginner",
@@ -18,11 +19,19 @@ const TYPE_LABELS: Record<Club["club_type"], string> = {
 };
 
 export function ClubCard({ club }: { club: Club }) {
+  const imageUrl = clubImagePublicUrl(club.image_url);
+
   return (
     <Link
       href={`/clubs/${club.id}`}
-      className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
+      {/* Supabase storage host isn't in next.config's image allowlist, so
+          next/image would fail at runtime here — same as PostCard. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {imageUrl && <img src={imageUrl} alt="" loading="lazy" className="h-32 w-full object-cover" />}
+
+      <div className="flex flex-col gap-3 p-5">
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-semibold text-foreground">{club.name}</h3>
         {club.visibility !== "public" && (
@@ -48,6 +57,7 @@ export function ClubCard({ club }: { club: Club }) {
             {club.location}
           </span>
         )}
+        </div>
       </div>
     </Link>
   );
