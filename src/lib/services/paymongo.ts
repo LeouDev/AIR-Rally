@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { Booking } from "@/lib/supabase/types";
 import { logServerError } from "@/lib/errors";
+import { isPaymongoPassOnFeesEnabled } from "@/lib/paymongoLaunchGates";
 
 const PAYMONGO_API_BASE = "https://api.paymongo.com/v1";
 /**
@@ -201,6 +202,21 @@ export async function createPayMongoCheckoutSession(input: CreatePayMongoCheckou
       success_url: successUrl,
       cancel_url: cancelUrl,
     };
+
+    // Charges PayMongo's processing fee to the customer rather than
+    // absorbing it. Gated and off by default — see
+    // isPaymongoPassOnFeesEnabled() for the specific unverified
+    // behaviour (Payment vs Payment Intent amount) that must be observed
+    // in a preview deployment before this is set in production.
+    //
+    // The fee is deliberately NOT computed here. PayMongo recalculates it
+    // from the payment method the customer actually picks at checkout
+    // (QR Ph 1.34%, GCash 2.23%, cards 3.125% + ₱13.39), which we cannot
+    // know when the session is created — so any amount we grossed up
+    // ourselves would be wrong the moment a second method is enabled.
+    if (isPaymongoPassOnFeesEnabled()) {
+      attributes.pass_on_fees = true;
+    }
 
     if (marketplaceSplit) {
       const platformAccountId = process.env.PAYMONGO_PLATFORM_ACCOUNT_ID;

@@ -35,3 +35,31 @@ export function isPaymongoMarketplaceSplitEnabled(): boolean {
 export function isPaymongoRefundExecutionEnabled(): boolean {
   return process.env.PAYMONGO_REFUND_EXECUTION_ENABLED === "true";
 }
+
+/**
+ * Adds PayMongo's processing fee to the customer's checkout total instead
+ * of AIR/Rally absorbing it out of the 5% commission. Measured against a
+ * real live payment: an ₱80 QR Ph booking was charged ₱1.20 (1.34% base
+ * plus 12% VAT = 1.5008%), so ₱1.20 of a ₱4.00 commission — 30% of
+ * margin — was going to PayMongo on every booking.
+ *
+ * Gated, and OFF by default, for one specific unresolved reason. PayMongo
+ * confirmed in writing that with `pass_on_fees: true` the *Payment
+ * Intent* keeps the original booking amount, which is what keeps the
+ * 5%/95% split intact. But confirm_paymongo_booking_payment()'s
+ * amount-integrity check reads the *Payment* object's amount, a different
+ * resource, and whether that one reports ₱80.00 or ₱81.22 has not been
+ * observed. If it reports the grossed-up figure, the check matches zero
+ * rows and NO booking ever confirms — customers pay and sit on "pending",
+ * exactly the outage this project already had once from the webhook
+ * signature bug.
+ *
+ * So: enable this in a preview/test deployment first, put one booking
+ * through, and confirm it reaches 'confirmed'. Only then set it in
+ * production. Do not flip it straight to production on the strength of
+ * the email alone — the email describes the Payment Intent, and the code
+ * checks the Payment.
+ */
+export function isPaymongoPassOnFeesEnabled(): boolean {
+  return process.env.PAYMONGO_PASS_ON_FEES_ENABLED === "true";
+}
