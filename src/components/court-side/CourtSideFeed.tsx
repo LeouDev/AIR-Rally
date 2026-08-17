@@ -22,6 +22,7 @@ import { listFollowerProfiles, listFollowingProfiles } from "@/lib/services/foll
 import { toggleEventJoinAction } from "@/lib/actions/events";
 import type { EventWithDetails } from "@/lib/services/events";
 import type { PublicProfile } from "@/lib/supabase/types";
+import { suggestedPlayersFromFeed, postCountLabel } from "@/lib/suggestedPlayers";
 
 const FEED_TABS = ["For you", "Following", "Near you"] as const;
 
@@ -164,9 +165,13 @@ export function CourtSideFeed({
   }
 
   const initials = initialsFrom(displayName);
-  const suggestedPeople = Array.from(new Map(posts.map((p) => [p.user_id, p.author])).entries())
-    .filter(([userId]) => userId !== currentUserId && !followingIds.has(userId))
-    .slice(0, 5);
+  // Was derived inline here, and never filtered a null author — a deleted
+  // account produced a suggestion card with no name. See lib/suggestedPlayers.
+  const suggestedPeople = suggestedPlayersFromFeed(posts, {
+    viewerId: currentUserId,
+    alreadyFollowing: Array.from(followingIds),
+    limit: 5,
+  });
 
   function handleDraftChange(value: string) {
     setDraft(value);
@@ -608,7 +613,86 @@ export function CourtSideFeed({
         </div>
 
         {posts.length === 0 ? (
-          <p className="mt-6 text-sm text-muted-foreground">Nobody&apos;s posted yet — be the first to say something.</p>
+          /* A new user's feed is built around finding people to play with,
+             not an empty box. With nobody posting yet there is nobody to
+             suggest either, so this falls back to the two things that DO
+             start a feed: post something, or join a club. */
+          <div className="mt-6 flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <h3 className="text-2xl/[1.875rem] font-semibold tracking-[-0.01em] text-foreground">
+                Your feed starts with four people
+              </h3>
+              <p className="text-[0.9375rem]/[1.375rem] text-subtle text-pretty">
+                Follow players from courts near you. When they post an open game, you&apos;ll see it
+                here first.
+              </p>
+            </div>
+
+            {suggestedPeople.length > 0 && (
+              <ul className="flex flex-col gap-2.5">
+                {suggestedPeople.map(({ profile: author, postCount }) => {
+                  const name = author.display_name || "Player";
+                  return (
+                    <li
+                      key={author.id}
+                      className="flex items-center gap-3 rounded-xl bg-card p-3.5 shadow-card"
+                    >
+                      <Avatar>
+                        {author.avatar_url && <AvatarImage src={author.avatar_url} alt="" />}
+                        <AvatarFallback className="bg-secondary text-xs font-semibold text-secondary-foreground">
+                          {initialsFrom(name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[0.9375rem]/5 font-semibold text-foreground">{name}</p>
+                        {/* The only secondary fact these cards carry: something
+                            the player chose to publish. Never inferred location. */}
+                        <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
+                          {postCountLabel(postCount)}
+                        </p>
+                      </div>
+                      <Button type="button" size="sm" onClick={() => toggleFollow(author.id)}>
+                        Follow
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <div className="h-px bg-border" />
+
+            <div className="flex flex-col gap-2.5">
+              <p className="text-xs/4 font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                Or start here
+              </p>
+              <div className="flex items-center gap-3 rounded-xl bg-secondary p-3.5 text-secondary-foreground">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[0.9375rem]/5 font-semibold">Say hello to the court</p>
+                  <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
+                    Your first post gets shown to nearby players.
+                  </p>
+                </div>
+                <span aria-hidden="true" className="text-lg font-semibold text-primary">
+                  +
+                </span>
+              </div>
+              <Link
+                href="/clubs"
+                className="flex items-center gap-3 rounded-xl bg-card p-3.5 shadow-card transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/25"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-[0.9375rem]/5 font-semibold text-foreground">Join a club</p>
+                  <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
+                    Find players who already meet regularly.
+                  </p>
+                </div>
+                <span aria-hidden="true" className="text-muted-foreground">
+                  →
+                </span>
+              </Link>
+            </div>
+          </div>
         ) : (
           <div className="mt-4 flex flex-col gap-3">
             {posts.map((post) => (
@@ -694,25 +778,26 @@ export function CourtSideFeed({
             <p className="mt-3 text-xs text-muted-foreground">You&apos;re following everyone active right now.</p>
           ) : (
             <div className="mt-3 flex flex-col gap-3.5">
-              {suggestedPeople.map(([userId, author]) => {
-                const name = author?.display_name || "Player";
+              {suggestedPeople.map(({ profile: author, postCount }) => {
+                const name = author.display_name || "Player";
                 return (
-                  <div key={userId} className="flex items-center gap-2.5">
+                  <div key={author.id} className="flex items-center gap-2.5">
                     <Avatar size="sm">
-                      {author?.avatar_url && <AvatarImage src={author.avatar_url} alt="" />}
+                      {author.avatar_url && <AvatarImage src={author.avatar_url} alt="" />}
                       <AvatarFallback className="bg-secondary text-[10px] font-semibold text-secondary-foreground">
                         {initialsFrom(name)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0 flex-1 text-xs">
                       <p className="truncate font-semibold text-foreground">{name}</p>
+                      <p className="text-muted-foreground">{postCountLabel(postCount)}</p>
                     </div>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
                       className="h-7 shrink-0 px-2.5 text-xs"
-                      onClick={() => toggleFollow(userId)}
+                      onClick={() => toggleFollow(author.id)}
                     >
                       Follow
                     </Button>
