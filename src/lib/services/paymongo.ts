@@ -21,7 +21,9 @@ export type PayMongoErrorReason =
   | "paymongo_not_configured"
   | "checkout_session_creation_failed"
   | "invalid_webhook_signature"
-  | "account_onboarding_failed";
+  | "account_onboarding_failed"
+  /** pass_on_fees was requested for a method whose fee we cannot predict — see PASS_ON_FEES_VERIFIED_METHODS. */
+  | "pass_on_fees_unverified_method";
 
 /**
  * Typed domain error for the PayMongo payment layer, mirroring
@@ -198,6 +200,59 @@ type PayMongoCheckoutSessionResponse = {
  * break confirmation for every split payment. Deferred to live TEST MODE
  * verification (see ARCHITECTURE.md) rather than assumed.
  */
+/**
+ * Payment methods whose passed-on fee calculateBookingCharge() is known to
+ * reproduce to the centavo.
+ *
+ * QR Ph only, and that is a measurement, not a preference: a live ₱800
+ * booking was charged ₱812.18 and calculateBookingCharge() predicted
+ * ₱812.18, matching PayMongo's own "Fees" line exactly. That prediction is
+ * what confirm_paymongo_booking_payment() compares the real payment
+ * against, via bookings.processing_fee_amount.
+ *
+ * PayMongo recalculates the fee from whichever method the customer picks
+ * at checkout — GCash 2.23%, cards 3.125% + ₱13.39 — and we must commit to
+ * a stored figure when the session is created, before that choice exists.
+ * So enabling a second method silently invalidates every stored fee: the
+ * amount check would miss, and paid bookings would sit on 'pending'
+ * forever. That is the exact outage this feature was built to end, and
+ * nothing about it is loud — no error, no failed request, just bookings
+ * that never confirm.
+ *
+ * Hence the guard below. Widening payment_method_types is a one-line
+ * change that a comment cannot defend, so this list refuses the
+ * combination outright until someone measures the new method's fee and
+ * teaches calculateBookingCharge() about it.
+ */
+export const PASS_ON_FEES_VERIFIED_METHODS: readonly string[] = ["qrph"];
+
+/**
+ * The methods offered at checkout. Exported so the test suite can assert
+ * it against PASS_ON_FEES_VERIFIED_METHODS — widening this list while the
+ * fee is passed on fails in CI, before it can strand a real payment.
+ */
+export const PAYMENT_METHOD_TYPES: readonly string[] = ["qrph"];
+
+/**
+ * Throws unless every offered payment method has a fee we can predict.
+ *
+ * Separate from the session builder so it is directly testable: the drift
+ * this defends against (someone widening PAYMENT_METHOD_TYPES) cannot be
+ * simulated by mocking a module-level const.
+ */
+export function assertPassOnFeesSupported(methods: readonly string[]): void {
+  const unverified = methods.filter((m) => !PASS_ON_FEES_VERIFIED_METHODS.includes(m));
+  if (unverified.length === 0) return;
+  throw new PayMongoError(
+    "pass_on_fees_unverified_method",
+    "Payments are temporarily unavailable — please try again shortly.",
+    `pass_on_fees is enabled, but payment_method_types includes ${unverified.join(", ")}, whose fee calculateBookingCharge() cannot predict ` +
+      `(it is calibrated for ${PASS_ON_FEES_VERIFIED_METHODS.join(", ")} only). The stored processing_fee_amount would not match the real payment, ` +
+      `so confirm_paymongo_booking_payment() would match zero rows and paid bookings would stay 'pending'. Either measure the new method's real fee ` +
+      `and extend PASS_ON_FEES_VERIFIED_METHODS and PROCESSING_FEE_PERCENT, or set PAYMONGO_PASS_ON_FEES_ENABLED=false.`
+  );
+}
+
 export async function createPayMongoCheckoutSession(input: CreatePayMongoCheckoutSessionInput): Promise<PayMongoCheckoutSession> {
   const { booking, venueName, courtName, successUrl, cancelUrl, marketplaceSplit, chargeAmountOverride, passOnFees } = input;
 
@@ -220,7 +275,7 @@ export async function createPayMongoCheckoutSession(input: CreatePayMongoCheckou
       // REFUND_UNSUPPORTED_SOURCE_TYPES in lib/services/refunds.ts), so
       // while this list is QR Ph-only, every refund is a manual
       // outside-PayMongo transfer regardless of the refund gate.
-      payment_method_types: ["qrph"],
+      payment_method_types: [...PAYMENT_METHOD_TYPES],
       metadata: { booking_id: booking.id, user_id: booking.user_id },
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -240,6 +295,10 @@ export async function createPayMongoCheckoutSession(input: CreatePayMongoCheckou
     // widening payment_method_types above means revisiting that
     // prediction, not just this flag.
     if (passOnFees && isPaymongoPassOnFeesEnabled()) {
+      // Fail loudly, at session creation, rather than letting the customer
+      // pay an amount nothing will ever match. Deliberately thrown before
+      // the session exists: once it does, it can be paid.
+      assertPassOnFeesSupported(attributes.payment_method_types as string[]);
       attributes.pass_on_fees = true;
     }
 

@@ -170,6 +170,87 @@ describe("createPayMongoCheckoutSession", () => {
   });
 });
 
+describe("createPayMongoCheckoutSession — passing PayMongo's fee to the customer", () => {
+  const ORIGINAL_GATE = process.env.PAYMONGO_PASS_ON_FEES_ENABLED;
+
+  afterEach(() => {
+    if (ORIGINAL_GATE === undefined) delete process.env.PAYMONGO_PASS_ON_FEES_ENABLED;
+    else process.env.PAYMONGO_PASS_ON_FEES_ENABLED = ORIGINAL_GATE;
+  });
+
+  async function createWith(passOnFees: boolean | undefined) {
+    process.env.PAYMONGO_SECRET_KEY = "sk_test_x";
+    mockFetch.mockResolvedValue(jsonResponse({ data: { id: "cs_f", attributes: { checkout_url: "https://checkout.paymongo.com/cs_f" } } }));
+    const { createPayMongoCheckoutSession } = await import("../paymongo");
+    await createPayMongoCheckoutSession({ ...CHECKOUT_INPUT, passOnFees });
+    return JSON.parse(mockFetch.mock.calls[0][1].body);
+  }
+
+  it("sends pass_on_fees when the caller opts in and the gate is on", async () => {
+    process.env.PAYMONGO_PASS_ON_FEES_ENABLED = "true";
+    const body = await createWith(true);
+    expect(body.data.attributes.pass_on_fees).toBe(true);
+  });
+
+  it("does not send it when the gate is off, however the caller asks", async () => {
+    delete process.env.PAYMONGO_PASS_ON_FEES_ENABLED;
+    const body = await createWith(true);
+    expect(body.data.attributes.pass_on_fees).toBeUndefined();
+  });
+
+  it("does not send it for a caller that did not opt in, even with the gate on", async () => {
+    // The reschedule path. It confirms against price_difference, which has
+    // no fee term, so a passed-on fee there strands the customer on
+    // 'pending_payment' after paying.
+    process.env.PAYMONGO_PASS_ON_FEES_ENABLED = "true";
+    const body = await createWith(undefined);
+    expect(body.data.attributes.pass_on_fees).toBeUndefined();
+  });
+});
+
+describe("pass-on-fees payment-method guard", () => {
+  it("only offers methods whose fee calculateBookingCharge() can predict", async () => {
+    // THE POINT OF THIS TEST: adding a method to PAYMENT_METHOD_TYPES
+    // (GCash 2.23%, cards 3.125% + ₱13.39) without measuring its fee and
+    // extending PASS_ON_FEES_VERIFIED_METHODS would leave every stored
+    // processing_fee_amount wrong. confirm_paymongo_booking_payment()
+    // would then match zero rows and paid bookings would sit on 'pending'
+    // forever — silently, with no failed request anywhere.
+    //
+    // If this test fails, do NOT widen the verified list to make it pass.
+    // Measure the new method's real fee against a live payment first.
+    const { PAYMENT_METHOD_TYPES, PASS_ON_FEES_VERIFIED_METHODS } = await import("../paymongo");
+    const unverified = PAYMENT_METHOD_TYPES.filter((m) => !PASS_ON_FEES_VERIFIED_METHODS.includes(m));
+    expect(unverified).toEqual([]);
+  });
+
+  it("refuses the combination outright, so no session can be created to pay", async () => {
+    const { assertPassOnFeesSupported } = await import("../paymongo");
+    expect(() => assertPassOnFeesSupported(["qrph", "gcash"])).toThrow(
+      expect.objectContaining({ reason: "pass_on_fees_unverified_method" })
+    );
+  });
+
+  it("keeps that failure's customer-facing message free of deployment detail", async () => {
+    const { assertPassOnFeesSupported } = await import("../paymongo");
+    const error = (() => {
+      try {
+        assertPassOnFeesSupported(["gcash"]);
+      } catch (e) {
+        return e as Error & { detail?: string };
+      }
+    })();
+    expect(error?.message).toBe("Payments are temporarily unavailable — please try again shortly.");
+    expect(error?.message).not.toMatch(/PAYMONGO_|processing_fee_amount|gcash/i);
+    expect(error?.detail).toMatch(/gcash/);
+  });
+
+  it("passes the methods actually offered today", async () => {
+    const { assertPassOnFeesSupported, PAYMENT_METHOD_TYPES } = await import("../paymongo");
+    expect(() => assertPassOnFeesSupported(PAYMENT_METHOD_TYPES)).not.toThrow();
+  });
+});
+
 describe("retrievePayMongoCheckoutSession", () => {
   it("fetches the session by id directly from PayMongo's API", async () => {
     process.env.PAYMONGO_SECRET_KEY = "sk_test_x";
