@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, PayoutBatch, PayoutBatchStatus } from "@/lib/supabase/types";
+import { assertRowShape } from "@/lib/postgrestShape";
 
 type Client = SupabaseClient<Database>;
 
@@ -98,14 +99,19 @@ export async function getPayoutBatchDetail(supabase: Client, batchId: string): P
     .eq("payout_batch_id", batchId);
   if (itemsError) throw itemsError;
 
-  const items = ((rawItems ?? []) as unknown as {
+  type PayoutBatchItemRow = {
     id: string;
     settlement_id: string;
     venue_id: string;
     amount: number;
     venues: { name: string } | null;
     booking_settlements: { booking_id: string; currency: string; bookings: { confirmation_code: string } | null } | null;
-  }[]).map((i) => ({
+  };
+  const items = assertRowShape<PayoutBatchItemRow>(
+    rawItems ?? [],
+    ["id", "settlement_id", "venue_id", "amount"],
+    "payout batch items query"
+  ).map((i) => ({
     itemId: i.id,
     settlementId: i.settlement_id,
     venueId: i.venue_id,
@@ -164,11 +170,12 @@ export async function getOwnerBatchStatusBySettlement(supabase: Client): Promise
     .select("settlement_id, payout_batches(batch_reference, status)");
   if (error) throw error;
 
-  const result = new Map<string, { reference: string; status: PayoutBatchStatus }>();
-  for (const item of (data ?? []) as unknown as {
+  type BatchStatusRow = {
     settlement_id: string;
     payout_batches: { batch_reference: string; status: PayoutBatchStatus } | null;
-  }[]) {
+  };
+  const result = new Map<string, { reference: string; status: PayoutBatchStatus }>();
+  for (const item of assertRowShape<BatchStatusRow>(data ?? [], ["settlement_id"], "owner batch status query")) {
     const batch = item.payout_batches;
     if (batch && batch.status !== "cancelled" && batch.status !== "failed") {
       result.set(item.settlement_id, { reference: batch.batch_reference, status: batch.status });

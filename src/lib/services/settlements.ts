@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, SettlementIssue, SettlementSource, SettlementStatus } from "@/lib/supabase/types";
 import { DEFAULT_CURRENCY } from "@/lib/booking-config";
+import { assertRowShape } from "@/lib/postgrestShape";
 
 type Client = SupabaseClient<Database>;
 
@@ -63,6 +64,30 @@ type SettlementQueryRow = {
   venues: { name: string } | null;
   bookings: { confirmation_code: string; start_time: string; courts: { name: string } | null } | null;
 };
+
+/**
+ * Everything toRow() reads without a `?? fallback` — the fields where a
+ * renamed column would silently become `undefined` inside a money total
+ * rather than gracefully degrading. `venues`/`bookings` are deliberately
+ * excluded: toRow() already treats their absence as legitimate (a
+ * settlement whose venue/booking row isn't visible through the embed
+ * still shows the money, per its own comment).
+ */
+const SETTLEMENT_QUERY_KEYS: (keyof SettlementQueryRow)[] = [
+  "id",
+  "booking_id",
+  "venue_id",
+  "currency",
+  "gross_booking_amount",
+  "paymongo_amount",
+  "credit_amount",
+  "platform_fee",
+  "venue_amount",
+  "cash_position",
+  "settlement_source",
+  "settlement_status",
+  "created_at",
+];
 
 const SETTLEMENT_SELECT =
   "id, booking_id, venue_id, currency, gross_booking_amount, paymongo_amount, credit_amount, platform_fee, venue_amount, cash_position, settlement_source, settlement_status, created_at, venues(name), bookings(confirmation_code, start_time, courts(name))";
@@ -158,7 +183,7 @@ export async function listOwnerSettlements(supabase: Client, limit = 100): Promi
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return ((data ?? []) as unknown as SettlementQueryRow[]).map(toRow);
+  return assertRowShape<SettlementQueryRow>(data ?? [], SETTLEMENT_QUERY_KEYS, "settlements query").map(toRow);
 }
 
 // --- Admin -----------------------------------------------------------------
@@ -284,7 +309,7 @@ export async function listAllSettlements(
 
   const { data, error } = await query.limit(options.limit ?? 200);
   if (error) throw error;
-  return ((data ?? []) as unknown as SettlementQueryRow[]).map(toRow);
+  return assertRowShape<SettlementQueryRow>(data ?? [], SETTLEMENT_QUERY_KEYS, "settlements query").map(toRow);
 }
 
 export type SettlementIssueGroups = {
