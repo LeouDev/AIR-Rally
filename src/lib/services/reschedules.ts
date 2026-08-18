@@ -516,7 +516,9 @@ export async function createReschedule(supabase: Client, userId: string, input: 
     // recovery from here is retrying completion — see
     // retryRescheduleCompletion() — which is itself idempotent via
     // complete_reschedule()'s own WHERE clause.
-    logServerError(`reschedules.completeReschedule.threwAfterRefund reschedule=${reschedule.id} refund=${refund.id}`, error);
+    logServerError(`reschedules.completeReschedule.threwAfterRefund reschedule=${reschedule.id} refund=${refund.id}`, error, {
+      critical: true,
+    });
     throw new RescheduleError(
       "completion_pending_retry",
       "Your refund succeeded, but we couldn't finish updating your booking. This will be resolved automatically — contact support if it isn't within a few minutes."
