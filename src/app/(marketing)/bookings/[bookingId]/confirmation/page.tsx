@@ -184,15 +184,17 @@ export default async function BookingConfirmationPage({ params, searchParams }: 
 
   // Nothing was ever charged: checkout was opened and left. Waiting cannot fix
   // this, so the page must not ask the customer to wait — it has to hand them
-  // a way back in. This is the state every pending booking in production is
-  // actually in.
+  // a way back in. expire_stale_pending_bookings() (see
+  // supabase/migrations/20260810000062_expire_stale_pending_bookings.sql)
+  // releases the slot itself within a few minutes; this page doesn't need
+  // to wait on that to be useful.
   if (paymentState === "awaiting_payment") {
     return (
       <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8">
         <EmptyState
           icon={CalendarClock}
           title="This booking hasn't been paid yet"
-          description="Checkout was started but never completed, so nothing was charged and this slot isn't held. You can book the same time again if it's still free."
+          description="Checkout was started but never completed, so nothing was charged. This slot releases automatically within a few minutes — check back if it's not bookable yet."
           action={
             <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-center">
               <Button asChild>
