@@ -15,7 +15,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://airrally.app";
+// Matches the fallback in lib/site.ts and the notification-email webhook —
+// air-rally.com is the real verified domain; NEXT_PUBLIC_SITE_URL isn't
+// set in Vercel today, so this fallback is what OG/Twitter image URLs
+// actually resolve to right now, not just a safety net.
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://air-rally.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
