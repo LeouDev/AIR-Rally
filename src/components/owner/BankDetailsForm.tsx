@@ -87,6 +87,7 @@ export function BankDetailsForm({ venueId, bankName, bankAccountName, maskedAcco
           value={bank}
           onChange={(e) => setBank(e.target.value)}
           aria-invalid={Boolean(errors.bankName)}
+          aria-describedby={errors.bankName ? `bank-${venueId}-error` : undefined}
           className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <option value="">Select your bank…</option>
@@ -96,7 +97,11 @@ export function BankDetailsForm({ venueId, bankName, bankAccountName, maskedAcco
             </option>
           ))}
         </select>
-        {errors.bankName && <p className="text-sm text-destructive">{errors.bankName}</p>}
+        {errors.bankName && (
+          <p id={`bank-${venueId}-error`} role="alert" className="text-sm text-destructive">
+            {errors.bankName}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -108,8 +113,13 @@ export function BankDetailsForm({ venueId, bankName, bankAccountName, maskedAcco
           maxLength={120}
           placeholder="Exactly as it appears on the account"
           aria-invalid={Boolean(errors.bankAccountName)}
+          aria-describedby={errors.bankAccountName ? `account-name-${venueId}-error` : undefined}
         />
-        {errors.bankAccountName && <p className="text-sm text-destructive">{errors.bankAccountName}</p>}
+        {errors.bankAccountName && (
+          <p id={`account-name-${venueId}-error`} role="alert" className="text-sm text-destructive">
+            {errors.bankAccountName}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -123,8 +133,13 @@ export function BankDetailsForm({ venueId, bankName, bankAccountName, maskedAcco
           maxLength={20}
           placeholder={maskedAccountNumber ? `Currently ${maskedAccountNumber} — type to replace` : "Digits only"}
           aria-invalid={Boolean(errors.bankAccountNumber)}
+          aria-describedby={errors.bankAccountNumber ? `account-number-${venueId}-error` : undefined}
         />
-        {errors.bankAccountNumber && <p className="text-sm text-destructive">{errors.bankAccountNumber}</p>}
+        {errors.bankAccountNumber && (
+          <p id={`account-number-${venueId}-error`} role="alert" className="text-sm text-destructive">
+            {errors.bankAccountNumber}
+          </p>
+        )}
       </div>
 
       <p className="flex items-start gap-2 rounded-xl border border-border bg-muted/30 p-3 text-xs text-muted-foreground">

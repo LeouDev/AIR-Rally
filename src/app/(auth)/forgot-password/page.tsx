@@ -65,12 +65,21 @@ export default function ForgotPasswordPage() {
             autoComplete="email"
             placeholder="you@example.com"
             aria-invalid={!!errors.email}
+            aria-describedby={errors.email ? "email-error" : undefined}
             {...register("email")}
           />
-          {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+          {errors.email && (
+            <p id="email-error" role="alert" className="text-xs text-destructive">
+              {errors.email.message}
+            </p>
+          )}
         </div>
 
-        {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        {errors.root && (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.root.message}
+          </p>
+        )}
 
         <Button type="submit" className="mt-2 h-11" disabled={isSubmitting}>
           {isSubmitting ? "Sending…" : "Send Reset Link"}
