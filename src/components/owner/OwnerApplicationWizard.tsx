@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import Link from "next/link";
 import { Camera, Clock, PartyPopper } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +18,7 @@ import {
   type SubmitOwnerApplicationValues,
 } from "@/lib/validations/ownerApplication";
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 7;
 // sessionStorage only (not localStorage) — a draft that outlives the tab
 // is a bigger surprise than one that doesn't; this only guards against an
 // accidental reload mid-application, not a return visit days later.
@@ -37,6 +38,7 @@ export function OwnerApplicationWizard({ onSubmitted }: OwnerApplicationWizardPr
     trigger,
     watch,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<SubmitOwnerApplicationValues>({
     resolver: zodResolver(submitOwnerApplicationSchema),
@@ -247,6 +249,91 @@ export function OwnerApplicationWizard({ onSubmitted }: OwnerApplicationWizardPr
                 <p className="text-sm text-muted-foreground">
                   Our team reviews your facility before it becomes available to players.
                 </p>
+              </div>
+            )}
+
+            {step === 7 && (
+              <div className="flex flex-col gap-5">
+                <h2 className="text-lg font-semibold text-foreground">The Venue Owner Agreement</h2>
+                <dl className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Commission</dt>
+                    <dd className="text-right text-foreground">AIR/Rally keeps 5% · you receive 95%</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Payouts</dt>
+                    <dd className="text-right text-foreground">Bank transfer, within 15 banking days after play</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Bookings</dt>
+                    <dd className="text-right text-foreground">A confirmed booking is a commitment</dd>
+                  </div>
+                </dl>
+                <p className="text-sm text-muted-foreground">
+                  Read the full{" "}
+                  <Link href="/owner-agreement" target="_blank" className="font-medium text-primary hover:underline">
+                    Venue Owner Agreement
+                  </Link>{" "}
+                  before you accept it.
+                </p>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label>Does your venue carry public liability insurance?</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        { value: true, label: "Yes, we carry it" },
+                        { value: false, label: "No, we don't" },
+                      ] as const
+                    ).map((option) => (
+                      <button
+                        key={String(option.value)}
+                        type="button"
+                        onClick={() => setValue("hasLiabilityInsurance", option.value, { shouldDirty: true, shouldValidate: true })}
+                        aria-pressed={watch("hasLiabilityInsurance") === option.value}
+                        className={cn(
+                          "rounded-xl border p-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                          watch("hasLiabilityInsurance") === option.value
+                            ? "border-primary bg-primary/5 text-foreground"
+                            : "border-border text-muted-foreground hover:border-primary/40"
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  {errors.hasLiabilityInsurance && (
+                    <p id="hasLiabilityInsurance-error" role="alert" className="text-xs text-destructive">
+                      {errors.hasLiabilityInsurance.message}
+                    </p>
+                  )}
+                  {watch("hasLiabilityInsurance") === false && (
+                    <p className="text-xs text-muted-foreground">
+                      You confirm you accept responsibility for incidents at your venue — Owner Agreement clause 5.3.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-start gap-2">
+                    <input
+                      id="agreedToOwnerAgreement"
+                      type="checkbox"
+                      aria-invalid={!!errors.agreedToOwnerAgreement}
+                      aria-describedby={errors.agreedToOwnerAgreement ? "agreedToOwnerAgreement-error" : undefined}
+                      className="mt-0.5 size-4 shrink-0 rounded border-border text-primary focus-visible:ring-2 focus-visible:ring-ring"
+                      {...register("agreedToOwnerAgreement")}
+                    />
+                    <Label htmlFor="agreedToOwnerAgreement" className="text-sm font-normal text-muted-foreground">
+                      I have read and agree to the Venue Owner Agreement, and I am authorised to list this venue on AIR/Rally.
+                    </Label>
+                  </div>
+                  {errors.agreedToOwnerAgreement && (
+                    <p id="agreedToOwnerAgreement-error" role="alert" className="text-xs text-destructive">
+                      {errors.agreedToOwnerAgreement.message}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
           </motion.div>

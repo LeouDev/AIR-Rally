@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, OwnerApplication, OwnerApplicationStatus } from "@/lib/supabase/types";
+import { CURRENT_OWNER_AGREEMENT_VERSION } from "@/lib/legal";
 
 type Client = SupabaseClient<Database>;
 
@@ -25,8 +26,20 @@ export type SubmitOwnerApplicationInput = {
   venueCity: string;
   venueDescription?: string;
   courtCount: number;
+  hasLiabilityInsurance: boolean;
 };
 
+/**
+ * Records Venue Owner Agreement acceptance inline with the application
+ * row it belongs to, rather than in the general-signup
+ * agreement_acceptances table — that table is written once per user
+ * immediately after signUp() and has no way to represent a second,
+ * distinct agreement (see lib/legal.ts#CURRENT_OWNER_AGREEMENT_VERSION).
+ * The RLS insert policy (20260810000064) independently requires these
+ * three columns to be non-null, so a client that skipped this schema
+ * entirely — not just one that tampered with the boolean — still can't
+ * submit.
+ */
 export async function submitOwnerApplication(
   supabase: Client,
   userId: string,
@@ -44,6 +57,9 @@ export async function submitOwnerApplication(
       venue_city: input.venueCity,
       venue_description: input.venueDescription || null,
       court_count: input.courtCount,
+      has_liability_insurance: input.hasLiabilityInsurance,
+      agreement_accepted_at: new Date().toISOString(),
+      agreement_version: CURRENT_OWNER_AGREEMENT_VERSION,
     })
     .select("*")
     .single();
