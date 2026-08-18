@@ -163,7 +163,8 @@ async function handleMerchantActivationEvent(data: PayMongoMerchantActivationEve
     if (!synced) {
       logServerError(
         "paymongo.webhook.activationNoMatchingVenue",
-        new Error(`merchant.${activationStatus} for account ${data.merchant_id} matched no venue`)
+        new Error(`merchant.${activationStatus} for account ${data.merchant_id} matched no venue`),
+        { critical: true }
       );
     }
 

@@ -116,7 +116,9 @@ describe("reportUnconfirmedPayment", () => {
     });
 
     expect(raised).toBe(true);
-    expect(mockLog).toHaveBeenCalledWith("paymongo.webhook.PAID_BUT_UNCONFIRMED.amountMismatch", expect.any(Error));
+    expect(mockLog).toHaveBeenCalledWith("paymongo.webhook.PAID_BUT_UNCONFIRMED.amountMismatch", expect.any(Error), {
+      critical: true,
+    });
   });
 
   it("raises for unexpected causes too, rather than swallowing them", () => {

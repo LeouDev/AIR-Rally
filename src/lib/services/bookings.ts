@@ -415,7 +415,7 @@ async function compensateCancelledBooking(
     // The booking IS cancelled at this point. Saying so loudly beats
     // pretending it succeeded or unwinding a cancellation the customer
     // asked for.
-    logServerError("bookings.cancellationCredit.issueFailed", error);
+    logServerError("bookings.cancellationCredit.issueFailed", error, { critical: true });
     return { ...decision, issued: false };
   }
 }
@@ -758,10 +758,10 @@ export function reportUnconfirmedPayment(source: string, diagnosis: PaymentConfi
       // what buried the real case.
       return false;
     case "amount_mismatch":
-      logServerError(`${source}.PAID_BUT_UNCONFIRMED.amountMismatch`, new Error(diagnosis.detail));
+      logServerError(`${source}.PAID_BUT_UNCONFIRMED.amountMismatch`, new Error(diagnosis.detail), { critical: true });
       return true;
     default:
-      logServerError(`${source}.PAID_BUT_UNCONFIRMED.${diagnosis.kind}`, new Error(diagnosis.detail));
+      logServerError(`${source}.PAID_BUT_UNCONFIRMED.${diagnosis.kind}`, new Error(diagnosis.detail), { critical: true });
       return true;
   }
 }
