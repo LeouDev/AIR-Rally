@@ -149,9 +149,14 @@ function SignupForm() {
               autoComplete="given-name"
               placeholder="Jamie"
               aria-invalid={!!errors.firstName}
+              aria-describedby={errors.firstName ? "firstName-error" : undefined}
               {...register("firstName")}
             />
-            {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
+            {errors.firstName && (
+              <p id="firstName-error" role="alert" className="text-xs text-destructive">
+                {errors.firstName.message}
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="lastName">Last name</Label>
@@ -160,9 +165,14 @@ function SignupForm() {
               autoComplete="family-name"
               placeholder="Cruz"
               aria-invalid={!!errors.lastName}
+              aria-describedby={errors.lastName ? "lastName-error" : undefined}
               {...register("lastName")}
             />
-            {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
+            {errors.lastName && (
+              <p id="lastName-error" role="alert" className="text-xs text-destructive">
+                {errors.lastName.message}
+              </p>
+            )}
           </div>
         </div>
 
@@ -174,9 +184,14 @@ function SignupForm() {
             autoComplete="email"
             placeholder="you@example.com"
             aria-invalid={!!errors.email}
+            aria-describedby={errors.email ? "email-error" : undefined}
             {...register("email")}
           />
-          {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+          {errors.email && (
+            <p id="email-error" role="alert" className="text-xs text-destructive">
+              {errors.email.message}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -187,9 +202,14 @@ function SignupForm() {
             autoComplete="new-password"
             placeholder="At least 8 characters"
             aria-invalid={!!errors.password}
+            aria-describedby={errors.password ? "password-error" : undefined}
             {...register("password")}
           />
-          {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
+          {errors.password && (
+            <p id="password-error" role="alert" className="text-xs text-destructive">
+              {errors.password.message}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -200,10 +220,13 @@ function SignupForm() {
             autoComplete="new-password"
             placeholder="Re-enter your password"
             aria-invalid={!!errors.confirmPassword}
+            aria-describedby={errors.confirmPassword ? "confirmPassword-error" : undefined}
             {...register("confirmPassword")}
           />
           {errors.confirmPassword && (
-            <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>
+            <p id="confirmPassword-error" role="alert" className="text-xs text-destructive">
+              {errors.confirmPassword.message}
+            </p>
           )}
         </div>
 
@@ -214,6 +237,7 @@ function SignupForm() {
               type="checkbox"
               aria-invalid={!!errors.agreedToTerms}
               className="mt-0.5 size-4 shrink-0 rounded border-border text-primary focus-visible:ring-2 focus-visible:ring-ring"
+              aria-describedby={errors.agreedToTerms ? "agreedToTerms-error" : undefined}
               {...register("agreedToTerms")}
             />
             <Label htmlFor="agreedToTerms" className="text-sm font-normal text-muted-foreground">
@@ -223,10 +247,18 @@ function SignupForm() {
               </Link>
             </Label>
           </div>
-          {errors.agreedToTerms && <p className="text-xs text-destructive">{errors.agreedToTerms.message}</p>}
+          {errors.agreedToTerms && (
+            <p id="agreedToTerms-error" role="alert" className="text-xs text-destructive">
+              {errors.agreedToTerms.message}
+            </p>
+          )}
         </div>
 
-        {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        {errors.root && (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.root.message}
+          </p>
+        )}
 
         <Button type="submit" className="mt-2 h-11" disabled={isSubmitting}>
           {isSubmitting ? "Creating account…" : "Create Account"}
@@ -296,6 +328,7 @@ function CompleteOAuthSignupForm() {
               type="checkbox"
               aria-invalid={!!errors.agreedToTerms}
               className="mt-0.5 size-4 shrink-0 rounded border-border text-primary focus-visible:ring-2 focus-visible:ring-ring"
+              aria-describedby={errors.agreedToTerms ? "agreedToTerms-error" : undefined}
               {...register("agreedToTerms")}
             />
             <Label htmlFor="agreedToTerms" className="text-sm font-normal text-muted-foreground">
@@ -305,10 +338,18 @@ function CompleteOAuthSignupForm() {
               </Link>
             </Label>
           </div>
-          {errors.agreedToTerms && <p className="text-xs text-destructive">{errors.agreedToTerms.message}</p>}
+          {errors.agreedToTerms && (
+            <p id="agreedToTerms-error" role="alert" className="text-xs text-destructive">
+              {errors.agreedToTerms.message}
+            </p>
+          )}
         </div>
 
-        {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        {errors.root && (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.root.message}
+          </p>
+        )}
 
         <Button type="submit" className="mt-2 h-11" disabled={isSubmitting}>
           {isSubmitting ? "Finishing up…" : "Continue"}

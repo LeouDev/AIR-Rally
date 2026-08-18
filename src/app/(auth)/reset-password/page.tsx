@@ -110,9 +110,14 @@ export default function ResetPasswordPage() {
             autoComplete="new-password"
             placeholder="At least 8 characters"
             aria-invalid={!!errors.password}
+            aria-describedby={errors.password ? "password-error" : undefined}
             {...register("password")}
           />
-          {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
+          {errors.password && (
+            <p id="password-error" role="alert" className="text-xs text-destructive">
+              {errors.password.message}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -123,14 +128,21 @@ export default function ResetPasswordPage() {
             autoComplete="new-password"
             placeholder="Re-enter your new password"
             aria-invalid={!!errors.confirmPassword}
+            aria-describedby={errors.confirmPassword ? "confirmPassword-error" : undefined}
             {...register("confirmPassword")}
           />
           {errors.confirmPassword && (
-            <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>
+            <p id="confirmPassword-error" role="alert" className="text-xs text-destructive">
+              {errors.confirmPassword.message}
+            </p>
           )}
         </div>
 
-        {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        {errors.root && (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.root.message}
+          </p>
+        )}
 
         <Button type="submit" className="mt-2 h-11" disabled={isSubmitting}>
           {isSubmitting ? "Updating…" : "Update Password"}

@@ -70,8 +70,13 @@ export function SupportForm() {
           maxLength={200}
           placeholder="A one-line summary"
           aria-invalid={Boolean(errors.subject)}
+          aria-describedby={errors.subject ? "support-subject-error" : undefined}
         />
-        {errors.subject && <p className="text-sm text-destructive">{errors.subject}</p>}
+        {errors.subject && (
+          <p id="support-subject-error" role="alert" className="text-sm text-destructive">
+            {errors.subject}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -83,10 +88,15 @@ export function SupportForm() {
           maxLength={4000}
           rows={7}
           aria-invalid={Boolean(errors.message)}
+          aria-describedby={errors.message ? "support-message-error" : undefined}
           className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           placeholder="Include booking references, venue names, or anything else that helps us find it."
         />
-        {errors.message && <p className="text-sm text-destructive">{errors.message}</p>}
+        {errors.message && (
+          <p id="support-message-error" role="alert" className="text-sm text-destructive">
+            {errors.message}
+          </p>
+        )}
       </div>
 
       <Button type="submit" disabled={submitting} className="self-start">

@@ -58,20 +58,47 @@ export function ProfileForm({ profile, email }: ProfileFormProps) {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="firstName">First name</Label>
-            <Input id="firstName" aria-invalid={!!errors.firstName} {...register("firstName")} />
-            {errors.firstName && <p className="text-xs text-destructive">{errors.firstName.message}</p>}
+            <Input
+              id="firstName"
+              aria-invalid={!!errors.firstName}
+              aria-describedby={errors.firstName ? "firstName-error" : undefined}
+              {...register("firstName")}
+            />
+            {errors.firstName && (
+              <p id="firstName-error" role="alert" className="text-xs text-destructive">
+                {errors.firstName.message}
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="lastName">Last name</Label>
-            <Input id="lastName" aria-invalid={!!errors.lastName} {...register("lastName")} />
-            {errors.lastName && <p className="text-xs text-destructive">{errors.lastName.message}</p>}
+            <Input
+              id="lastName"
+              aria-invalid={!!errors.lastName}
+              aria-describedby={errors.lastName ? "lastName-error" : undefined}
+              {...register("lastName")}
+            />
+            {errors.lastName && (
+              <p id="lastName-error" role="alert" className="text-xs text-destructive">
+                {errors.lastName.message}
+              </p>
+            )}
           </div>
         </div>
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="displayName">Display name</Label>
-          <Input id="displayName" aria-invalid={!!errors.displayName} {...register("displayName")} />
-          {errors.displayName && <p className="text-xs text-destructive">{errors.displayName.message}</p>}
+          <Input
+            id="displayName"
+            aria-invalid={!!errors.displayName}
+            aria-describedby={errors.displayName ? "displayName-error" : undefined}
+            {...register("displayName")}
+          />
+          {errors.displayName && (
+            <p id="displayName-error" role="alert" className="text-xs text-destructive">
+              {errors.displayName.message}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -81,12 +108,21 @@ export function ProfileForm({ profile, email }: ProfileFormProps) {
             type="tel"
             placeholder="+63 900 000 0000"
             aria-invalid={!!errors.phone}
+            aria-describedby={errors.phone ? "phone-error" : undefined}
             {...register("phone")}
           />
-          {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
+          {errors.phone && (
+            <p id="phone-error" role="alert" className="text-xs text-destructive">
+              {errors.phone.message}
+            </p>
+          )}
         </div>
 
-        {errors.root && <p className="text-sm text-destructive">{errors.root.message}</p>}
+        {errors.root && (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.root.message}
+          </p>
+        )}
 
         <Button type="submit" className="mt-2 self-start" disabled={isSubmitting || !isDirty}>
           {isSubmitting ? "Saving…" : "Save Changes"}
