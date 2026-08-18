@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, VenuePaymentAccount, VenuePaymentAccountStatus } from "@/lib/supabase/types";
+import { assertRowShape } from "@/lib/postgrestShape";
 
 type Client = SupabaseClient<Database>;
 
@@ -29,7 +30,12 @@ export async function listOwnerPaymentAccounts(supabase: Client): Promise<(Venue
     .order("created_at", { ascending: true });
   if (error) throw error;
 
-  return ((data ?? []) as unknown as (VenuePaymentAccount & { venues: { name: string } | null })[]).map((row) => ({
+  type OwnerAccountRow = VenuePaymentAccount & { venues: { name: string } | null };
+  return assertRowShape<OwnerAccountRow>(
+    data ?? [],
+    ["id", "venue_id", "status", "bank_name", "bank_account_number"],
+    "owner payment accounts query"
+  ).map((row) => ({
     ...row,
     venueName: row.venues?.name ?? "Unknown venue",
   }));
@@ -97,9 +103,14 @@ export async function listAllPaymentAccounts(
   const { data, error } = await query.limit(200);
   if (error) throw error;
 
-  return ((data ?? []) as unknown as (VenuePaymentAccount & {
+  type AdminAccountRow = VenuePaymentAccount & {
     venues: { name: string; owner_id: string; profiles: { display_name: string | null } | null } | null;
-  })[]).map((row) => ({
+  };
+  return assertRowShape<AdminAccountRow>(
+    data ?? [],
+    ["id", "venue_id", "status", "bank_name", "bank_account_number"],
+    "admin payment accounts query"
+  ).map((row) => ({
     ...row,
     venueName: row.venues?.name ?? "Unknown venue",
     ownerName: row.venues?.profiles?.display_name ?? null,

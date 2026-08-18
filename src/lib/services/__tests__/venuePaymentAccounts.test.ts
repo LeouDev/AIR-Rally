@@ -31,7 +31,7 @@ describe("listOwnerPaymentAccounts", () => {
 
   it("survives a venue whose name isn't visible through the embed", async () => {
     const supabase = createMockSupabase({
-      data: [{ id: "a1", venue_id: "v1", status: "verified", venues: null }],
+      data: [{ id: "a1", venue_id: "v1", status: "verified", bank_name: null, bank_account_number: null, venues: null }],
       error: null,
     });
 

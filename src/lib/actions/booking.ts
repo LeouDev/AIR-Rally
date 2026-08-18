@@ -1,48 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createBooking, cancelBooking, getBookingById, BookingError, type CancelBookingResult } from "@/lib/services/bookings";
+import { cancelBooking, getBookingById, BookingError, type CancelBookingResult } from "@/lib/services/bookings";
 import { resolveCancellationCredit, type CancellationCreditDecision } from "@/lib/services/credits";
 import { calculateRefundCredit } from "@/lib/services/bookingFee";
-import { createBookingSchema, cancelBookingSchema, type CreateBookingValues, type CancelBookingValues } from "@/lib/validations/booking";
+import { cancelBookingSchema, type CancelBookingValues } from "@/lib/validations/booking";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
-import type { Booking } from "@/lib/supabase/types";
 import { getServerClient, type ActionResult } from "@/lib/actions/auth";
-
-export async function createBookingAction(values: CreateBookingValues): Promise<ActionResult<Booking>> {
-  const parsed = createBookingSchema.safeParse(values);
-  if (!parsed.success) {
-    return { success: false, error: "Please fix the errors below and try again." };
-  }
-
-  const clientResult = await getServerClient();
-  if (!clientResult.ok) return { success: false, error: clientResult.error };
-  const supabase = clientResult.client;
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return { success: false, error: "Sign in to book a court." };
-  }
-
-  try {
-    const booking = await createBooking(supabase, user.id, {
-      courtId: parsed.data.courtId,
-      startTime: parsed.data.startTime,
-      endTime: parsed.data.endTime,
-    });
-    revalidatePath("/bookings");
-    return { success: true, data: booking };
-  } catch (error) {
-    if (error instanceof BookingError) {
-      logServerError(`booking.create.${error.reason}`, error);
-      return { success: false, error: error.message };
-    }
-    logServerError("booking.create", error);
-    return { success: false, error: getFriendlyErrorMessage(error, "We couldn't create that booking.") };
-  }
-}
 
 export async function cancelBookingAction(values: CancelBookingValues): Promise<ActionResult<CancelBookingResult>> {
   const parsed = cancelBookingSchema.safeParse(values);

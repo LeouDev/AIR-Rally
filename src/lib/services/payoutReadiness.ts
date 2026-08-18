@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import { DEFAULT_CURRENCY } from "@/lib/booking-config";
 import { getSettlementIssues } from "@/lib/services/settlements";
+import { assertRowShape } from "@/lib/postgrestShape";
 
 type Client = SupabaseClient<Database>;
 
@@ -145,11 +146,12 @@ export async function validatePayoutBatch(supabase: Client, settlementIds: strin
     .in("settlement_id", unique);
   if (committedError) throw committedError;
 
-  const alreadyBatched = new Map<string, string>();
-  for (const item of (committed ?? []) as unknown as {
+  type CommittedRow = {
     settlement_id: string;
     payout_batches: { batch_reference: string; status: string } | null;
-  }[]) {
+  };
+  const alreadyBatched = new Map<string, string>();
+  for (const item of assertRowShape<CommittedRow>(committed ?? [], ["settlement_id"], "committed settlements query")) {
     const batch = item.payout_batches;
     if (batch && batch.status !== "cancelled" && batch.status !== "failed") {
       alreadyBatched.set(item.settlement_id, batch.batch_reference);
