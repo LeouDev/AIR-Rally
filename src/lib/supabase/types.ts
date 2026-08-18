@@ -199,6 +199,16 @@ export type OwnerApplication = {
   reviewed_by: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * All three null for applications submitted before the Venue Owner
+   * Agreement acknowledgement step existed (migration
+   * 20260810000064_owner_agreement_acceptance.sql) — never backfilled.
+   * Non-null on every new submission: the INSERT policy's WITH CHECK
+   * enforces it at the database layer, not just in application code.
+   */
+  agreement_accepted_at: string | null;
+  agreement_version: string | null;
+  has_liability_insurance: boolean | null;
 };
 
 /**
@@ -915,12 +925,35 @@ export type Database = {
         OwnerApplication,
         Pick<
           OwnerApplication,
-          "user_id" | "business_name" | "business_phone" | "business_email" | "venue_name" | "venue_address" | "venue_city" | "court_count"
+          | "user_id"
+          | "business_name"
+          | "business_phone"
+          | "business_email"
+          | "venue_name"
+          | "venue_address"
+          | "venue_city"
+          | "court_count"
+          | "agreement_accepted_at"
+          | "agreement_version"
+          | "has_liability_insurance"
         > &
           Partial<
             Omit<
               OwnerApplication,
-              "id" | "user_id" | "business_name" | "business_phone" | "business_email" | "venue_name" | "venue_address" | "venue_city" | "court_count" | "created_at" | "updated_at"
+              | "id"
+              | "user_id"
+              | "business_name"
+              | "business_phone"
+              | "business_email"
+              | "venue_name"
+              | "venue_address"
+              | "venue_city"
+              | "court_count"
+              | "agreement_accepted_at"
+              | "agreement_version"
+              | "has_liability_insurance"
+              | "created_at"
+              | "updated_at"
             >
           >
       >;

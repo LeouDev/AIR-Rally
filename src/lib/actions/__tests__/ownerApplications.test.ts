@@ -60,6 +60,8 @@ const validValues = {
   venueAddress: "123 Test St",
   venueCity: "Cebu City",
   courtCount: 2,
+  hasLiabilityInsurance: true,
+  agreedToOwnerAgreement: true,
 };
 
 beforeEach(() => {

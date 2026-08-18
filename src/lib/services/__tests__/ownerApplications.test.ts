@@ -26,6 +26,9 @@ const APPLICATION: OwnerApplication = {
   reviewed_by: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  agreement_accepted_at: "2026-01-01T00:00:00Z",
+  agreement_version: "1.0",
+  has_liability_insurance: true,
 };
 
 describe("requestOwnerAccess", () => {
@@ -54,6 +57,7 @@ describe("submitOwnerApplication", () => {
       venueAddress: "123 Test St",
       venueCity: "Cebu City",
       courtCount: 2,
+      hasLiabilityInsurance: true,
     });
     expect(result).toEqual(APPLICATION);
   });
