@@ -610,6 +610,7 @@ export type PaymentConfirmationDiagnosis =
   | { kind: "currency_mismatch"; detail: string }
   | { kind: "session_mismatch"; detail: string }
   | { kind: "booking_not_found"; detail: string }
+  | { kind: "cancelled"; detail: string }
   | { kind: "unknown"; detail: string };
 
 /**
@@ -658,6 +659,27 @@ export async function diagnoseUnconfirmedPayment(
   // the single most common reason for a false return.
   if (booking.status === "confirmed") {
     return { kind: "already_confirmed", detail: `booking ${booking.confirmation_code} was already confirmed` };
+  }
+
+  // The one genuinely alarming case besides amount_mismatch: PayMongo
+  // reports this payment succeeded, but the booking is cancelled — most
+  // often the pending-booking expiry sweep (cancelled_by is null for a
+  // system cancellation; a real user id here means the customer cancelled
+  // it themselves, which is its own, separate race). Either way the
+  // customer has paid and the booking will not confirm; QR Ph cannot be
+  // refunded through PayMongo's API at all (see refunds.ts), so this
+  // resolves only as a manual bank transfer.
+  if (booking.status === "cancelled") {
+    return {
+      kind: "cancelled",
+      detail:
+        `booking ${booking.confirmation_code} is cancelled` +
+        (booking.cancelled_by === null
+          ? " by an automated process (cancelled_by is null — most likely the pending-booking expiry sweep)"
+          : ` by user ${booking.cancelled_by}`) +
+        `, but PayMongo reports this payment succeeded. The customer HAS PAID and the booking is cancelled. ` +
+        `QR Ph payments cannot be refunded through PayMongo's API — this needs a manual bank transfer.`,
+    };
   }
 
   // A price-increase reschedule's difference checkout charges less than the

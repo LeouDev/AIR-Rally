@@ -96,3 +96,17 @@ export const CANCELLATION_CREDIT_CUTOFF_HOURS = 48;
  * re-verify with a real payment before trusting it at the edges.
  */
 export const PAYMONGO_PAYMENT_IN_FLIGHT_WINDOW_MINUTES = 10;
+
+/**
+ * How long a pending booking WITH a PayMongo checkout session must sit
+ * before the expiry sweep even considers it — not the sole gate, unlike
+ * PAYMONGO_PAYMENT_IN_FLIGHT_WINDOW_MINUTES above. See
+ * src/app/api/cron/expire-stale-paymongo-bookings/route.ts: past this
+ * age, the sweep asks PayMongo directly whether any non-failed payment
+ * attempt exists before cancelling anything. Deliberately wider than the
+ * 10-minute in-flight window above, as a second, independent margin on
+ * top of the live check — the original bug (a HIGH-severity finding) was
+ * a sweep that cancelled purely on elapsed time with no live check at
+ * all, which cancelled at least one booking mid-payment.
+ */
+export const PAYMONGO_EXPIRY_SWEEP_CHECK_AFTER_MINUTES = 20;

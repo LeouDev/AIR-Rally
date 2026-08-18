@@ -1319,6 +1319,20 @@ export type Database = {
         };
         Returns: string[];
       };
+      /**
+       * Cancels one specific pending booking, after the app layer has
+       * already verified against PayMongo's own API that no non-failed
+       * payment attempt exists for it. service_role-only. Called by
+       * src/app/api/cron/expire-stale-paymongo-bookings/route.ts — see
+       * supabase/migrations/20260810000065_paymongo_aware_expiry_sweep.sql.
+       * Returns false if the booking wasn't pending (already handled).
+       */
+      expire_specific_pending_booking: {
+        Args: {
+          p_booking_id: string;
+        };
+        Returns: boolean;
+      };
       /** Atomically confirms the replacement booking (if not already) + cancels the original + marks the reschedule completed. See lib/services/reschedules.ts. */
       complete_reschedule: {
         Args: {

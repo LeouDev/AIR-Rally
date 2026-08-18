@@ -52,6 +52,23 @@ describe("diagnoseUnconfirmedPayment", () => {
     expect(d.kind).toBe("already_confirmed");
   });
 
+  it("names the expiry sweep specifically when a cancelled booking turns out to be paid (cancelled_by null)", async () => {
+    const d = await diagnoseUnconfirmedPayment(client({ ...BOOKING, status: "cancelled", cancelled_by: null }), PAID);
+    expect(d.kind).toBe("cancelled");
+    if (d.kind !== "cancelled") throw new Error("unreachable");
+    expect(d.detail).toMatch(/automated process/i);
+    expect(d.detail).toMatch(/expiry sweep/i);
+    expect(d.detail).toMatch(/HAS PAID/);
+  });
+
+  it("names the actual user, not the sweep, when they cancelled it themselves", async () => {
+    const d = await diagnoseUnconfirmedPayment(client({ ...BOOKING, status: "cancelled", cancelled_by: "user-42" }), PAID);
+    expect(d.kind).toBe("cancelled");
+    if (d.kind !== "cancelled") throw new Error("unreachable");
+    expect(d.detail).toContain("user-42");
+    expect(d.detail).not.toMatch(/expiry sweep/i);
+  });
+
   it("recognises a reschedule difference as ordinary — it confirms elsewhere by design", async () => {
     const d = await diagnoseUnconfirmedPayment(client(BOOKING, { id: "r1", price_difference: 5000 }), PAID);
     expect(d.kind).toBe("reschedule_difference");
@@ -125,5 +142,16 @@ describe("reportUnconfirmedPayment", () => {
     expect(reportUnconfirmedPayment("t", { kind: "session_mismatch", detail: "x" })).toBe(true);
     expect(reportUnconfirmedPayment("t", { kind: "unknown", detail: "x" })).toBe(true);
     expect(mockLog).toHaveBeenCalledTimes(2);
+  });
+
+  it("raises critical for a paid-but-cancelled booking — this is the money-at-risk case", () => {
+    const raised = reportUnconfirmedPayment("paymongo.webhook", {
+      kind: "cancelled",
+      detail: "booking D8732925 is cancelled by an automated process, but PayMongo reports this payment succeeded.",
+    });
+    expect(raised).toBe(true);
+    expect(mockLog).toHaveBeenCalledWith("paymongo.webhook.PAID_BUT_UNCONFIRMED.cancelled", expect.any(Error), {
+      critical: true,
+    });
   });
 });
