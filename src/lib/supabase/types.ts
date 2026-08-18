@@ -1273,6 +1273,19 @@ export type Database = {
         };
         Returns: boolean;
       };
+      /**
+       * Cancels every `pending` booking older than p_older_than_minutes,
+       * releasing its exclusion-constraint hold on the court/time slot.
+       * service_role-only. Called by a pg_cron job, not application code —
+       * see supabase/migrations/20260810000062_expire_stale_pending_bookings.sql.
+       * Returns the ids it cancelled.
+       */
+      expire_stale_pending_bookings: {
+        Args: {
+          p_older_than_minutes: number;
+        };
+        Returns: string[];
+      };
       /** Atomically confirms the replacement booking (if not already) + cancels the original + marks the reschedule completed. See lib/services/reschedules.ts. */
       complete_reschedule: {
         Args: {
