@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Settings, LayoutGrid, Play, Users, ShieldCheck, Building2, CalendarCheck, CalendarDays, Heart, Wallet } from "lucide-react";
+import { Settings, LayoutGrid, Play, Users, ShieldCheck, Building2, CalendarCheck, CalendarDays, Heart, Wallet, Trophy } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProfileForm } from "@/components/profile/ProfileForm";
 import type { Profile } from "@/lib/supabase/types";
@@ -33,6 +33,13 @@ export function ProfileActionsMenu({ profile, email }: ProfileActionsMenuProps) 
 
   const destinations: Destination[] = [
     {
+      key: "ranked",
+      href: "/profile/rank",
+      icon: Trophy,
+      title: "AIR/Rally Ranked",
+      description: "Your tier, pips, and the leaderboard.",
+    },
+    {
       key: "court-side",
       href: "/court-side",
       icon: LayoutGrid,
@@ -50,7 +57,7 @@ export function ProfileActionsMenu({ profile, email }: ProfileActionsMenuProps) 
       key: "events",
       href: "/events",
       icon: CalendarCheck,
-      title: "Open Play",
+      title: "Play",
       description: "Join a game, or start one on a court you've booked.",
     },
     {

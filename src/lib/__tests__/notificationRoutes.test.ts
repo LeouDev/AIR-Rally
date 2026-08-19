@@ -70,6 +70,8 @@ describe("notificationCategory", () => {
     ["club_approved", "community"],
     ["credits_added", "account"],
     ["review_received", "account"],
+    ["ranked_rank_up", "ranked"],
+    ["ranked_result_confirmed", "ranked"],
   ])("puts %s under %s", (type, expected) => {
     expect(notificationCategory(type)).toBe(expected);
   });
