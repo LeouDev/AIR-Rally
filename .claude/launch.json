@@ -12,6 +12,18 @@
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "cd /Users/leou/air-rally-mobile && sleep 100000000 | npx expo start --port 8081"],
       "port": 8081
+    },
+    {
+      "name": "air-rally-mobile-web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/leou/air-rally-mobile && npx expo start --web --port 8099"],
+      "port": 8099
+    },
+    {
+      "name": "air-rally-ranked-work",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/leou/air-rally-ranked-work && npm run dev -- --port 3001"],
+      "port": 3001
     }
   ]
 }
