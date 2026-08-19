@@ -19,6 +19,8 @@ type MobileBookingBarProps = {
   passOnFees?: boolean;
   /** Forwarded to the BookingWidget so the confirm dialog can show applied credit. */
   creditBalance?: number;
+  /** Forwarded verbatim to the BookingWidget in the sheet — see its props. */
+  hasOperatingHours?: boolean;
 };
 
 /**
@@ -33,7 +35,7 @@ type MobileBookingBarProps = {
  * most Android tablets, a split-screen laptop window — with no booking
  * UI on the page at all. The court was simply unbookable at those widths.
  */
-export function MobileBookingBar({ startingPrice, venueName, venueTimezone, courts, phone, email, isAuthenticated, passOnFees, creditBalance }: MobileBookingBarProps) {
+export function MobileBookingBar({ startingPrice, venueName, venueTimezone, courts, phone, email, isAuthenticated, passOnFees, creditBalance, hasOperatingHours }: MobileBookingBarProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -73,6 +75,7 @@ export function MobileBookingBar({ startingPrice, venueName, venueTimezone, cour
               isAuthenticated={isAuthenticated}
               passOnFees={passOnFees}
               creditBalance={creditBalance}
+              hasOperatingHours={hasOperatingHours}
             />
           </div>
         </SheetContent>

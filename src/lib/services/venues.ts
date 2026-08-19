@@ -515,6 +515,20 @@ export async function listActiveCities(supabase: Client): Promise<string[]> {
 }
 
 /**
+ * Every active venue's id and creation date — nothing else — for the
+ * public sitemap (see app/sitemap.ts). `venue_marketplace` is already
+ * scoped to `status = 'active'` by the view itself (see
+ * 20260809000008_marketplace_view.sql), so this lists exactly the venues
+ * a real visitor can already reach from /explore, no separate filter
+ * needed.
+ */
+export async function listActiveVenueIdsForSitemap(supabase: Client): Promise<Array<{ id: string; createdAt: string }>> {
+  const { data, error } = await supabase.from("venue_marketplace").select("id, created_at");
+  if (error) throw error;
+  return (data ?? []).map((row) => ({ id: row.id, createdAt: row.created_at }));
+}
+
+/**
  * Full public detail for one venue: the marketplace row plus its active
  * courts, amenities, and images. Returns null for a venue that doesn't
  * exist, isn't active, OR whose id isn't even a validly-formed UUID (a
