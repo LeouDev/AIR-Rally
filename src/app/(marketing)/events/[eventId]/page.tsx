@@ -7,8 +7,12 @@ import { getCurrentUser } from "@/lib/supabase/auth";
 import { listAttendingEventIds } from "@/lib/services/events";
 import { calculateSplit, formatShare } from "@/lib/eventSplit";
 import { EventJoinButton } from "@/components/events/EventJoinButton";
+import { matchStatusLabel } from "@/lib/ranked";
 import type { CommunityEvent, PublicProfile } from "@/lib/supabase/types";
 import { BackLink } from "@/components/shared/BackLink";
+
+/** Non-terminal — the set a "still going" link should resolve to. */
+const ACTIVE_RANKED_STATUSES = ["lobby", "officiating", "live", "awaiting_confirmation"];
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Game" };
@@ -32,13 +36,27 @@ export default async function EventDetailPage({ params }: { params: Promise<{ ev
   if (!event) notFound();
   const game = event as CommunityEvent;
 
-  const [{ data: creator }, { data: venue }, { data: attendeeRows }] = await Promise.all([
+  const [{ data: creator }, { data: venue }, { data: attendeeRows }, { data: rankedMatches }] = await Promise.all([
     supabase.from("public_profiles").select("*").eq("id", game.creator_id).maybeSingle(),
     game.venue_id
       ? supabase.from("venues").select("id, name, city").eq("id", game.venue_id).maybeSingle()
       : Promise.resolve({ data: null }),
     supabase.from("event_attendees").select("user_id, status").eq("event_id", game.id).eq("status", "joined"),
+    // Not unique per event (a rematch, or several games across one long
+    // session), so this has to pick the active one, not just check
+    // existence. RLS (ranked_matches' SELECT policy) means a match still
+    // in progress only comes back here for its own participants/creator/
+    // scorekeeper/admin — a fellow attendee who isn't in that particular
+    // match sees nothing and still gets the "start one" bridge below,
+    // even though one is already underway elsewhere in this session.
+    // Pre-existing scope limit, not something this query introduces.
+    supabase
+      .from("ranked_matches")
+      .select("id, status")
+      .eq("event_id", game.id)
+      .order("created_at", { ascending: false }),
   ]);
+  const activeRankedMatch = (rankedMatches ?? []).find((m) => ACTIVE_RANKED_STATUSES.includes(m.status));
 
   const attendeeIds = (attendeeRows ?? []).map((a) => a.user_id);
   const { data: attendees } = attendeeIds.length
@@ -128,6 +146,29 @@ export default async function EventDetailPage({ params }: { params: Promise<{ ev
           <p className="text-sm text-muted-foreground">Nobody has confirmed yet.</p>
         )}
       </div>
+
+      {activeRankedMatch ? (
+        <Link
+          href={`/ranked/match/${activeRankedMatch.id}`}
+          className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-sm font-medium text-foreground hover:bg-muted"
+        >
+          <span>Ranked match: {matchStatusLabel({ status: activeRankedMatch.status })}</span>
+          <span aria-hidden="true">→</span>
+        </Link>
+      ) : (
+        // Only once you're actually on this court and in the game — a
+        // ranked match needs a real party, not just an interested visitor.
+        user &&
+        game.court_id &&
+        (joined || isOrganiser) && (
+          <Link
+            href={`/ranked/new?event=${game.id}&court=${game.court_id}`}
+            className="rounded-full border border-border px-4 py-2 text-center text-sm font-medium text-foreground hover:bg-muted"
+          >
+            Start a Ranked match here
+          </Link>
+        )
+      )}
 
       {user ? (
         <EventJoinButton eventId={game.id} joined={joined} isFull={isFull} isOrganiser={isOrganiser} />

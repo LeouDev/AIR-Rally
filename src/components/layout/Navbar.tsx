@@ -19,7 +19,7 @@ import { AuthNavSection } from "@/components/layout/AuthNavSection";
 // signed-out one.
 const NAV_LINKS = [
   { href: "/explore", label: "Explore" },
-  { href: "/events", label: "Open Play" },
+  { href: "/events", label: "Play" },
   { href: "/court-side", label: "COURT/Side" },
   { href: "/clubs", label: "Clubs" },
   { href: "/how-it-works", label: "How It Works" },
