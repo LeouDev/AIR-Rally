@@ -114,6 +114,20 @@ async function main(): Promise<void> {
   if (buckets.length === 0) console.log("  (none)");
   buckets.forEach((r) => console.log(`  ${String(r.id).padEnd(16)} public=${r.public} objects=${r.objs}`));
 
+  // Gate for registering a mobile push token against production: the
+  // notification-push trigger in 20260810000066_device_push_tokens.sql
+  // takes its non-no-op branch (vault.decrypted_secrets + net.http_post)
+  // the moment a real device_push_tokens row exists. If either extension
+  // is missing, that branch RAISEs — and since booking triggers insert
+  // notifications, a booking fails outright for that user. Check before
+  // any device signs in against production, not after.
+  console.log("\n=== REQUIRED EXTENSIONS FOR PUSH (vault, pg_net) ===");
+  const REQUIRED_EXTENSIONS = ["supabase_vault", "pg_net"];
+  const extensions = (await rows(client, `select extname from pg_extension`)).map((r) => String(r.extname));
+  for (const ext of REQUIRED_EXTENSIONS) {
+    console.log(`  ${ext.padEnd(24)} ${extensions.includes(ext) ? "PRESENT" : "MISSING"}`);
+  }
+
   console.log("\n=== KEY FUNCTIONS PRESENT? ===");
   const FUNCS = [
     "is_admin",
