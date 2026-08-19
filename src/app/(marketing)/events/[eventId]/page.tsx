@@ -4,9 +4,10 @@ import type { Metadata } from "next";
 import { CalendarDays, MapPin, Users, Info } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
-import { listAttendingEventIds } from "@/lib/services/events";
+import { listMyEventStatuses, listPendingJoinRequests } from "@/lib/services/events";
 import { calculateSplit, formatShare } from "@/lib/eventSplit";
 import { EventJoinButton } from "@/components/events/EventJoinButton";
+import { EventJoinRequests } from "@/components/events/EventJoinRequests";
 import { matchStatusLabel } from "@/lib/ranked";
 import type { CommunityEvent, PublicProfile } from "@/lib/supabase/types";
 import { BackLink } from "@/components/shared/BackLink";
@@ -63,11 +64,12 @@ export default async function EventDetailPage({ params }: { params: Promise<{ ev
     ? await supabase.from("public_profiles").select("*").in("id", attendeeIds)
     : { data: [] as PublicProfile[] };
 
-  const joined = user ? (await listAttendingEventIds(supabase, user.id, [game.id])).length > 0 : false;
+  const myStatus = user ? (await listMyEventStatuses(supabase, user.id, [game.id])).get(game.id) ?? null : null;
   const seated = Math.max(attendeeIds.length, 1);
   const split = calculateSplit(game.price_amount, seated);
   const isFull = game.max_players !== null && attendeeIds.length >= game.max_players;
   const isOrganiser = user?.id === game.creator_id;
+  const pendingRequests = isOrganiser ? await listPendingJoinRequests(supabase, game.id) : [];
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-10 sm:px-6 lg:px-8">
@@ -160,7 +162,7 @@ export default async function EventDetailPage({ params }: { params: Promise<{ ev
         // ranked match needs a real party, not just an interested visitor.
         user &&
         game.court_id &&
-        (joined || isOrganiser) && (
+        (myStatus === "joined" || isOrganiser) && (
           <Link
             href={`/ranked/new?event=${game.id}&court=${game.court_id}`}
             className="rounded-full border border-border px-4 py-2 text-center text-sm font-medium text-foreground hover:bg-muted"
@@ -170,8 +172,10 @@ export default async function EventDetailPage({ params }: { params: Promise<{ ev
         )
       )}
 
+      {isOrganiser && <EventJoinRequests eventId={game.id} requests={pendingRequests} />}
+
       {user ? (
-        <EventJoinButton eventId={game.id} joined={joined} isFull={isFull} isOrganiser={isOrganiser} />
+        <EventJoinButton eventId={game.id} status={myStatus} isFull={isFull} isOrganiser={isOrganiser} />
       ) : (
         <Link
           href={`/login?redirect=/events/${game.id}`}

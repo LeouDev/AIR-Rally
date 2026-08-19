@@ -14,6 +14,7 @@ export function createQueryBuilder<T>(result: QueryResult<T>) {
   const builder: Record<string, unknown> = {
     select: jest.fn(() => builder),
     eq: jest.fn(() => builder),
+    neq: jest.fn(() => builder),
     insert: jest.fn(() => builder),
     update: jest.fn(() => builder),
     delete: jest.fn(() => builder),

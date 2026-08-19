@@ -467,6 +467,10 @@ export type Post = {
   comment_count: number;
   /** Trigger-maintained, same as like_count. */
   reshare_count: number;
+  /** Set to embed a joinable match card — "share this game" into COURT/Side. */
+  event_id: string | null;
+  /** Set to scope this post to one club's own feed — see club_role_of() RLS. */
+  club_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -786,7 +790,7 @@ export type SupportRequest = {
 
 export type EventType = "open_play" | "club_meetup" | "training" | "tournament";
 export type EventStatus = "draft" | "published" | "cancelled" | "completed";
-export type EventAttendeeStatus = "joined" | "waitlisted" | "cancelled";
+export type EventAttendeeStatus = "pending_approval" | "joined" | "waitlisted" | "cancelled";
 
 export type CommunityEvent = {
   id: string;

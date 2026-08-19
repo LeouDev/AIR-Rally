@@ -1,14 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createEvent, joinEvent, leaveEvent, cancelEvent } from "@/lib/services/events";
+import { createEvent, joinEvent, leaveEvent, cancelEvent, approveEventJoin, rejectEventJoin } from "@/lib/services/events";
 import { getBookingById } from "@/lib/services/bookings";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
 import { z } from "zod";
 import { createEventSchema, type CreateEventValues } from "@/lib/validations/event";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import { getServerClient, type ActionResult } from "@/lib/actions/auth";
-import type { CommunityEvent } from "@/lib/supabase/types";
+import type { CommunityEvent, EventAttendeeStatus } from "@/lib/supabase/types";
 
 export async function createEventAction(values: CreateEventValues): Promise<ActionResult<CommunityEvent>> {
   const parsed = createEventSchema.safeParse(values);
@@ -38,15 +38,21 @@ export async function createEventAction(values: CreateEventValues): Promise<Acti
 }
 
 /**
- * Joins or leaves an event. On join, the database decides whether the
- * caller gets a seat or the waitlist (enforce_event_capacity() holds a
- * row lock so concurrent joins can't both claim the last seat), so the
+ * Joins or leaves an event, given the caller's current status (null if
+ * they have no active row). "Attending" now covers three states —
+ * pending_approval / joined / waitlisted — so this takes and returns the
+ * real status rather than a joined/waitlisted pair of booleans.
+ *
+ * On join, the database decides the outcome: enforce_event_join_approval()
+ * (20260810000069) gates a non-creator straight to pending_approval, and
+ * for the creator's own event (or once approved) enforce_event_capacity()
+ * decides joined vs waitlisted under its row lock. Either way the
  * assigned status is read back rather than assumed.
  */
 export async function toggleEventJoinAction(
   eventId: string,
-  currentlyJoined: boolean
-): Promise<ActionResult<{ joined: boolean; waitlisted: boolean }>> {
+  currentStatus: EventAttendeeStatus | null
+): Promise<ActionResult<{ status: EventAttendeeStatus | null }>> {
   const clientResult = await getServerClient();
   if (!clientResult.ok) return { success: false, error: clientResult.error };
   const supabase = clientResult.client;
@@ -59,18 +65,45 @@ export async function toggleEventJoinAction(
   }
 
   try {
-    if (currentlyJoined) {
+    if (currentStatus && currentStatus !== "cancelled") {
       await leaveEvent(supabase, user.id, eventId);
       revalidatePath("/court-side");
-      return { success: true, data: { joined: false, waitlisted: false } };
+      return { success: true, data: { status: null } };
     }
 
     const status = await joinEvent(supabase, user.id, eventId);
     revalidatePath("/court-side");
-    return { success: true, data: { joined: true, waitlisted: status === "waitlisted" } };
+    return { success: true, data: { status } };
   } catch (error) {
     logServerError("events.toggleJoin", error);
     return { success: false, error: getFriendlyErrorMessage(error, "We couldn't update that.") };
+  }
+}
+
+/** Approve or decline a pending join request. RLS restricts both to the
+ * event's actual creator — a mismatched caller gets a policy rejection,
+ * not a silent no-op. */
+export async function respondToJoinRequestAction(
+  eventId: string,
+  requesterId: string,
+  decision: "approve" | "reject"
+): Promise<ActionResult<{ status: EventAttendeeStatus | null }>> {
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  try {
+    if (decision === "approve") {
+      const status = await approveEventJoin(supabase, eventId, requesterId);
+      revalidatePath(`/events/${eventId}`);
+      return { success: true, data: { status } };
+    }
+    await rejectEventJoin(supabase, eventId, requesterId);
+    revalidatePath(`/events/${eventId}`);
+    return { success: true, data: { status: null } };
+  } catch (error) {
+    logServerError("events.respondToJoinRequest", error);
+    return { success: false, error: getFriendlyErrorMessage(error, "We couldn't update that request.") };
   }
 }
 

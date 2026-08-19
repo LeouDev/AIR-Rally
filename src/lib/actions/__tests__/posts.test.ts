@@ -68,6 +68,8 @@ describe("createPostAction", () => {
       like_count: 0,
       comment_count: 0,
       reshare_count: 0,
+      event_id: null,
+      club_id: null,
       created_at: "now",
       updated_at: "now",
     });

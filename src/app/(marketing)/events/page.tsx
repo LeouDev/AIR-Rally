@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { CalendarDays, MapPin, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
-import { listUpcomingEvents, listAttendingEventIds } from "@/lib/services/events";
+import { listUpcomingEvents, listMyEventStatuses } from "@/lib/services/events";
 import { calculateSplit, formatShare } from "@/lib/eventSplit";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +24,9 @@ export default async function EventsPage() {
   const user = await getCurrentUser();
   const events = await listUpcomingEvents(supabase, 50);
 
-  const attendingIds = user ? new Set(await listAttendingEventIds(supabase, user.id, events.map((e) => e.id))) : new Set<string>();
+  const myStatuses = user
+    ? await listMyEventStatuses(supabase, user.id, events.map((e) => e.id))
+    : new Map<string, never>();
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-10 sm:px-6 lg:px-8">
@@ -65,7 +67,7 @@ export default async function EventsPage() {
             // The share preview divides by everyone seated, organiser
             // included. Purely informational — nobody is charged here.
             const split = calculateSplit(event.price_amount, Math.max(event.attendeeCount, 1));
-            const joined = attendingIds.has(event.id);
+            const myStatus = myStatuses.get(event.id) ?? null;
 
             return (
               <li key={event.id}>
@@ -75,9 +77,19 @@ export default async function EventsPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <h2 className="font-semibold text-foreground">{event.title}</h2>
-                    {joined && (
+                    {myStatus === "joined" && (
                       <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
                         You&apos;re in
+                      </span>
+                    )}
+                    {myStatus === "waitlisted" && (
+                      <span className="shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+                        Waitlisted
+                      </span>
+                    )}
+                    {myStatus === "pending_approval" && (
+                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        Requested
                       </span>
                     )}
                   </div>

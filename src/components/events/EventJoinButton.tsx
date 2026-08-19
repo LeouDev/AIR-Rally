@@ -4,24 +4,25 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { toggleEventJoinAction } from "@/lib/actions/events";
+import type { EventAttendeeStatus } from "@/lib/supabase/types";
 
 /**
- * Join / leave a game.
- *
- * The database decides whether a join takes a seat or the waitlist —
- * enforce_event_capacity() holds a row lock so two people can't both claim
- * the last spot — so the result is read back rather than assumed. That's
- * why a full game still shows a join button: joining puts you on the
- * waitlist, and auto-promotion moves you up when someone drops.
+ * Join / leave a game — now a 4-state control, not a toggle. A join no
+ * longer lands a seat directly: enforce_event_join_approval()
+ * (20260810000069) gates every non-creator join to pending_approval
+ * first, and the event's creator approves or declines it. The database
+ * still decides joined vs waitlisted once approved — enforce_event_capacity()
+ * holds a row lock so two people can't both claim the last spot — so the
+ * result is read back rather than assumed, same as before.
  */
 export function EventJoinButton({
   eventId,
-  joined,
+  status,
   isFull,
   isOrganiser,
 }: {
   eventId: string;
-  joined: boolean;
+  status: EventAttendeeStatus | null;
   isFull: boolean;
   isOrganiser: boolean;
 }) {
@@ -38,21 +39,28 @@ export function EventJoinButton({
 
   function handleClick() {
     startTransition(async () => {
-      const result = await toggleEventJoinAction(eventId, joined);
+      const result = await toggleEventJoinAction(eventId, status);
       if (!result.success) {
         toast.error(result.error);
         return;
       }
+      const next = result.data.status;
       toast.success(
-        result.data.waitlisted
+        next === "waitlisted"
           ? "You're on the waitlist — we'll move you up if a spot opens."
-          : result.data.joined
+          : next === "joined"
             ? "You're in. Sort out your share with the organiser."
-            : "You've left this game."
+            : next === "pending_approval"
+              ? "Request sent — the organiser will review it."
+              : status === "pending_approval"
+                ? "Request withdrawn."
+                : "You've left this game."
       );
       router.refresh();
     });
   }
+
+  const active = status === "joined" || status === "waitlisted" || status === "pending_approval";
 
   return (
     <button
@@ -60,10 +68,20 @@ export function EventJoinButton({
       onClick={handleClick}
       disabled={isPending}
       className={`rounded-full px-4 py-2.5 text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-50 ${
-        joined ? "border border-border bg-card text-foreground" : "bg-primary text-primary-foreground"
+        active ? "border border-border bg-card text-foreground" : "bg-primary text-primary-foreground"
       }`}
     >
-      {isPending ? "Working…" : joined ? "Leave this game" : isFull ? "Join the waitlist" : "Join this game"}
+      {isPending
+        ? "Working…"
+        : status === "pending_approval"
+          ? "Cancel request"
+          : status === "waitlisted"
+            ? "Leave the waitlist"
+            : status === "joined"
+              ? "Leave this game"
+              : isFull
+                ? "Ask to join the waitlist"
+                : "Ask to join"}
     </button>
   );
 }

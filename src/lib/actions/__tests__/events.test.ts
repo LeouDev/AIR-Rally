@@ -79,32 +79,43 @@ describe("createEventAction", () => {
 describe("toggleEventJoinAction", () => {
   it("rejects an unauthenticated caller", async () => {
     mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient(null) });
-    const result = await toggleEventJoinAction("event-1", false);
+    const result = await toggleEventJoinAction("event-1", null);
     expect(result).toEqual({ success: false, error: "Sign in to join events." });
   });
 
+  // Every non-creator join now starts pending_approval —
+  // enforce_event_join_approval() (20260810000069) decides that, not
+  // this action — so joinEvent()'s mocked return is what the action
+  // must surface unchanged.
   it("joins when not currently attending", async () => {
     mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
-    mockJoinEvent.mockResolvedValue("joined");
-    const result = await toggleEventJoinAction("event-1", false);
+    mockJoinEvent.mockResolvedValue("pending_approval");
+    const result = await toggleEventJoinAction("event-1", null);
     expect(mockJoinEvent).toHaveBeenCalledWith(expect.anything(), "user-1", "event-1");
-    expect(result).toEqual({ success: true, data: { joined: true, waitlisted: false } });
+    expect(result).toEqual({ success: true, data: { status: "pending_approval" } });
   });
 
-  // The capacity trigger, not this action, decides seat vs waitlist — so
-  // the action must surface what the database actually assigned rather
-  // than optimistically reporting a seat.
+  // The capacity trigger, not this action, decides seat vs waitlist once
+  // approved — so the action must surface what the database actually
+  // assigned rather than optimistically reporting a seat.
   it("reports a waitlisted join when the event was already full", async () => {
     mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
     mockJoinEvent.mockResolvedValue("waitlisted");
-    const result = await toggleEventJoinAction("event-1", false);
-    expect(result).toEqual({ success: true, data: { joined: true, waitlisted: true } });
+    const result = await toggleEventJoinAction("event-1", null);
+    expect(result).toEqual({ success: true, data: { status: "waitlisted" } });
   });
 
   it("leaves when currently attending", async () => {
     mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
-    const result = await toggleEventJoinAction("event-1", true);
+    const result = await toggleEventJoinAction("event-1", "joined");
     expect(mockLeaveEvent).toHaveBeenCalledWith(expect.anything(), "user-1", "event-1");
-    expect(result).toEqual({ success: true, data: { joined: false, waitlisted: false } });
+    expect(result).toEqual({ success: true, data: { status: null } });
+  });
+
+  it("leaves when a request is still pending", async () => {
+    mockGetServerClient.mockResolvedValue({ ok: true, client: fakeClient({ id: "user-1" }) });
+    const result = await toggleEventJoinAction("event-1", "pending_approval");
+    expect(mockLeaveEvent).toHaveBeenCalledWith(expect.anything(), "user-1", "event-1");
+    expect(result).toEqual({ success: true, data: { status: null } });
   });
 });

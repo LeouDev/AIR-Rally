@@ -27,6 +27,8 @@ const POST_ROW: Post = {
   like_count: 3,
   comment_count: 1,
   reshare_count: 0,
+  event_id: null,
+  club_id: null,
   created_at: "2026-08-12T00:00:00Z",
   updated_at: "2026-08-12T00:00:00Z",
 };

@@ -1,4 +1,4 @@
-import { listUpcomingEvents, createEvent, joinEvent, leaveEvent, listAttendingEventIds } from "@/lib/services/events";
+import { listUpcomingEvents, createEvent, joinEvent, leaveEvent, listMyEventStatuses } from "@/lib/services/events";
 import { createTableMockSupabase, createMockSupabase, postgrestError } from "@/lib/test-helpers/mockSupabase";
 import type { CommunityEvent, PublicProfile } from "@/lib/supabase/types";
 
@@ -153,14 +153,16 @@ describe("joinEvent / leaveEvent", () => {
   });
 });
 
-describe("listAttendingEventIds", () => {
-  it("returns an empty array without querying when eventIds is empty", async () => {
+describe("listMyEventStatuses", () => {
+  it("returns an empty map without querying when eventIds is empty", async () => {
     const supabase = createMockSupabase({ data: [], error: null });
-    await expect(listAttendingEventIds(supabase, "user-1", [])).resolves.toEqual([]);
+    await expect(listMyEventStatuses(supabase, "user-1", [])).resolves.toEqual(new Map());
   });
 
-  it("returns the attending subset of the given event ids", async () => {
-    const supabase = createMockSupabase({ data: [{ event_id: "event-1" }], error: null });
-    await expect(listAttendingEventIds(supabase, "user-1", ["event-1", "event-2"])).resolves.toEqual(["event-1"]);
+  it("returns the caller's exact status per event id", async () => {
+    const supabase = createMockSupabase({ data: [{ event_id: "event-1", status: "pending_approval" }], error: null });
+    await expect(listMyEventStatuses(supabase, "user-1", ["event-1", "event-2"])).resolves.toEqual(
+      new Map([["event-1", "pending_approval"]])
+    );
   });
 });

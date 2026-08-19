@@ -6,7 +6,7 @@ import { CourtSideFeed } from "@/components/court-side/CourtSideFeed";
 import { getCurrentUserWithProfile } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { listFeedPosts, listLikedPostIds, listResharedPostIds } from "@/lib/services/posts";
-import { listUpcomingEvents, listAttendingEventIds } from "@/lib/services/events";
+import { listUpcomingEvents, listMyEventStatuses } from "@/lib/services/events";
 import { listFollowingIds, getFollowCounts } from "@/lib/services/follows";
 import { resolveClubMentionsForPosts } from "@/lib/services/clubs";
 
@@ -48,17 +48,21 @@ export default async function CourtSidePage() {
   const eventIds = events.map((e) => e.id);
   const authorIds = Array.from(new Set(posts.map((p) => p.user_id)));
 
-  const [likedPostIds, resharedPostIds, followingIds, attendingEventIds, followCounts, clubMentions] = await Promise.all([
+  const [likedPostIds, resharedPostIds, followingIds, myEventStatuses, followCounts, clubMentions] = await Promise.all([
     listLikedPostIds(supabase, session.user.id, postIds),
     listResharedPostIds(supabase, session.user.id, postIds),
     listFollowingIds(supabase, session.user.id, authorIds),
-    listAttendingEventIds(supabase, session.user.id, eventIds),
+    listMyEventStatuses(supabase, session.user.id, eventIds),
     getFollowCounts(supabase, session.user.id),
     resolveClubMentionsForPosts(
       supabase,
       posts.map((p) => p.content)
     ),
   ]);
+  // Plain object, not a Map — this crosses the server→client component
+  // boundary, and a Map doesn't survive serialization (same reason
+  // ClubMentionMap is a Record in lib/services/clubs.ts).
+  const initialEventStatuses = Object.fromEntries(myEventStatuses);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
@@ -72,7 +76,7 @@ export default async function CourtSidePage() {
         initialLikedPostIds={likedPostIds}
         initialFollowingIds={followingIds}
         initialEvents={events}
-        initialAttendingEventIds={attendingEventIds}
+        initialEventStatuses={initialEventStatuses}
         initialFollowerCount={followCounts.followers}
         initialFollowingCount={followCounts.following}
         initialResharedPostIds={resharedPostIds}

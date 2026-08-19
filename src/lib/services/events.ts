@@ -170,17 +170,91 @@ export async function leaveEvent(supabase: Client, userId: string, eventId: stri
   if (error) throw error;
 }
 
-/** Batched — one query for a whole set of event ids, not one per card. */
-export async function listAttendingEventIds(supabase: Client, userId: string, eventIds: string[]): Promise<string[]> {
-  if (eventIds.length === 0) return [];
+/**
+ * The caller's exact status per event — batched, one query for a whole
+ * set of ids. A plain "attending?" boolean isn't enough once a join can
+ * be pending: Join / Requested / Joined / Waitlisted all render
+ * differently. Cancelled rows are omitted, same as "not attending".
+ */
+export async function listMyEventStatuses(
+  supabase: Client,
+  userId: string,
+  eventIds: string[]
+): Promise<Map<string, EventAttendeeStatus>> {
+  if (eventIds.length === 0) return new Map();
   const { data, error } = await supabase
     .from("event_attendees")
-    .select("event_id")
+    .select("event_id, status")
     .eq("user_id", userId)
     .in("event_id", eventIds)
-    .in("status", ["joined", "waitlisted"]);
+    .neq("status", "cancelled");
   if (error) throw error;
-  return (data ?? []).map((row) => row.event_id);
+  return new Map((data ?? []).map((row) => [row.event_id, row.status]));
+}
+
+export type PendingJoinRequest = {
+  userId: string;
+  profile: PublicProfile | null;
+  requestedAt: string;
+};
+
+/**
+ * Requests awaiting the creator's decision. RLS ("Event attendees are
+ * publicly readable, pending requests are private", 20260810000069)
+ * already restricts pending rows to the requester and the event's own
+ * creator — a non-creator caller simply gets an empty list back, not an
+ * error.
+ */
+export async function listPendingJoinRequests(supabase: Client, eventId: string): Promise<PendingJoinRequest[]> {
+  const { data, error } = await supabase
+    .from("event_attendees")
+    .select("user_id, created_at")
+    .eq("event_id", eventId)
+    .eq("status", "pending_approval")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  if (!data || data.length === 0) return [];
+
+  const userIds = data.map((row) => row.user_id);
+  const { data: profiles, error: profilesError } = await supabase.from("public_profiles").select("*").in("id", userIds);
+  if (profilesError) throw profilesError;
+  const profileById = new Map(profiles.map((p) => [p.id, p]));
+
+  return data.map((row) => ({
+    userId: row.user_id,
+    profile: profileById.get(row.user_id) ?? null,
+    requestedAt: row.created_at,
+  }));
+}
+
+/**
+ * Approves a pending request. Whether it lands a seat or the waitlist is
+ * still decided by enforce_event_capacity() under its row lock — same as
+ * an ordinary join — enforce_event_join_approval() (20260810000069) just
+ * lets the creator's own update through instead of resetting it back to
+ * pending. RLS restricts this to the event's actual creator.
+ */
+export async function approveEventJoin(supabase: Client, eventId: string, userId: string): Promise<EventAttendeeStatus> {
+  const { data, error } = await supabase
+    .from("event_attendees")
+    .update({ status: "joined" })
+    .eq("event_id", eventId)
+    .eq("user_id", userId)
+    .select("status")
+    .single();
+  if (error) throw error;
+  return data.status;
+}
+
+/** Declines a pending request — the same status a leave uses, so a declined
+ * request reads identically to "not attending" everywhere else in the app. */
+export async function rejectEventJoin(supabase: Client, eventId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from("event_attendees")
+    .update({ status: "cancelled" })
+    .eq("event_id", eventId)
+    .eq("user_id", userId);
+  if (error) throw error;
 }
 
 

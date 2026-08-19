@@ -21,7 +21,7 @@ import { toggleFollowAction } from "@/lib/actions/follows";
 import { listFollowerProfiles, listFollowingProfiles } from "@/lib/services/follows";
 import { toggleEventJoinAction } from "@/lib/actions/events";
 import type { EventWithDetails } from "@/lib/services/events";
-import type { PublicProfile } from "@/lib/supabase/types";
+import type { EventAttendeeStatus, PublicProfile } from "@/lib/supabase/types";
 import { suggestedPlayersFromFeed, postCountLabel } from "@/lib/suggestedPlayers";
 
 const FEED_TABS = ["For you", "Following", "Near you"] as const;
@@ -53,7 +53,8 @@ type CourtSideFeedProps = {
   initialLikedPostIds: string[];
   initialFollowingIds: string[];
   initialEvents: EventWithDetails[];
-  initialAttendingEventIds: string[];
+  /** Plain object, not a Map — crosses the server→client boundary. */
+  initialEventStatuses: Record<string, EventAttendeeStatus>;
   initialFollowerCount: number;
   initialFollowingCount: number;
   initialResharedPostIds: string[];
@@ -77,7 +78,7 @@ export function CourtSideFeed({
   initialLikedPostIds,
   initialFollowingIds,
   initialEvents,
-  initialAttendingEventIds,
+  initialEventStatuses,
   initialFollowerCount,
   initialFollowingCount,
   initialResharedPostIds,
@@ -135,7 +136,9 @@ export function CourtSideFeed({
   const [shareOpen, setShareOpen] = useState(false);
 
   const [events, setEvents] = useState<EventWithDetails[]>(initialEvents);
-  const [attendingEventIds, setAttendingEventIds] = useState<Set<string>>(new Set(initialAttendingEventIds));
+  const [eventStatuses, setEventStatuses] = useState<Map<string, EventAttendeeStatus>>(
+    new Map(Object.entries(initialEventStatuses))
+  );
 
   const [followerCount] = useState(initialFollowerCount);
   const [followingCount] = useState(initialFollowingCount);
@@ -367,31 +370,39 @@ export function CourtSideFeed({
   }
 
   async function toggleJoinEvent(eventId: string) {
-    const wasJoined = attendingEventIds.has(eventId);
-    setAttendingEventIds((current) => {
-      const next = new Set(current);
-      if (wasJoined) next.delete(eventId);
-      else next.add(eventId);
+    // Not optimistic: a join no longer always lands a seat (it may land
+    // pending_approval or waitlisted instead), so there's nothing safe
+    // to guess here — apply the database's actual answer once it's back,
+    // same posture as EventJoinButton.
+    const previousStatus = eventStatuses.get(eventId) ?? null;
+    const result = await toggleEventJoinAction(eventId, previousStatus);
+    if (!result.success) {
+      toast.error(result.error);
+      return;
+    }
+
+    const nextStatus = result.data.status;
+    setEventStatuses((current) => {
+      const next = new Map(current);
+      if (nextStatus) next.set(eventId, nextStatus);
+      else next.delete(eventId);
       return next;
     });
-    setEvents((current) =>
-      current.map((e) => (e.id === eventId ? { ...e, attendeeCount: e.attendeeCount + (wasJoined ? -1 : 1) } : e))
-    );
 
-    const result = await toggleEventJoinAction(eventId, wasJoined);
-    if (!result.success) {
-      setAttendingEventIds((current) => {
-        const next = new Set(current);
-        if (wasJoined) next.add(eventId);
-        else next.delete(eventId);
-        return next;
-      });
-      setEvents((current) =>
-        current.map((e) => (e.id === eventId ? { ...e, attendeeCount: e.attendeeCount + (wasJoined ? 1 : -1) } : e))
-      );
-      toast.error(result.error);
-    } else if (!wasJoined) {
+    // participant_count only ever counts 'joined' rows (see
+    // update_event_participant_count()), so the visible seat count only
+    // moves when a seat is actually taken or actually freed.
+    if (nextStatus === "joined" || previousStatus === "joined") {
+      const delta = nextStatus === "joined" ? 1 : -1;
+      setEvents((current) => current.map((e) => (e.id === eventId ? { ...e, attendeeCount: Math.max(0, e.attendeeCount + delta) } : e)));
+    }
+
+    if (nextStatus === "pending_approval") {
+      toast.success("Request sent — the organiser will review it.");
+    } else if (nextStatus === "joined") {
       toast.success("You're on the list!");
+    } else if (nextStatus === "waitlisted") {
+      toast.success("You're on the waitlist.");
     }
   }
 
@@ -742,7 +753,7 @@ export function CourtSideFeed({
             <p className="mt-1 text-xs text-muted-foreground">Local games waiting for a few more players.</p>
             <div className="mt-3 flex flex-col">
               {events.map((event) => {
-                const joined = attendingEventIds.has(event.id);
+                const status = eventStatuses.get(event.id) ?? null;
                 const { day, date, time } = formatEventDate(event.start_time);
                 return (
                   <div key={event.id} className="flex items-center gap-3 border-t border-border py-3 first:border-t-0">
@@ -759,11 +770,17 @@ export function CourtSideFeed({
                     <Button
                       type="button"
                       size="sm"
-                      variant={joined ? "secondary" : "outline"}
+                      variant={status ? "secondary" : "outline"}
                       className="h-7 shrink-0 px-2.5 text-xs"
                       onClick={() => toggleJoinEvent(event.id)}
                     >
-                      {joined ? "Joined" : "Join"}
+                      {status === "joined"
+                        ? "Joined"
+                        : status === "waitlisted"
+                          ? "Waitlisted"
+                          : status === "pending_approval"
+                            ? "Requested"
+                            : "Join"}
                     </Button>
                   </div>
                 );
