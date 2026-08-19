@@ -253,6 +253,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
               isAuthenticated={user !== null}
               passOnFees={passOnFees}
               creditBalance={creditBalance}
+              hasOperatingHours={operatingHours.length > 0}
             />
           </div>
         </div>
@@ -269,6 +270,7 @@ export default async function CourtDetailPage({ params }: CourtDetailPageProps) 
           isAuthenticated={user !== null}
           passOnFees={passOnFees}
           creditBalance={creditBalance}
+          hasOperatingHours={operatingHours.length > 0}
         />
       )}
     </div>

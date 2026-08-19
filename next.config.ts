@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Framework fingerprinting is free reconnaissance for an attacker —
+  // no functional value to leaving it on, one line to turn off.
+  poweredByHeader: false,
   images: {
     remotePatterns: [
       {

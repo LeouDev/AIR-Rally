@@ -21,6 +21,7 @@ import { calculateBookingCharge } from "@/lib/services/bookingFee";
 import { splitBookingPayment } from "@/lib/services/credits";
 import type { AvailableSlot, Court } from "@/lib/supabase/types";
 import { formatVenueDate, formatVenueTime } from "@/lib/bookingTime";
+import { formatPhilippinePhoneForDisplay } from "@/lib/phoneFormat";
 
 const VISIBLE_DAYS = 14;
 
@@ -68,6 +69,23 @@ type BookingWidgetProps = {
    * ₱1218.27 here and ₱812.18 at PayMongo.
    */
   creditBalance?: number;
+  /**
+   * Whether this venue has at least one venue_operating_hours row at all
+   * — not "open today," but "ever open, on any day." Defaults to true so
+   * every existing caller/test is unaffected unless the page explicitly
+   * knows otherwise (see the court detail page, which already fetches
+   * this venue's operating hours for the Hours section above).
+   *
+   * A venue with zero rows here shows every day as closed by construction
+   * (see ARCHITECTURE.md's availability model) — no date will ever have a
+   * slot, which is a fundamentally different situation from "closed
+   * today, try another date." A live-site audit found two production
+   * venues in exactly this state, publicly listed with a working-looking
+   * booking widget that told visitors to try a different date — false
+   * for every one of the 14 dates offered. See the empty-state message
+   * below, which is the fix.
+   */
+  hasOperatingHours?: boolean;
 };
 
 /**
@@ -81,7 +99,7 @@ type BookingWidgetProps = {
  * that's decided server-side in lib/actions/checkout.ts regardless of
  * what this component displays.
  */
-export function BookingWidget({ venueName, venueTimezone, courts, phone, email, isAuthenticated, passOnFees = false, creditBalance = 0 }: BookingWidgetProps) {
+export function BookingWidget({ venueName, venueTimezone, courts, phone, email, isAuthenticated, passOnFees = false, creditBalance = 0, hasOperatingHours = true }: BookingWidgetProps) {
   const router = useRouter();
   const pathname = usePathname();
 
@@ -322,7 +340,9 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
           </p>
         ) : slots.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border bg-muted/40 px-3 py-3 text-center text-xs text-muted-foreground">
-            No available times for this date and duration. Try another date.
+            {hasOperatingHours
+              ? "No available times for this date and duration. Try another date."
+              : "This venue hasn't set its operating hours yet, so it can't be booked on any date. Check back soon, or reach out below."}
           </p>
         ) : (
           <div className="grid grid-cols-3 gap-2">
@@ -440,9 +460,9 @@ export function BookingWidget({ venueName, venueTimezone, courts, phone, email, 
         <div className="flex flex-col gap-2 border-t border-border pt-4 text-sm">
           <p className="text-xs text-muted-foreground">Need more information? Connect with us directly and we&apos;ll assist you.</p>
           {phone && (
-            <a href={`tel:${phone}`} className="flex items-center gap-2 text-foreground hover:text-primary">
+            <a href={`tel:${formatPhilippinePhoneForDisplay(phone)}`} className="flex items-center gap-2 text-foreground hover:text-primary">
               <Phone className="size-4 shrink-0" aria-hidden="true" />
-              {phone}
+              {formatPhilippinePhoneForDisplay(phone)}
             </a>
           )}
           {email && (
