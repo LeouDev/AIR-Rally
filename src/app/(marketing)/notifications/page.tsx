@@ -13,6 +13,7 @@ export const metadata: Metadata = { title: "Notifications" };
 const FILTERS = [
   { value: "all", label: "All" },
   { value: "bookings", label: "Games" },
+  { value: "ranked", label: "Ranked" },
   { value: "community", label: "Community" },
   { value: "account", label: "Account" },
 ] as const;

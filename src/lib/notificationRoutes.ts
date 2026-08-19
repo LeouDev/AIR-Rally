@@ -33,6 +33,21 @@ const TYPE_ROUTES: Record<string, string> = {
   venue_suspended: "/list-your-court",
   event_invite: "/events",
   event_cancelled: "/events",
+  // Ranked notifications set link_url themselves (usually straight to the
+  // match), so these are only reached for a row some future writer forgets
+  // to stamp — see 20260810000067_air_rally_ranked.sql.
+  ranked_match_found: "/profile/rank",
+  ranked_officiating_confirmed: "/profile/rank",
+  ranked_result_submitted: "/profile/rank",
+  ranked_result_confirmed: "/profile/rank",
+  ranked_result_disputed: "/profile/rank",
+  ranked_dispute_resolved: "/profile/rank",
+  ranked_rank_up: "/profile/rank",
+  ranked_rank_down: "/profile/rank",
+  ranked_pip_gained: "/profile/rank",
+  ranked_pip_lost: "/profile/rank",
+  ranked_star_protected: "/profile/rank",
+  ranked_calibration_complete: "/profile/rank",
 };
 
 /** Pulls `[event:<uuid>]` out of a message body. */
@@ -59,8 +74,9 @@ export function displayMessage(message: string): string {
 }
 
 /** Coarse grouping for the notification list's filter tabs. */
-export function notificationCategory(type: string): "bookings" | "community" | "account" {
+export function notificationCategory(type: string): "bookings" | "community" | "ranked" | "account" {
   if (type.startsWith("booking") || type.startsWith("reschedule") || type.startsWith("event")) return "bookings";
   if (type.startsWith("post") || type.startsWith("club")) return "community";
+  if (type.startsWith("ranked")) return "ranked";
   return "account";
 }
