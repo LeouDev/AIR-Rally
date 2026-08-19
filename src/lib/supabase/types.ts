@@ -174,6 +174,21 @@ export type Notification = {
 };
 
 /**
+ * Row shape of `device_push_tokens` (see
+ * supabase/migrations/20260810000066_device_push_tokens.sql). One row per
+ * mobile device holding an Expo push token; written exclusively through
+ * the register_push_token()/unregister_push_token() RPCs.
+ */
+export type DevicePushToken = {
+  id: string;
+  user_id: string;
+  token: string;
+  platform: "ios" | "android";
+  created_at: string;
+  updated_at: string;
+};
+
+/**
  * Row shape of `owner_applications` (see
  * supabase/migrations/20260810000025_owner_approval.sql). A lightweight
  * pre-approval application, not a venue draft — a real venue can't exist
@@ -921,6 +936,9 @@ export type Database = {
       // never for Insert — no client role has an insert policy; every row
       // comes from a security-definer trigger. Only read_at is updatable.
       notifications: TableDef<Notification, never, Partial<Pick<Notification, "read_at">>>;
+      // never for Insert/Update — writes go through register_push_token();
+      // clients can only select and delete their own rows.
+      device_push_tokens: TableDef<DevicePushToken, never, never>;
       owner_applications: TableDef<
         OwnerApplication,
         Pick<
@@ -1036,6 +1054,14 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      register_push_token: {
+        Args: { p_token: string; p_platform: "ios" | "android" };
+        Returns: undefined;
+      };
+      unregister_push_token: {
+        Args: { p_token: string };
+        Returns: undefined;
+      };
       court_side_feed: {
         Args: { p_limit?: number; p_cursor?: string };
         Returns: (Post & { effective_at: string; resharer_id: string | null })[];
