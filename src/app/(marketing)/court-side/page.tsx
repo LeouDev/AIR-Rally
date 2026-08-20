@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { listFeedPosts, listLikedPostIds, listResharedPostIds } from "@/lib/services/posts";
 import { listUpcomingEvents, listMyEventStatuses } from "@/lib/services/events";
 import { listFollowingIds, getFollowCounts } from "@/lib/services/follows";
-import { resolveClubMentionsForPosts } from "@/lib/services/clubs";
+import { resolveClubMentionsForPosts, listClubsForUser } from "@/lib/services/clubs";
 
 export const metadata = { title: "COURT/Side" };
 // Renders per-user data (own profile, own like/follow/RSVP state via a
@@ -51,7 +51,7 @@ export default async function CourtSidePage() {
   const eventIds = Array.from(new Set([...events.map((e) => e.id), ...postEventIds]));
   const authorIds = Array.from(new Set(posts.map((p) => p.user_id)));
 
-  const [likedPostIds, resharedPostIds, followingIds, myEventStatuses, followCounts, clubMentions] = await Promise.all([
+  const [likedPostIds, resharedPostIds, followingIds, myEventStatuses, followCounts, clubMentions, myClubs] = await Promise.all([
     listLikedPostIds(supabase, session.user.id, postIds),
     listResharedPostIds(supabase, session.user.id, postIds),
     listFollowingIds(supabase, session.user.id, authorIds),
@@ -61,6 +61,7 @@ export default async function CourtSidePage() {
       supabase,
       posts.map((p) => p.content)
     ),
+    listClubsForUser(supabase, session.user.id),
   ]);
   // Plain object, not a Map — this crosses the server→client component
   // boundary, and a Map doesn't survive serialization (same reason
@@ -84,6 +85,7 @@ export default async function CourtSidePage() {
         initialFollowingCount={followCounts.following}
         initialResharedPostIds={resharedPostIds}
         clubMentions={clubMentions}
+        myClubs={myClubs}
       />
     </div>
   );

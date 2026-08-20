@@ -49,7 +49,8 @@ export async function createPostAction(
       parsed.data.content,
       parsed.data.imageUrl,
       parsed.data.imagePaths ?? [],
-      parsed.data.eventId
+      parsed.data.eventId,
+      parsed.data.clubId
     );
 
     // Best-effort: the post is already published, so a mention-recording
@@ -63,6 +64,7 @@ export async function createPostAction(
     }
 
     revalidatePath("/court-side");
+    if (parsed.data.clubId) revalidatePath(`/court-side/club/${parsed.data.clubId}`);
     return { success: true, data: post };
   } catch (error) {
     logServerError("posts.create", error);

@@ -21,7 +21,7 @@ import { toggleFollowAction } from "@/lib/actions/follows";
 import { listFollowerProfiles, listFollowingProfiles } from "@/lib/services/follows";
 import { toggleEventJoinAction } from "@/lib/actions/events";
 import type { EventWithDetails } from "@/lib/services/events";
-import type { EventAttendeeStatus, PublicProfile } from "@/lib/supabase/types";
+import type { Club, EventAttendeeStatus, PublicProfile } from "@/lib/supabase/types";
 import { suggestedPlayersFromFeed, postCountLabel } from "@/lib/suggestedPlayers";
 
 const FEED_TABS = ["For you", "Following", "Near you"] as const;
@@ -60,6 +60,8 @@ type CourtSideFeedProps = {
   initialResharedPostIds: string[];
   /** Club mentions resolved server-side so "@ClubName" renders as a link. */
   clubMentions: ClubMentionMap;
+  /** Clubs the viewer belongs to — backs the "My Club" switcher. */
+  myClubs: Club[];
 };
 
 /**
@@ -83,6 +85,7 @@ export function CourtSideFeed({
   initialFollowingCount,
   initialResharedPostIds,
   clubMentions,
+  myClubs,
 }: CourtSideFeedProps) {
   const [activeTab, setActiveTab] = useState<(typeof FEED_TABS)[number]>("For you");
   const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
@@ -747,6 +750,26 @@ export function CourtSideFeed({
       {/* Right rail */}
       <aside className="flex flex-col gap-4">
         <CourtSideSearch />
+
+        {myClubs.length > 0 && (
+          <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+            <h3 className="text-sm font-semibold text-foreground">My Club</h3>
+            <div className="mt-3 flex flex-col gap-1.5">
+              {myClubs.map((club) => (
+                <Link
+                  key={club.id}
+                  href={`/court-side/club/${club.id}`}
+                  className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm text-foreground hover:bg-muted"
+                >
+                  <span className="truncate">{club.name}</span>
+                  <span aria-hidden="true" className="text-muted-foreground">
+                    →
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {events.length > 0 && (
           <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">

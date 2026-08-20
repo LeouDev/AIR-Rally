@@ -33,7 +33,11 @@ async function attachEvents<T extends { event_id: string | null }>(
   supabase: Client,
   rows: T[]
 ): Promise<(T & { event: EmbeddedEvent | null })[]> {
-  const eventIds = Array.from(new Set(rows.map((r) => r.event_id).filter((id): id is string => id !== null)));
+  // Not just `!== null`: a row from an unmigrated database (e.g. local
+  // dev against staging before it has 20260810000070) simply omits the
+  // key rather than nulling it, and `undefined` slipping through here
+  // becomes the literal string "undefined" in the next .in() call.
+  const eventIds = Array.from(new Set(rows.map((r) => r.event_id).filter((id): id is string => id !== null && id !== undefined)));
   const eventsById = await listEmbeddedEvents(supabase, eventIds);
   return rows.map((row) => ({ ...row, event: row.event_id ? (eventsById.get(row.event_id) ?? null) : null }));
 }
@@ -134,17 +138,50 @@ export async function listPostsByUser(
   return { posts, nextCursor };
 }
 
+/**
+ * One club's own feed — "My Club". A direct `posts` query, not
+ * court_side_feed(): a club post can never be reshared (post_reshares'
+ * insert policy blocks it, 20260810000071), so there's no reshare union
+ * to build here, and RLS (club_role_of() on the select policy) already
+ * restricts this to actual members.
+ */
+export async function listClubPosts(
+  supabase: Client,
+  clubId: string,
+  { limit = FEED_PAGE_SIZE, cursor }: { limit?: number; cursor?: string } = {}
+): Promise<{ posts: PostWithAuthor[]; nextCursor: string | null }> {
+  let query = supabase.from("posts").select("*").eq("club_id", clubId).order("created_at", { ascending: false }).limit(limit);
+  if (cursor) query = query.lt("created_at", cursor);
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const [withAuthors, withEvents] = await Promise.all([attachAuthors(supabase, data), attachEvents(supabase, data)]);
+  const eventById = new Map(withEvents.map((row) => [row.id, row.event]));
+  const posts = withAuthors.map((row) => ({ ...row, event: eventById.get(row.id) ?? null }));
+  const nextCursor = data.length === limit ? data[data.length - 1].created_at : null;
+  return { posts, nextCursor };
+}
+
 export async function createPost(
   supabase: Client,
   userId: string,
   content: string,
   imageUrl?: string | null,
   imagePaths: string[] = [],
-  eventId?: string | null
+  eventId?: string | null,
+  clubId?: string | null
 ): Promise<Post> {
   const { data, error } = await supabase
     .from("posts")
-    .insert({ user_id: userId, content, image_url: imageUrl ?? null, image_paths: imagePaths, event_id: eventId ?? null })
+    .insert({
+      user_id: userId,
+      content,
+      image_url: imageUrl ?? null,
+      image_paths: imagePaths,
+      event_id: eventId ?? null,
+      club_id: clubId ?? null,
+    })
     .select()
     .single();
   if (error) throw error;

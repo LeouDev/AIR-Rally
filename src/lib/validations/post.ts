@@ -7,6 +7,8 @@ export const createPostSchema = z.object({
   imageUrl: z.string().trim().url().optional(),
   /** Set to embed a joinable match card — "share this game" into COURT/Side. */
   eventId: z.uuid().optional(),
+  /** Set to scope this post to one club's own feed — "My Club". */
+  clubId: z.uuid().optional(),
 });
 export type CreatePostValues = z.infer<typeof createPostSchema>;
 
