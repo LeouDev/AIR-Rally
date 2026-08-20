@@ -43,6 +43,8 @@ export type Profile = {
   referral_code: string;
   /** Whether this user gets the email copy of their notifications. Never affects the in-app notification itself. */
   email_notifications_enabled: boolean;
+  /** Set once, by anonymize_account() (20260810000074), and never cleared — a self-deleted account, never re-activated. Null for every other profile. */
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1599,6 +1601,13 @@ export type Database = {
           p_refund_id: string;
         };
         Returns: boolean;
+      };
+      /** Anonymizes a profile's PII in place — never deletes the row. See lib/services/accountDeletion.ts and supabase/migrations/20260810000074_account_deletion.sql. service_role-only. */
+      anonymize_account: {
+        Args: {
+          p_user_id: string;
+        };
+        Returns: undefined;
       };
 
       /* --- Ranked -------------------------------------------------------

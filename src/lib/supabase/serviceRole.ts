@@ -6,8 +6,10 @@ import { getSupabaseEnv } from "@/lib/supabase/env";
  * The one place `SUPABASE_SECRET_KEY` is ever read — narrowly scoped to
  * exactly the operations that genuinely cannot be safely gated any other
  * way: completing/failing a booking_reschedules row (see
- * lib/services/reschedules.ts) and moving AIR/Rally Credits (see
- * lib/services/credits.ts). Every other write in this app (booking
+ * lib/services/reschedules.ts), moving AIR/Rally Credits (see
+ * lib/services/credits.ts), and deleting a user's account (see
+ * lib/services/accountDeletion.ts — needs the Supabase Admin API to ban
+ * the auth.users row and scrub its email). Every other write in this app (booking
  * creation/cancellation, payment confirmation, refunds, venue/court
  * management) goes through the ordinary per-request, RLS-scoped client
  * from lib/supabase/server.ts — this file is deliberately NOT a general
@@ -38,11 +40,16 @@ import { getSupabaseEnv } from "@/lib/supabase/env";
  * — not by any value in the request, so leaving them callable by
  * `authenticated` would let any session mint itself credit.
  *
- * Never imported by anything outside lib/services/reschedules.ts and
- * lib/services/credits.ts — grep for `createServiceRoleClient` before
- * adding a new call site, and never import this module from a
- * "use client" component or any code path reachable with only a
- * customer's own session.
+ * anonymize_account() (20260810000074_account_deletion.sql) is restricted
+ * for the same reason again, plus this module is the only way to reach
+ * supabase.auth.admin at all (banning a user, scrubbing their email,
+ * revoking sessions) — there is no RLS-gated equivalent for the Admin API.
+ *
+ * Never imported by anything outside lib/services/reschedules.ts,
+ * lib/services/credits.ts, and lib/services/accountDeletion.ts — grep for
+ * `createServiceRoleClient` before adding a new call site, and never
+ * import this module from a "use client" component or any code path
+ * reachable with only a customer's own session.
  */
 export function createServiceRoleClient() {
   const { url } = getSupabaseEnv();
