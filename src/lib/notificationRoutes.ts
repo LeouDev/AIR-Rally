@@ -57,7 +57,20 @@ function embeddedEventId(message: string): string | null {
 }
 
 export function notificationHref(notification: { type: string; message: Notification["message"]; link_url?: string | null }): string {
-  if (notification.link_url) return notification.link_url;
+  // apply_ranked_result() (20260810000068_dupr_rating_engine.sql) stamps
+  // every rank-change notification (calibration complete, tier/pip up or
+  // down) with a bare '/ranked' link_url — there's no page at that exact
+  // path, only /ranked/leaderboard, /ranked/match/[id], /ranked/new. Since
+  // link_url otherwise wins over the TYPE_ROUTES fallback below (this row
+  // always has one, so the fallback's own /profile/rank entries for these
+  // types never actually run), that dead value has to be caught here
+  // rather than relying on the fallback map to save it.
+  if (notification.link_url && notification.link_url !== "/ranked" && !notification.link_url.startsWith("/ranked?")) {
+    return notification.link_url;
+  }
+  if (notification.link_url === "/ranked" || notification.link_url?.startsWith("/ranked?")) {
+    return "/profile/rank";
+  }
 
   const eventId = embeddedEventId(notification.message ?? "");
   if (eventId) return `/events/${eventId}`;
