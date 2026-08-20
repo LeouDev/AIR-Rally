@@ -36,6 +36,8 @@ describe("notificationHref", () => {
     ["booking_received", "/list-your-court/bookings"],
     ["credits_added", "/profile/credits"],
     ["post_liked", "/court-side"],
+    ["post_reshared", "/court-side"],
+    ["post_mention", "/court-side"],
     ["club_approved", "/clubs"],
     ["event_invite", "/events"],
   ])("routes a legacy %s to %s", (type, expected) => {

@@ -25,7 +25,11 @@ const TYPE_ROUTES: Record<string, string> = {
   credits_added: "/profile/credits",
   post_liked: "/court-side",
   post_reshared: "/court-side",
-  post_mentioned: "/court-side",
+  // The trigger inserts type 'post_mention' (20260810000032), not
+  // 'post_mentioned' — this key has to match that exactly or every
+  // mention notification falls through to the generic /notifications
+  // default below instead of landing on the post.
+  post_mention: "/court-side",
   club_joined: "/clubs",
   club_approved: "/clubs",
   club_member_request: "/clubs",
