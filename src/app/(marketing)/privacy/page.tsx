@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { LegalDocumentView } from "@/components/legal/LegalDocumentView";
 import { PRIVACY } from "@/lib/legalContent";
-import { LEGAL_REVIEW_STATUS } from "@/lib/legal";
-
 export const metadata: Metadata = { title: "Privacy Policy" };
 
 /**
@@ -12,5 +10,5 @@ export const metadata: Metadata = { title: "Privacy Policy" };
  * them — only the User Agreement carries a version.
  */
 export default function PrivacyPage() {
-  return <LegalDocumentView document={PRIVACY} effectiveDate="17 August 2026" reviewStatus={LEGAL_REVIEW_STATUS} />;
+  return <LegalDocumentView document={PRIVACY} effectiveDate="17 August 2026" />;
 }

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
 import type { LegalDocument } from "@/lib/legalContent";
 
 /**
@@ -11,20 +10,18 @@ import type { LegalDocument } from "@/lib/legalContent";
  * this is enforceable" in front of a customer would undermine the very
  * clause it sits under.
  *
- * The review banner, by contrast, IS shown. These documents genuinely
- * have not been through a lawyer, and a reader deciding whether to trust
- * the platform with money is entitled to know that.
+ * No review-status banner here either — removed at the business owner's
+ * direction. LEGAL_REVIEW_STATUS (lib/legal.ts) still exists and still
+ * appears in the counsel PDF; it's just no longer shown to customers.
  */
 export function LegalDocumentView({
   document,
   version,
   effectiveDate,
-  reviewStatus,
 }: {
   document: LegalDocument;
   version?: string;
   effectiveDate: string;
-  reviewStatus: string;
 }) {
   return (
     <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8">
@@ -33,15 +30,6 @@ export function LegalDocumentView({
         {version ? `Version ${version} · ` : ""}
         Last updated {effectiveDate}
       </p>
-
-      <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        <p>
-          <span className="font-medium text-foreground">{reviewStatus}.</span> This document describes how AIR/Rally
-          actually works today and is written in good faith, but it has not yet been reviewed by a qualified lawyer. If
-          anything here conflicts with Philippine law, the law applies.
-        </p>
-      </div>
 
       <div className="mt-8 flex flex-col gap-6">
         {document.intro.map((paragraph, i) => (

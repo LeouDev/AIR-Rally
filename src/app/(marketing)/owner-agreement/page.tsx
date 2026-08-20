@@ -18,7 +18,6 @@ export default function OwnerAgreementPage() {
       document={OWNER_AGREEMENT}
       version={CURRENT_OWNER_AGREEMENT_VERSION}
       effectiveDate="18 August 2026"
-      reviewStatus="Pending review by qualified counsel"
     />
   );
 }
