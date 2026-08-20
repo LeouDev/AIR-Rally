@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { sendEmail } from "@/lib/services/email";
+import { renderBookingReceiptEmail } from "@/lib/emails/bookingReceiptEmail";
+import { renderSignupWelcomeEmail } from "@/lib/emails/signupWelcomeEmail";
 import { notificationHref, displayMessage } from "@/lib/notificationRoutes";
 import { getBookingById } from "@/lib/services/bookings";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
@@ -100,16 +102,25 @@ export async function POST(request: Request): Promise<Response> {
     const href = notificationHref(notification);
     const link = href.startsWith("http") ? href : `${siteUrl}${href}`;
 
-    // A receipt when we can build one honestly, the generic template
-    // otherwise. Never let a failed lookup here turn into a failed email —
-    // same fail-open posture as everything else in this route.
-    const receiptHtml =
-      notification.type === "booking_confirmed" ? await tryBuildBookingReceiptEmail(supabase, notification.link_url, link) : null;
+    // A dedicated template when we can build one honestly, the generic
+    // one otherwise. Never let a failed lookup here turn into a failed
+    // email — same fail-open posture as everything else in this route.
+    // email_confirmed is the ONLY signal that a just-confirmed email/
+    // password signup actually finished (see this migration's own
+    // comment: 20260810000075_email_confirmed_notification.sql) — it's
+    // fully static, unlike the receipt, so there's nothing to look up.
+    const customHtml =
+      notification.type === "booking_confirmed"
+        ? await tryBuildBookingReceiptEmail(supabase, notification.link_url, link)
+        : notification.type === "email_confirmed"
+          ? renderSignupWelcomeEmail(siteUrl)
+          : null;
+    const subject = notification.type === "email_confirmed" ? "You're ready to play on AIR/Rally" : notification.title;
 
     const sent = await sendEmail({
       to: data.user.email,
-      subject: notification.title,
-      html: receiptHtml ?? renderNotificationEmail({ title: notification.title, message: displayMessage(notification.message), link }),
+      subject,
+      html: customHtml ?? renderNotificationEmail({ title: notification.title, message: displayMessage(notification.message), link }),
     });
 
     return NextResponse.json({ received: true, emailed: sent });
@@ -187,56 +198,6 @@ async function tryBuildBookingReceiptEmail(
 function formatMoney(amountMinorUnits: number, currency: string): string {
   const symbol = currency === "PHP" ? "₱" : `${currency} `;
   return `${symbol}${(amountMinorUnits / 100).toFixed(2)}`;
-}
-
-function renderBookingReceiptEmail(input: {
-  confirmationCode: string;
-  courtName: string;
-  venueName: string;
-  when: string;
-  amountPaid: string;
-  paidWithCredits: boolean;
-  link: string;
-}): string {
-  const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return `<!doctype html>
-<html>
-  <body style="margin:0;padding:24px;background:#f5f1ea;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-    <table role="presentation" width="100%" style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;">
-      <tr><td style="padding:24px;">
-        <p style="margin:0 0 4px;font-size:13px;font-weight:600;letter-spacing:0.02em;color:#ea580c;">AIR/RALLY</p>
-        <h1 style="margin:0 0 4px;font-size:20px;line-height:1.3;color:#1f2937;">You&#39;re on court.</h1>
-        <p style="margin:0 0 20px;font-size:14px;color:#6b7280;">${input.paidWithCredits ? "Paid with AIR/Rally Credits." : "Paid in full."} Show this code at the venue.</p>
-
-        <div style="margin:0 0 20px;padding:16px;background:#f3f4f6;border-radius:12px;text-align:center;">
-          <p style="margin:0 0 4px;font-size:11px;font-weight:600;letter-spacing:0.08em;color:#6b7280;text-transform:uppercase;">Confirmation code</p>
-          <p style="margin:0;font-size:26px;font-weight:700;letter-spacing:0.06em;color:#1f2937;font-family:monospace;">${escape(input.confirmationCode)}</p>
-        </div>
-
-        <table role="presentation" width="100%" style="margin:0 0 20px;font-size:14px;color:#1f2937;">
-          <tr>
-            <td style="padding:6px 0;color:#6b7280;">Venue</td>
-            <td style="padding:6px 0;text-align:right;font-weight:600;">${escape(input.venueName)}</td>
-          </tr>
-          <tr>
-            <td style="padding:6px 0;color:#6b7280;">Court</td>
-            <td style="padding:6px 0;text-align:right;font-weight:600;">${escape(input.courtName)}</td>
-          </tr>
-          <tr>
-            <td style="padding:6px 0;color:#6b7280;">Date &amp; time</td>
-            <td style="padding:6px 0;text-align:right;font-weight:600;font-family:monospace;">${escape(input.when)}</td>
-          </tr>
-          <tr>
-            <td style="padding:6px 0;color:#6b7280;">Amount paid</td>
-            <td style="padding:6px 0;text-align:right;font-weight:600;font-family:monospace;">${escape(input.amountPaid)}</td>
-          </tr>
-        </table>
-
-        <a href="${input.link}" style="display:inline-block;padding:10px 20px;background:#ea580c;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">View booking</a>
-      </td></tr>
-    </table>
-  </body>
-</html>`;
 }
 
 /**
