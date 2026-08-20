@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getSiteUrl } from "@/lib/site";
 import { CURRENT_AGREEMENT_VERSION } from "@/lib/legal";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
+import { sendEmail } from "@/lib/services/email";
+import { renderSignupWelcomeEmail } from "@/lib/emails/signupWelcomeEmail";
 import {
   loginSchema,
   signUpSchema,
@@ -99,7 +101,25 @@ export async function signUp(
     }
   }
 
-  return { success: true, data: { requiresEmailConfirmation: data.session === null } };
+  const requiresEmailConfirmation = data.session === null;
+
+  // Only when there's no confirmation link to wait for. Otherwise this
+  // fires later, off the actual email_confirmed_at transition (see
+  // supabase/migrations/20260810000075_email_confirmed_notification.sql)
+  // — this function runs before that link even exists, so it has no way
+  // to know whether, or when, anyone clicks it.
+  if (!requiresEmailConfirmation) {
+    // Fire-and-forget, same posture as the agreement RPC above — the
+    // account already exists, so a mail-provider hiccup must not turn
+    // into a failed signup. sendEmail() itself never throws.
+    await sendEmail({
+      to: email,
+      subject: "You're ready to play on AIR/Rally",
+      html: renderSignupWelcomeEmail(siteUrl),
+    });
+  }
+
+  return { success: true, data: { requiresEmailConfirmation } };
 }
 
 /**
@@ -138,6 +158,19 @@ export async function completeOAuthSignup(values: CompleteOAuthSignupValues): Pr
   if (error) {
     logServerError("auth.completeOAuthSignup", error);
     return { success: false, error: getFriendlyErrorMessage(error, "We couldn't finish setting up your account.") };
+  }
+
+  // Same welcome email as the email/password path — OAuth just reaches
+  // this point by a different route (see this function's own doc
+  // comment). Best-effort: no address on the OAuth profile is rare but
+  // possible, and not worth failing an otherwise-complete signup over.
+  if (user.email) {
+    const siteUrl = await getSiteUrl();
+    await sendEmail({
+      to: user.email,
+      subject: "You're ready to play on AIR/Rally",
+      html: renderSignupWelcomeEmail(siteUrl),
+    });
   }
 
   return { success: true, data: undefined };
