@@ -45,7 +45,10 @@ export default async function CourtSidePage() {
   const [{ posts, nextCursor }, events] = await Promise.all([listFeedPosts(supabase), listUpcomingEvents(supabase)]);
 
   const postIds = posts.map((p) => p.id);
-  const eventIds = events.map((e) => e.id);
+  const postEventIds = posts.map((p) => p.event?.id).filter((id): id is string => id !== undefined && id !== null);
+  // Covers both the "Happening Now" sidebar and any shared-game card a
+  // post embeds — one status map serves both, keyed by event id.
+  const eventIds = Array.from(new Set([...events.map((e) => e.id), ...postEventIds]));
   const authorIds = Array.from(new Set(posts.map((p) => p.user_id)));
 
   const [likedPostIds, resharedPostIds, followingIds, myEventStatuses, followCounts, clubMentions] = await Promise.all([

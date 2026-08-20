@@ -721,6 +721,8 @@ export function CourtSideFeed({
                 expanded={expandedPostIds.has(post.id)}
                 onToggleLike={toggleLike}
                 onToggleFollow={toggleFollow}
+                eventStatus={post.event ? (eventStatuses.get(post.event.id) ?? null) : null}
+                onToggleJoinEvent={toggleJoinEvent}
                 onToggleComments={toggleComments}
                 onDeleteOwnPost={handleDeleteOwnPost}
                 onShare={() => setShareOpen(true)}

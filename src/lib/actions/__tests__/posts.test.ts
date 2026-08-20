@@ -77,7 +77,7 @@ describe("createPostAction", () => {
     const result = await createPostAction({ content: "hi" });
 
     expect(result.success).toBe(true);
-    expect(mockCreatePost).toHaveBeenCalledWith(expect.anything(), "user-1", "hi", undefined, []);
+    expect(mockCreatePost).toHaveBeenCalledWith(expect.anything(), "user-1", "hi", undefined, [], undefined);
   });
 });
 

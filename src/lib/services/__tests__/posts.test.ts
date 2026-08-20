@@ -56,7 +56,7 @@ describe("listFeedPosts", () => {
     );
     const { posts, nextCursor } = await listFeedPosts(supabase);
     expect(posts).toEqual([
-      { ...POST_ROW, effective_at: POST_ROW.created_at, resharer_id: null, author: AUTHOR, resharer: null },
+      { ...POST_ROW, effective_at: POST_ROW.created_at, resharer_id: null, author: AUTHOR, resharer: null, event: null },
     ]);
     expect(nextCursor).toBeNull();
   });
@@ -107,7 +107,7 @@ describe("listPostsByUser", () => {
       public_profiles: { data: [AUTHOR], error: null },
     });
     const { posts } = await listPostsByUser(supabase, "user-1");
-    expect(posts).toEqual([{ ...POST_ROW, author: AUTHOR }]);
+    expect(posts).toEqual([{ ...POST_ROW, author: AUTHOR, event: null }]);
   });
 });
 

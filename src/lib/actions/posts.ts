@@ -43,7 +43,14 @@ export async function createPostAction(
   }
 
   try {
-    const post = await createPost(supabase, user.id, parsed.data.content, parsed.data.imageUrl, parsed.data.imagePaths ?? []);
+    const post = await createPost(
+      supabase,
+      user.id,
+      parsed.data.content,
+      parsed.data.imageUrl,
+      parsed.data.imagePaths ?? [],
+      parsed.data.eventId
+    );
 
     // Best-effort: the post is already published, so a mention-recording
     // failure is logged rather than surfaced as a failed post.

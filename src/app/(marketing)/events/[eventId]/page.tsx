@@ -8,6 +8,7 @@ import { listMyEventStatuses, listPendingJoinRequests } from "@/lib/services/eve
 import { calculateSplit, formatShare } from "@/lib/eventSplit";
 import { EventJoinButton } from "@/components/events/EventJoinButton";
 import { EventJoinRequests } from "@/components/events/EventJoinRequests";
+import { ShareToCourtSideButton } from "@/components/events/ShareToCourtSideButton";
 import { matchStatusLabel } from "@/lib/ranked";
 import type { CommunityEvent, PublicProfile } from "@/lib/supabase/types";
 import { BackLink } from "@/components/shared/BackLink";
@@ -173,6 +174,10 @@ export default async function EventDetailPage({ params }: { params: Promise<{ ev
       )}
 
       {isOrganiser && <EventJoinRequests eventId={game.id} requests={pendingRequests} />}
+
+      {user && (isOrganiser || myStatus === "joined") && (
+        <ShareToCourtSideButton eventId={game.id} title={game.title} />
+      )}
 
       {user ? (
         <EventJoinButton eventId={game.id} status={myStatus} isFull={isFull} isOrganiser={isOrganiser} />

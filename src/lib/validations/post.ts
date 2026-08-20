@@ -5,6 +5,8 @@ export const createPostSchema = z.object({
   imagePaths: z.array(z.string().max(500)).max(5).optional(),
   content: z.string().trim().min(1, "Say something first.").max(280),
   imageUrl: z.string().trim().url().optional(),
+  /** Set to embed a joinable match card — "share this game" into COURT/Side. */
+  eventId: z.uuid().optional(),
 });
 export type CreatePostValues = z.infer<typeof createPostSchema>;
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { MessageCircle, Repeat2, Heart, Share2, Trash2 } from "lucide-react";
+import { MessageCircle, Repeat2, Heart, Share2, Trash2, CalendarDays, MapPin, Users } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { PostComments } from "@/components/court-side/PostComments";
@@ -10,9 +10,78 @@ import { AdminDeletePostButton } from "@/components/admin/AdminDeletePostButton"
 import { ReportButton } from "@/components/trust/ReportButton";
 import type { PostWithAuthor } from "@/lib/services/posts";
 import type { ClubMentionMap } from "@/lib/services/clubs";
-import type { PublicProfile } from "@/lib/supabase/types";
+import type { EventAttendeeStatus, PublicProfile } from "@/lib/supabase/types";
 import { postImagePublicUrl } from "@/lib/services/postImages";
 import { cn } from "@/lib/utils";
+
+function formatEventWhen(iso: string): string {
+  return new Date(iso).toLocaleString("en-PH", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+const JOIN_LABEL: Record<EventAttendeeStatus, string> = {
+  pending_approval: "Requested",
+  joined: "Joined",
+  waitlisted: "Waitlisted",
+  cancelled: "Join",
+};
+
+/** The card a "share this game" post embeds — post.event is populated by
+ * listFeedPosts/listPostsByUser whenever post.event_id is set. Join is
+ * only interactive where the parent tracks event status (the main feed);
+ * elsewhere (a profile's own posts) it falls back to a plain link through
+ * to the full game page, which has its own working join/approve UI. */
+function EmbeddedEventCard({
+  event,
+  status,
+  onToggleJoin,
+}: {
+  event: NonNullable<PostWithAuthor["event"]>;
+  status?: EventAttendeeStatus | null;
+  onToggleJoin?: (eventId: string) => void;
+}) {
+  return (
+    <Link
+      href={`/events/${event.id}`}
+      className="mt-3 flex flex-col gap-2 rounded-xl border border-border bg-muted/30 p-3 transition-colors hover:border-primary/40"
+    >
+      <p className="text-sm font-semibold text-foreground">{event.title}</p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <CalendarDays className="size-3.5" aria-hidden="true" />
+          {formatEventWhen(event.start_time)}
+        </span>
+        {event.venue && (
+          <span className="flex items-center gap-1">
+            <MapPin className="size-3.5" aria-hidden="true" />
+            {event.venue.name}
+          </span>
+        )}
+        <span className="flex items-center gap-1">
+          <Users className="size-3.5" aria-hidden="true" />
+          {event.attendeeCount}
+          {event.max_players ? ` / ${event.max_players}` : ""} playing
+          {event.isFull ? " · full" : ""}
+        </span>
+      </div>
+      {onToggleJoin ? (
+        <Button
+          type="button"
+          size="sm"
+          variant={status ? "secondary" : "outline"}
+          className="h-7 w-fit shrink-0 px-2.5 text-xs"
+          onClick={(e) => {
+            e.preventDefault();
+            onToggleJoin(event.id);
+          }}
+        >
+          {status ? JOIN_LABEL[status] : "Ask to join"}
+        </Button>
+      ) : (
+        <span className="text-xs font-medium text-primary">View game →</span>
+      )}
+    </Link>
+  );
+}
 
 export function initialsFrom(name: string) {
   return name
@@ -79,6 +148,10 @@ type PostCardProps = {
    * every post is theirs by definition.
    */
   resharer?: PublicProfile | null;
+  /** The viewer's status on post.event, if this post shared a game and
+   * the parent tracks it (only CourtSideFeed does today). */
+  eventStatus?: EventAttendeeStatus | null;
+  onToggleJoinEvent?: (eventId: string) => void;
 };
 
 /**
@@ -104,6 +177,8 @@ export function PostCard({
   reshared,
   onToggleReshare,
   resharer,
+  eventStatus,
+  onToggleJoinEvent,
 }: PostCardProps) {
   const authorName = post.author?.display_name || "Player";
   const isOwnPost = post.user_id === currentUserId;
@@ -169,6 +244,8 @@ export function PostCard({
       <p className="mt-3 text-[0.9375rem]/[1.375rem] text-foreground text-pretty">
         {highlightMentions(post.content, clubMentions)}
       </p>
+
+      {post.event && <EmbeddedEventCard event={post.event} status={eventStatus} onToggleJoin={onToggleJoinEvent} />}
 
       {post.image_paths.length > 0 && (
         <div

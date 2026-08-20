@@ -1,4 +1,4 @@
-import { listUpcomingEvents, createEvent, joinEvent, leaveEvent, listMyEventStatuses } from "@/lib/services/events";
+import { listUpcomingEvents, createEvent, joinEvent, leaveEvent, listMyEventStatuses, listEmbeddedEvents } from "@/lib/services/events";
 import { createTableMockSupabase, createMockSupabase, postgrestError } from "@/lib/test-helpers/mockSupabase";
 import type { CommunityEvent, PublicProfile } from "@/lib/supabase/types";
 
@@ -163,6 +163,41 @@ describe("listMyEventStatuses", () => {
     const supabase = createMockSupabase({ data: [{ event_id: "event-1", status: "pending_approval" }], error: null });
     await expect(listMyEventStatuses(supabase, "user-1", ["event-1", "event-2"])).resolves.toEqual(
       new Map([["event-1", "pending_approval"]])
+    );
+  });
+});
+
+describe("listEmbeddedEvents", () => {
+  it("returns an empty map without querying when eventIds is empty", async () => {
+    const supabase = createMockSupabase({ data: [], error: null });
+    await expect(listEmbeddedEvents(supabase, [])).resolves.toEqual(new Map());
+  });
+
+  // Backs a "share this game" post's embedded card — same summary shape
+  // as listUpcomingEvents, batched by an arbitrary id set instead of
+  // "upcoming only".
+  it("attaches venue and computes isFull, keyed by event id", async () => {
+    const supabase = createTableMockSupabase({
+      events: { data: [EVENT_ROW], error: null },
+      venues: { data: [{ id: "venue-1", name: "Ayala Courts", city: "Cebu City" }], error: null },
+    });
+    const result = await listEmbeddedEvents(supabase, [EVENT_ROW.id]);
+    expect(result).toEqual(
+      new Map([
+        [
+          "event-1",
+          {
+            id: "event-1",
+            title: "Sunset Social Rally",
+            start_time: "2099-01-01T00:00:00Z",
+            venue: { id: "venue-1", name: "Ayala Courts", city: "Cebu City" },
+            attendeeCount: 2,
+            max_players: null,
+            isFull: false,
+            creator_id: "user-1",
+          },
+        ],
+      ])
     );
   });
 });

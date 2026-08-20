@@ -1,6 +1,7 @@
 import type { SupabaseClient, PostgrestError } from "@supabase/supabase-js";
 import type { Database, Post, PostComment, PublicProfile } from "@/lib/supabase/types";
 import { POST_IMAGES_BUCKET } from "@/lib/services/postImages";
+import { listEmbeddedEvents, type EmbeddedEvent } from "@/lib/services/events";
 import { logServerError } from "@/lib/errors";
 
 type Client = SupabaseClient<Database>;
@@ -11,7 +12,9 @@ function isUniqueViolation(error: PostgrestError): boolean {
   return error.code === UNIQUE_VIOLATION;
 }
 
-export type PostWithAuthor = Post & { author: PublicProfile | null };
+/** `event` is populated whenever post.event_id is set — a post that
+ * shared a match embeds a joinable card, everywhere a post renders. */
+export type PostWithAuthor = Post & { author: PublicProfile | null; event?: EmbeddedEvent | null };
 
 /** A row as court_side_feed() returns it: a post plus the two feed-ordering fields. */
 type FeedRow = Post & { effective_at: string; resharer_id: string | null };
@@ -24,6 +27,16 @@ type FeedRow = Post & { effective_at: string; resharer_id: string | null };
  */
 export type FeedPost = PostWithAuthor & { effective_at: string; resharer_id: string | null; resharer: PublicProfile | null };
 export type PostCommentWithAuthor = PostComment & { author: PublicProfile | null };
+
+/** Attaches embedded event summaries to whichever rows carry an event_id — shared by listFeedPosts/listPostsByUser. */
+async function attachEvents<T extends { event_id: string | null }>(
+  supabase: Client,
+  rows: T[]
+): Promise<(T & { event: EmbeddedEvent | null })[]> {
+  const eventIds = Array.from(new Set(rows.map((r) => r.event_id).filter((id): id is string => id !== null)));
+  const eventsById = await listEmbeddedEvents(supabase, eventIds);
+  return rows.map((row) => ({ ...row, event: row.event_id ? (eventsById.get(row.event_id) ?? null) : null }));
+}
 
 const FEED_PAGE_SIZE = 20;
 
@@ -79,9 +92,12 @@ export async function listFeedPosts(
   // the extra ids do.
   const authorIds = rows.map((r) => r.user_id);
   const resharerIds = rows.map((r) => r.resharer_id).filter((id): id is string => id !== null);
-  const profiles = await profilesByIds(supabase, [...authorIds, ...resharerIds]);
+  const [profiles, rowsWithEvents] = await Promise.all([
+    profilesByIds(supabase, [...authorIds, ...resharerIds]),
+    attachEvents(supabase, rows),
+  ]);
 
-  const posts: FeedPost[] = rows.map((row) => ({
+  const posts: FeedPost[] = rowsWithEvents.map((row) => ({
     ...row,
     author: profiles.get(row.user_id) ?? null,
     resharer: row.resharer_id ? (profiles.get(row.resharer_id) ?? null) : null,
@@ -111,7 +127,9 @@ export async function listPostsByUser(
   const { data, error } = await query;
   if (error) throw error;
 
-  const posts = await attachAuthors(supabase, data);
+  const [withAuthors, withEvents] = await Promise.all([attachAuthors(supabase, data), attachEvents(supabase, data)]);
+  const eventById = new Map(withEvents.map((row) => [row.id, row.event]));
+  const posts = withAuthors.map((row) => ({ ...row, event: eventById.get(row.id) ?? null }));
   const nextCursor = data.length === limit ? data[data.length - 1].created_at : null;
   return { posts, nextCursor };
 }
@@ -121,11 +139,12 @@ export async function createPost(
   userId: string,
   content: string,
   imageUrl?: string | null,
-  imagePaths: string[] = []
+  imagePaths: string[] = [],
+  eventId?: string | null
 ): Promise<Post> {
   const { data, error } = await supabase
     .from("posts")
-    .insert({ user_id: userId, content, image_url: imageUrl ?? null, image_paths: imagePaths })
+    .insert({ user_id: userId, content, image_url: imageUrl ?? null, image_paths: imagePaths, event_id: eventId ?? null })
     .select()
     .single();
   if (error) throw error;
