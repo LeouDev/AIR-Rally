@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { LegalDocumentView } from "@/components/legal/LegalDocumentView";
 import { TERMS } from "@/lib/legalContent";
-import { CURRENT_AGREEMENT_VERSION, LEGAL_REVIEW_STATUS } from "@/lib/legal";
+import { CURRENT_AGREEMENT_VERSION } from "@/lib/legal";
 
 export const metadata: Metadata = { title: "User Agreement" };
 
@@ -17,7 +17,6 @@ export default function TermsPage() {
       document={TERMS}
       version={CURRENT_AGREEMENT_VERSION}
       effectiveDate="17 August 2026"
-      reviewStatus={LEGAL_REVIEW_STATUS}
     />
   );
 }
