@@ -21,7 +21,7 @@ export async function AppHome({ userId }: { userId: string }) {
   const [profile, bookings, feed] = await Promise.all([
     getProfile(supabase, userId),
     listMyBookingsWithDetails(supabase, userId),
-    listFeedPosts(supabase, { limit: 1 }),
+    listFeedPosts(supabase, { scope: "for_you", limit: 1 }),
   ]);
 
   const upcoming = nextUpcomingBooking(bookings);

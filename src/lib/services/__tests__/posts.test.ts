@@ -54,7 +54,12 @@ describe("listFeedPosts", () => {
       { public_profiles: { data: [AUTHOR], error: null } },
       { court_side_feed: { data: [feedRow()], error: null } }
     );
-    const { posts, nextCursor } = await listFeedPosts(supabase);
+    const { posts, nextCursor } = await listFeedPosts(supabase, { scope: "for_you" });
+    // p_scope is required with no default on the RPC itself (migration
+    // 20260810000077) precisely so a caller can never silently omit it
+    // and land on an unfiltered feed by accident — assert it's actually
+    // on the wire, not just accepted by this function's own TS type.
+    expect(supabase.rpc).toHaveBeenCalledWith("court_side_feed", expect.objectContaining({ p_scope: "for_you" }));
     expect(posts).toEqual([
       { ...POST_ROW, effective_at: POST_ROW.created_at, resharer_id: null, author: AUTHOR, resharer: null, event: null },
     ]);
@@ -69,8 +74,8 @@ describe("listFeedPosts", () => {
       { public_profiles: { data: [AUTHOR], error: null } },
       { court_side_feed: { data: fullPage, error: null } }
     );
-    const { nextCursor } = await listFeedPosts(supabase);
-    expect(nextCursor).toBe(fullPage[19].effective_at);
+    const { nextCursor } = await listFeedPosts(supabase, { scope: "for_you" });
+    expect(nextCursor).toEqual({ effectiveAt: fullPage[19].effective_at, id: fullPage[19].id });
   });
 
   it("attaches the resharer so the card can say who put it in the feed", async () => {
@@ -78,7 +83,7 @@ describe("listFeedPosts", () => {
       { public_profiles: { data: [AUTHOR, RESHARER], error: null } },
       { court_side_feed: { data: [feedRow({ resharer_id: RESHARER.id, effective_at: "2026-08-15T00:00:00Z" })], error: null } }
     );
-    const { posts } = await listFeedPosts(supabase);
+    const { posts } = await listFeedPosts(supabase, { scope: "for_you" });
     expect(posts[0].resharer).toEqual(RESHARER);
     // The author is still the original poster — a reshare never reattributes.
     expect(posts[0].author).toEqual(AUTHOR);
@@ -89,14 +94,40 @@ describe("listFeedPosts", () => {
       { public_profiles: { data: [AUTHOR], error: null } },
       { court_side_feed: { data: [feedRow()], error: null } }
     );
-    const { posts } = await listFeedPosts(supabase);
+    const { posts } = await listFeedPosts(supabase, { scope: "for_you" });
     expect(posts[0].resharer).toBeNull();
   });
 
   it("skips the author lookup entirely when there are no posts", async () => {
     const supabase = createTableMockSupabase({}, { court_side_feed: { data: [], error: null } });
-    const { posts } = await listFeedPosts(supabase);
+    const { posts } = await listFeedPosts(supabase, { scope: "for_you" });
     expect(posts).toEqual([]);
+  });
+
+  it("passes the 'following' scope through unchanged", async () => {
+    const supabase = createTableMockSupabase(
+      { public_profiles: { data: [AUTHOR], error: null } },
+      { court_side_feed: { data: [feedRow()], error: null } }
+    );
+    await listFeedPosts(supabase, { scope: "following" });
+    expect(supabase.rpc).toHaveBeenCalledWith("court_side_feed", expect.objectContaining({ p_scope: "following" }));
+  });
+
+  it("sends both cursor halves together, never just effective_at", async () => {
+    // The RPC raises Postgres 22023 on a half-supplied cursor
+    // (court_side_feed_scope.sql) precisely because effective_at alone
+    // is not unique — a stray single-field cursor here would eventually
+    // reach that guard in production. This is the client-side half of
+    // making that state unrepresentable: FeedCursor requires both.
+    const supabase = createTableMockSupabase(
+      { public_profiles: { data: [AUTHOR], error: null } },
+      { court_side_feed: { data: [feedRow()], error: null } }
+    );
+    await listFeedPosts(supabase, { scope: "for_you", cursor: { effectiveAt: "2026-08-11T00:00:00Z", id: "post-0" } });
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "court_side_feed",
+      expect.objectContaining({ p_cursor: "2026-08-11T00:00:00Z", p_cursor_id: "post-0" })
+    );
   });
 });
 

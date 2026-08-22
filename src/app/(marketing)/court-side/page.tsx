@@ -42,7 +42,10 @@ export default async function CourtSidePage() {
   }
 
   const supabase = await createClient();
-  const [{ posts, nextCursor }, events] = await Promise.all([listFeedPosts(supabase), listUpcomingEvents(supabase)]);
+  const [{ posts, nextCursor }, events] = await Promise.all([
+    listFeedPosts(supabase, { scope: "for_you" }),
+    listUpcomingEvents(supabase),
+  ]);
 
   const postIds = posts.map((p) => p.id);
   const postEventIds = posts.map((p) => p.event?.id).filter((id): id is string => id !== undefined && id !== null);

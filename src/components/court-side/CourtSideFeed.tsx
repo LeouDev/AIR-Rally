@@ -11,7 +11,7 @@ import { PostCard, initialsFrom } from "@/components/court-side/PostCard";
 import { FollowListDialog } from "@/components/court-side/FollowListDialog";
 import { ShareDialog } from "@/components/court-side/ShareDialog";
 import { createClient } from "@/lib/supabase/client";
-import { listFeedPosts, listLikedPostIds, listResharedPostIds, type FeedPost } from "@/lib/services/posts";
+import { listFeedPosts, listLikedPostIds, listResharedPostIds, type FeedCursor, type FeedPost } from "@/lib/services/posts";
 import { searchPublicProfiles } from "@/lib/services/profiles";
 import { searchClubs, clubMentionHandle, type ClubMentionMap } from "@/lib/services/clubs";
 import { uploadPostImages, MAX_POST_IMAGES } from "@/lib/services/postImages";
@@ -21,22 +21,24 @@ import { toggleFollowAction } from "@/lib/actions/follows";
 import { listFollowerProfiles, listFollowingProfiles } from "@/lib/services/follows";
 import { toggleEventJoinAction } from "@/lib/actions/events";
 import type { EventWithDetails } from "@/lib/services/events";
-import type { Club, EventAttendeeStatus, PublicProfile } from "@/lib/supabase/types";
+import type { Club, CourtSideFeedScope, EventAttendeeStatus, PublicProfile } from "@/lib/supabase/types";
 import { suggestedPlayersFromFeed, postCountLabel } from "@/lib/suggestedPlayers";
 
 // 'Near you' is not offered: it needs a device location, which the web
 // client has no way to ask a browser for on every visit without a
 // permission prompt no one asked to see. Mobile removed the same tab
 // for the same reason (expo-location would be a new native dependency
-// moving the OTA fingerprint) — see its court-side/index.tsx. Both
-// remaining tabs are also unfiltered today: the feed always comes from
-// court_side_feed(p_limit, p_cursor) (lib/services/posts.ts), which has
-// no scope parameter yet, so switching tabs below moves the selection
-// and nothing else. That gap gets closed when the RPC learns a scope
-// argument (see migration 20260810000077); this component announcing
-// otherwise in the meantime — the toast this replaced — was the actual
-// bug, not the missing filter itself.
+// moving the OTA fingerprint) — see its court-side/index.tsx.
 const FEED_TABS = ["For you", "Following"] as const;
+
+// UI label -> the RPC's own scope enum (public.court_side_scope).
+// Kept as an explicit map rather than a case transform so the two
+// vocabularies (display copy, database enum) can drift independently —
+// changing a tab's label should never risk silently changing the query.
+const FEED_TAB_SCOPE: Record<(typeof FEED_TABS)[number], CourtSideFeedScope> = {
+  "For you": "for_you",
+  Following: "following",
+};
 
 function formatEventDate(iso: string) {
   const date = new Date(iso);
@@ -61,7 +63,7 @@ type CourtSideFeedProps = {
   avatarUrl: string | null;
   isAdmin: boolean;
   initialPosts: FeedPost[];
-  initialNextCursor: string | null;
+  initialNextCursor: FeedCursor | null;
   initialLikedPostIds: string[];
   initialFollowingIds: string[];
   initialEvents: EventWithDetails[];
@@ -103,6 +105,10 @@ export function CourtSideFeed({
   const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [switchingTab, setSwitchingTab] = useState(false);
+  // Guards against a slow response from an earlier tab switch landing
+  // after a faster one — see switchTab() below.
+  const switchRequestId = useRef(0);
   const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set(initialLikedPostIds));
   const [resharedPostIds, setResharedPostIds] = useState<Set<string>>(new Set(initialResharedPostIds));
   // Ids of people actually chosen from the "@" picker. Only these get a
@@ -439,7 +445,10 @@ export function CourtSideFeed({
     setLoadingMore(true);
     try {
       const supabase = createClient();
-      const { posts: morePosts, nextCursor: newCursor } = await listFeedPosts(supabase, { cursor: nextCursor });
+      const { posts: morePosts, nextCursor: newCursor } = await listFeedPosts(supabase, {
+        scope: FEED_TAB_SCOPE[activeTab],
+        cursor: nextCursor,
+      });
       const morePostIds = morePosts.map((p) => p.id);
       const [moreLikedIds, moreResharedIds] = await Promise.all([
         listLikedPostIds(supabase, currentUserId, morePostIds),
@@ -453,6 +462,45 @@ export function CourtSideFeed({
       toast.error("We couldn't load more posts.");
     } finally {
       setLoadingMore(false);
+    }
+  }
+
+  /**
+   * Switching tabs now genuinely changes the feed, so it fetches page
+   * one of the new scope from scratch rather than moving a selection
+   * over data that was never filtered — replaces the post list and its
+   * cursor entirely rather than appending, the same shape a fresh page
+   * load would produce for that scope.
+   *
+   * A tab switch that is still in flight is dropped rather than
+   * cancelled: `requestId` lets a stale response arriving after a newer
+   * request started detect that it is stale and no-op, so pressing
+   * Following then For you in quick succession can never have the
+   * slower response overwrite the faster one's result.
+   */
+  async function switchTab(tab: (typeof FEED_TABS)[number]) {
+    if (tab === activeTab) return;
+    setActiveTab(tab);
+    const requestId = ++switchRequestId.current;
+    setSwitchingTab(true);
+    try {
+      const supabase = createClient();
+      const { posts: newPosts, nextCursor: newCursor } = await listFeedPosts(supabase, { scope: FEED_TAB_SCOPE[tab] });
+      if (requestId !== switchRequestId.current) return;
+      const newPostIds = newPosts.map((p) => p.id);
+      const [newLikedIds, newResharedIds] = await Promise.all([
+        listLikedPostIds(supabase, currentUserId, newPostIds),
+        listResharedPostIds(supabase, currentUserId, newPostIds),
+      ]);
+      if (requestId !== switchRequestId.current) return;
+      setPosts(newPosts);
+      setLikedPostIds(new Set(newLikedIds));
+      setResharedPostIds(new Set(newResharedIds));
+      setNextCursor(newCursor);
+    } catch {
+      if (requestId === switchRequestId.current) toast.error("We couldn't load that feed.");
+    } finally {
+      if (requestId === switchRequestId.current) setSwitchingTab(false);
     }
   }
 
@@ -482,11 +530,7 @@ export function CourtSideFeed({
           </button>
         </div>
 
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as (typeof FEED_TABS)[number])}
-          className="mt-6"
-        >
+        <Tabs value={activeTab} onValueChange={(value) => switchTab(value as (typeof FEED_TABS)[number])} className="mt-6">
           <TabsList variant="line">
             {FEED_TABS.map((tab) => (
               <TabsTrigger key={tab} value={tab}>
@@ -630,129 +674,135 @@ export function CourtSideFeed({
         </div>
 
         {/* Posts */}
-        <div className="mt-8 flex items-center gap-3 text-xs font-semibold text-muted-foreground">
-          <span>Trending in your community</span>
-          <span className="h-px flex-1 bg-border" />
-        </div>
-
-        {posts.length === 0 ? (
-          /* A new user's feed is built around finding people to play with,
-             not an empty box. With nobody posting yet there is nobody to
-             suggest either, so this falls back to the two things that DO
-             start a feed: post something, or join a club. */
-          <div className="mt-6 flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <h3 className="text-2xl/[1.875rem] font-semibold tracking-[-0.01em] text-foreground">
-                Your feed starts with four people
-              </h3>
-              <p className="text-[0.9375rem]/[1.375rem] text-subtle text-pretty">
-                Follow players from courts near you. When they post an open game, you&apos;ll see it
-                here first.
-              </p>
-            </div>
-
-            {suggestedPeople.length > 0 && (
-              <ul className="flex flex-col gap-2.5">
-                {suggestedPeople.map(({ profile: author, postCount }) => {
-                  const name = author.display_name || "Player";
-                  return (
-                    <li
-                      key={author.id}
-                      className="flex items-center gap-3 rounded-xl bg-card p-3.5 shadow-card"
-                    >
-                      <Avatar>
-                        {author.avatar_url && <AvatarImage src={author.avatar_url} alt="" />}
-                        <AvatarFallback className="bg-secondary text-xs font-semibold text-secondary-foreground">
-                          {initialsFrom(name)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[0.9375rem]/5 font-semibold text-foreground">{name}</p>
-                        {/* The only secondary fact these cards carry: something
-                            the player chose to publish. Never inferred location. */}
-                        <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
-                          {postCountLabel(postCount)}
-                        </p>
-                      </div>
-                      <Button type="button" size="sm" onClick={() => toggleFollow(author.id)}>
-                        Follow
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-
-            <div className="h-px bg-border" />
-
-            <div className="flex flex-col gap-2.5">
-              <p className="text-xs/4 font-semibold tracking-[0.12em] text-muted-foreground uppercase">
-                Or start here
-              </p>
-              <div className="flex items-center gap-3 rounded-xl bg-secondary p-3.5 text-secondary-foreground">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[0.9375rem]/5 font-semibold">Say hello to the court</p>
-                  <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
-                    Your first post gets shown to nearby players.
-                  </p>
-                </div>
-                <span aria-hidden="true" className="text-lg font-semibold text-primary">
-                  +
-                </span>
-              </div>
-              <Link
-                href="/clubs"
-                className="flex items-center gap-3 rounded-xl bg-card p-3.5 shadow-card transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/25"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-[0.9375rem]/5 font-semibold text-foreground">Join a club</p>
-                  <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
-                    Find players who already meet regularly.
-                  </p>
-                </div>
-                <span aria-hidden="true" className="text-muted-foreground">
-                  →
-                </span>
-              </Link>
-            </div>
-          </div>
+        {switchingTab ? (
+          <div className="mt-8 flex items-center justify-center py-12 text-sm text-muted-foreground">Loading…</div>
         ) : (
-          <div className="mt-4 flex flex-col gap-3">
-            {posts.map((post) => (
-              <PostCard
-                // Not post.id alone: the same post appears once as itself
-                // and once per reshare, so React would see duplicate keys
-                // and drop rows. resharer_id disambiguates them.
-                key={`${post.id}:${post.resharer_id ?? "original"}`}
-                post={post}
-                resharer={post.resharer}
-                currentUserId={currentUserId}
-                isAdmin={isAdmin}
-                liked={likedPostIds.has(post.id)}
-                isFollowingAuthor={followingIds.has(post.user_id)}
-                expanded={expandedPostIds.has(post.id)}
-                onToggleLike={toggleLike}
-                onToggleFollow={toggleFollow}
-                eventStatus={post.event ? (eventStatuses.get(post.event.id) ?? null) : null}
-                onToggleJoinEvent={toggleJoinEvent}
-                onToggleComments={toggleComments}
-                onDeleteOwnPost={handleDeleteOwnPost}
-                onShare={() => setShareOpen(true)}
-                onCommentCountChange={handleCommentCountChange}
-                clubMentions={clubMentions}
-                reshared={resharedPostIds.has(post.id)}
-                onToggleReshare={toggleReshare}
-              />
-            ))}
-          </div>
-        )}
+          <>
+            <div className="mt-8 flex items-center gap-3 text-xs font-semibold text-muted-foreground">
+              <span>Trending in your community</span>
+              <span className="h-px flex-1 bg-border" />
+            </div>
 
-        {nextCursor && (
-          <div className="mt-4 flex justify-center">
-            <Button type="button" variant="outline" size="sm" disabled={loadingMore} onClick={loadMore}>
-              {loadingMore ? "Loading…" : "Load more"}
-            </Button>
-          </div>
+            {posts.length === 0 ? (
+            /* A new user's feed is built around finding people to play with,
+               not an empty box. With nobody posting yet there is nobody to
+               suggest either, so this falls back to the two things that DO
+               start a feed: post something, or join a club. */
+            <div className="mt-6 flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <h3 className="text-2xl/[1.875rem] font-semibold tracking-[-0.01em] text-foreground">
+                  Your feed starts with four people
+                </h3>
+                <p className="text-[0.9375rem]/[1.375rem] text-subtle text-pretty">
+                  Follow players from courts near you. When they post an open game, you&apos;ll see it
+                  here first.
+                </p>
+              </div>
+
+              {suggestedPeople.length > 0 && (
+                <ul className="flex flex-col gap-2.5">
+                  {suggestedPeople.map(({ profile: author, postCount }) => {
+                    const name = author.display_name || "Player";
+                    return (
+                      <li
+                        key={author.id}
+                        className="flex items-center gap-3 rounded-xl bg-card p-3.5 shadow-card"
+                      >
+                        <Avatar>
+                          {author.avatar_url && <AvatarImage src={author.avatar_url} alt="" />}
+                          <AvatarFallback className="bg-secondary text-xs font-semibold text-secondary-foreground">
+                            {initialsFrom(name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[0.9375rem]/5 font-semibold text-foreground">{name}</p>
+                          {/* The only secondary fact these cards carry: something
+                              the player chose to publish. Never inferred location. */}
+                          <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
+                            {postCountLabel(postCount)}
+                          </p>
+                        </div>
+                        <Button type="button" size="sm" onClick={() => toggleFollow(author.id)}>
+                          Follow
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              <div className="h-px bg-border" />
+
+              <div className="flex flex-col gap-2.5">
+                <p className="text-xs/4 font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                  Or start here
+                </p>
+                <div className="flex items-center gap-3 rounded-xl bg-secondary p-3.5 text-secondary-foreground">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[0.9375rem]/5 font-semibold">Say hello to the court</p>
+                    <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
+                      Your first post gets shown to nearby players.
+                    </p>
+                  </div>
+                  <span aria-hidden="true" className="text-lg font-semibold text-primary">
+                    +
+                  </span>
+                </div>
+                <Link
+                  href="/clubs"
+                  className="flex items-center gap-3 rounded-xl bg-card p-3.5 shadow-card transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/25"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[0.9375rem]/5 font-semibold text-foreground">Join a club</p>
+                    <p className="text-[0.8125rem]/[1.125rem] text-muted-foreground">
+                      Find players who already meet regularly.
+                    </p>
+                  </div>
+                  <span aria-hidden="true" className="text-muted-foreground">
+                    →
+                  </span>
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 flex flex-col gap-3">
+              {posts.map((post) => (
+                <PostCard
+                  // Not post.id alone: the same post appears once as itself
+                  // and once per reshare, so React would see duplicate keys
+                  // and drop rows. resharer_id disambiguates them.
+                  key={`${post.id}:${post.resharer_id ?? "original"}`}
+                  post={post}
+                  resharer={post.resharer}
+                  currentUserId={currentUserId}
+                  isAdmin={isAdmin}
+                  liked={likedPostIds.has(post.id)}
+                  isFollowingAuthor={followingIds.has(post.user_id)}
+                  expanded={expandedPostIds.has(post.id)}
+                  onToggleLike={toggleLike}
+                  onToggleFollow={toggleFollow}
+                  eventStatus={post.event ? (eventStatuses.get(post.event.id) ?? null) : null}
+                  onToggleJoinEvent={toggleJoinEvent}
+                  onToggleComments={toggleComments}
+                  onDeleteOwnPost={handleDeleteOwnPost}
+                  onShare={() => setShareOpen(true)}
+                  onCommentCountChange={handleCommentCountChange}
+                  clubMentions={clubMentions}
+                  reshared={resharedPostIds.has(post.id)}
+                  onToggleReshare={toggleReshare}
+                />
+              ))}
+            </div>
+          )}
+
+            {nextCursor && (
+              <div className="mt-4 flex justify-center">
+                <Button type="button" variant="outline" size="sm" disabled={loadingMore} onClick={loadMore}>
+                  {loadingMore ? "Loading…" : "Load more"}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

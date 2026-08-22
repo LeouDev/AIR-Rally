@@ -452,6 +452,9 @@ export type Referral = {
   updated_at: string;
 };
 
+/** public.court_side_scope — supabase/migrations/20260810000077_court_side_feed_scope.sql. */
+export type CourtSideFeedScope = "for_you" | "following";
+
 /**
  * Phase 7.1: COURT/Side community backend (see
  * supabase/migrations/20260810000027_court_side.sql). `like_count` /
@@ -1280,10 +1283,26 @@ export type Database = {
         Args: { p_token: string };
         Returns: undefined;
       };
-      court_side_feed: {
-        Args: { p_limit?: number; p_cursor?: string };
-        Returns: (Post & { effective_at: string; resharer_id: string | null })[];
-      };
+      // Migration 20260810000077 (court_side_feed_scope) — staging only as
+      // of this writing, NOT yet applied to production. It expands
+      // court_side_feed to a 4-arg overload alongside the still-live 2-arg
+      // one (Postgres itself overloads on argument names; postgrest-js
+      // resolves the union below to whichever member's Args keys match
+      // what the caller actually passes — see FindMatchingFunctionByArgs
+      // in @supabase/postgrest-js). The 2-arg member is dropped only once
+      // 20260810000079 (the contract half) ships to production. Do not
+      // remove it before then, or every caller still on the old shape
+      // (there should be none by then, but the type would be lying about
+      // production either way) stops reflecting what the database has.
+      court_side_feed:
+        | {
+            Args: { p_limit?: number; p_cursor?: string };
+            Returns: (Post & { effective_at: string; resharer_id: string | null })[];
+          }
+        | {
+            Args: { p_scope: CourtSideFeedScope; p_limit?: number; p_cursor?: string; p_cursor_id?: string };
+            Returns: (Post & { effective_at: string; resharer_id: string | null })[];
+          };
       get_available_slots: {
         Args: {
           p_court_id: string;

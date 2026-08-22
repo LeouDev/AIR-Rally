@@ -1,5 +1,5 @@
 import type { SupabaseClient, PostgrestError } from "@supabase/supabase-js";
-import type { Database, Post, PostComment, PublicProfile } from "@/lib/supabase/types";
+import type { CourtSideFeedScope, Database, Post, PostComment, PublicProfile } from "@/lib/supabase/types";
 import { POST_IMAGES_BUCKET } from "@/lib/services/postImages";
 import { listEmbeddedEvents, type EmbeddedEvent } from "@/lib/services/events";
 import { logServerError } from "@/lib/errors";
@@ -27,6 +27,17 @@ type FeedRow = Post & { effective_at: string; resharer_id: string | null };
  */
 export type FeedPost = PostWithAuthor & { effective_at: string; resharer_id: string | null; resharer: PublicProfile | null };
 export type PostCommentWithAuthor = PostComment & { author: PublicProfile | null };
+
+/**
+ * A composite keyset cursor: (effective_at, id). effective_at alone is
+ * not unique — a post and a reshare, or two posts, can share an instant
+ * — so pairing it with id is what makes the cursor total. Modeled as an
+ * object rather than a single opaque string so a caller physically
+ * cannot supply one half without the other; the RPC itself enforces the
+ * same thing server-side (court_side_feed raises 22023 on a half cursor)
+ * — this is that same rule made unrepresentable at the type level.
+ */
+export type FeedCursor = { effectiveAt: string; id: string };
 
 /** Attaches embedded event summaries to whichever rows carry an event_id — shared by listFeedPosts/listPostsByUser. */
 async function attachEvents<T extends { event_id: string | null }>(
@@ -63,26 +74,43 @@ async function attachAuthors<T extends { user_id: string }>(
 }
 
 /**
- * The COURT/Side feed, via the court_side_feed() RPC (migration
- * 20260810000050) rather than a direct read of `posts`.
+ * The COURT/Side feed, via the court_side_feed() RPC rather than a
+ * direct read of `posts`.
  *
  * The RPC unions posts with reshares so a reshare lifts a post back to the
  * top with attribution — before it, pressing reshare incremented a counter
  * and notified the author, and nothing else. It is SECURITY INVOKER, so
  * RLS still applies exactly as it did to the direct query.
  *
- * The cursor is `effective_at` (the post's own time, or the reshare's when
- * the row is a reshare) rather than `created_at`. That is invisible to
- * callers: it is still an ISO timestamp from the last row, so loadMore is
- * unchanged.
+ * `scope` is required, with no default, on purpose — matching the RPC's
+ * own p_scope, which the migration deliberately gave no default either:
+ * a parameter whose omission silently means "everything" is exactly how
+ * 'Following' shipped as a tab that filtered nothing while claiming to.
+ * Every call site must say which feed it wants.
+ *
+ * NOT YET SAFE TO SHIP. This calls the 4-argument overload added by
+ * migration 20260810000077 (court_side_feed_scope), which as of this
+ * writing is live on staging only — NOT on production. A build calling
+ * this against a database still on the 2-arg function fails every
+ * request with HTTP 404 / Postgres 42883. Do not ship a build containing
+ * this change until 077 is confirmed on production (it is an RC gate;
+ * see the Lead Engineer). Safe to develop and test against staging now.
+ *
+ * The cursor is a composite (effective_at, id) pair, not a single
+ * timestamp — effective_at alone can tie (a post and a reshare, or two
+ * posts, sharing an instant), which silently duplicates or skips rows at
+ * a page boundary. Supplying only one half raises Postgres 22023; the
+ * FeedCursor type makes that state unrepresentable on this side already.
  */
 export async function listFeedPosts(
   supabase: Client,
-  { limit = FEED_PAGE_SIZE, cursor }: { limit?: number; cursor?: string } = {}
-): Promise<{ posts: FeedPost[]; nextCursor: string | null }> {
+  { scope, limit = FEED_PAGE_SIZE, cursor }: { scope: CourtSideFeedScope; limit?: number; cursor?: FeedCursor }
+): Promise<{ posts: FeedPost[]; nextCursor: FeedCursor | null }> {
   const { data, error } = await supabase.rpc("court_side_feed", {
+    p_scope: scope,
     p_limit: limit,
-    p_cursor: cursor ?? undefined,
+    p_cursor: cursor?.effectiveAt ?? undefined,
+    p_cursor_id: cursor?.id ?? undefined,
   });
   if (error) throw error;
 
@@ -107,7 +135,8 @@ export async function listFeedPosts(
     resharer: row.resharer_id ? (profiles.get(row.resharer_id) ?? null) : null,
   }));
 
-  const nextCursor = rows.length === limit ? rows[rows.length - 1].effective_at : null;
+  const lastRow = rows[rows.length - 1];
+  const nextCursor = rows.length === limit ? { effectiveAt: lastRow.effective_at, id: lastRow.id } : null;
   return { posts, nextCursor };
 }
 
