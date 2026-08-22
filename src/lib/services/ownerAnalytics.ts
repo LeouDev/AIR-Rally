@@ -1,6 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import { listOwnerCourtsWithVenue } from "@/lib/services/ownerBookings";
+import {
+  type LocalDateRange,
+  type VenuePeriods,
+  localDateIn,
+  shiftDate,
+  weekdayOf,
+  isWithin,
+  periodsFor,
+  fetchWindowFor,
+} from "@/lib/services/venueLocalPeriods";
 
 type Client = SupabaseClient<Database>;
 
@@ -66,43 +76,34 @@ type BookingRow = {
 
 type OperatingHoursRow = { venue_id: string; day_of_week: number; start_time: string; end_time: string };
 
-function utcDayBounds(daysAgo: number): { start: Date; end: Date } {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysAgo));
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 1);
-  return { start, end };
-}
+/**
+ * "Today"/"this week"/"this month" are VENUE-LOCAL calendar periods, never
+ * UTC ones — see venueLocalPeriods.ts for why and for the date-math these
+ * share with getOwnerDashboardSummary (ownerBookings.ts), which buckets
+ * "this week" through the exact same LocalDateRange/periodsFor so the two
+ * owner-facing revenue surfaces can't disagree about what week it is.
+ */
 
-function utcWeekBounds(weeksAgo: number): { start: Date; end: Date } {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - now.getUTCDay() - weeksAgo * 7));
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 7);
-  return { start, end };
-}
+/** A booking annotated with the venue context every period decision needs. */
+type DatedBooking = BookingRow & {
+  /** The booking's start date in ITS OWN venue's timezone. */
+  localDate: string;
+  periods: VenuePeriods;
+};
 
-function utcMonthBounds(monthsAgo: number): { start: Date; end: Date } {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsAgo, 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsAgo + 1, 1));
-  return { start, end };
-}
-
-function inRange(iso: string, start: Date, end: Date): boolean {
-  const t = new Date(iso).getTime();
-  return t >= start.getTime() && t < end.getTime();
-}
-
-function sumConfirmedRevenue(bookings: BookingRow[], start: Date, end: Date): number {
+function sumConfirmedRevenue(bookings: DatedBooking[], pick: (p: VenuePeriods) => LocalDateRange): number {
   return bookings
-    .filter((b) => b.status === "confirmed" && inRange(b.start_time, start, end))
+    .filter((b) => b.status === "confirmed" && isWithin(b.localDate, pick(b.periods)))
     .reduce((sum, b) => sum + b.price_amount, 0);
 }
 
-function revenuePeriod(bookings: BookingRow[], current: { start: Date; end: Date }, previous: { start: Date; end: Date }): RevenuePeriod {
-  const amount = sumConfirmedRevenue(bookings, current.start, current.end);
-  const previousAmount = sumConfirmedRevenue(bookings, previous.start, previous.end);
+function revenuePeriod(
+  bookings: DatedBooking[],
+  current: (p: VenuePeriods) => LocalDateRange,
+  previous: (p: VenuePeriods) => LocalDateRange
+): RevenuePeriod {
+  const amount = sumConfirmedRevenue(bookings, current);
+  const previousAmount = sumConfirmedRevenue(bookings, previous);
   const changePct = previousAmount === 0 ? null : (amount - previousAmount) / previousAmount;
   return { amount, previousAmount, changePct };
 }
@@ -118,28 +119,27 @@ function hoursBetween(startIso: string, endIso: string): number {
 }
 
 /**
- * Total open hours for one venue between `from` (inclusive) and `to`
- * (exclusive, both UTC), derived by walking each calendar day in the
- * range and summing whichever `venue_operating_hours` rows match that
- * day's day-of-week. A cheap, documented approximation — like the
- * operating-hours approach used for availability search — not a
- * timezone-exact wall-clock calculation, since bookings are what's being
- * measured against, not a live slot check.
+ * Total open hours for one venue across an INCLUSIVE venue-local date
+ * range, derived by walking each calendar day in the range and summing
+ * whichever `venue_operating_hours` rows match that day's day-of-week.
+ * A cheap, documented approximation — like the operating-hours approach
+ * used for availability search — not a timezone-exact wall-clock
+ * calculation, since bookings are what's being measured against, not a
+ * live slot check. It walks the same venue-local calendar days the
+ * bookings above are bucketed into.
  */
-function openHoursInRange(operatingHours: OperatingHoursRow[], venueId: string, from: Date, to: Date): number {
+export function openHoursInRange(operatingHours: OperatingHoursRow[], venueId: string, range: LocalDateRange): number {
   const rowsForVenue = operatingHours.filter((r) => r.venue_id === venueId);
   if (rowsForVenue.length === 0) return 0;
 
   let total = 0;
-  const cursor = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
-  while (cursor.getTime() < to.getTime()) {
-    const dow = cursor.getUTCDay();
+  for (let day = range.from; day <= range.to; day = shiftDate(day, 1)) {
+    const dow = weekdayOf(day);
     for (const row of rowsForVenue) {
       if (row.day_of_week === dow) {
         total += (hmsToMinutes(row.end_time) - hmsToMinutes(row.start_time)) / 60;
       }
     }
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return total;
 }
@@ -184,28 +184,87 @@ export async function getOwnerAnalytics(supabase: Client, ownerId: string): Prom
   if (courts.length === 0) return empty;
   const courtNameById = new Map(courts.map((c) => [c.id, c.name]));
   const courtIds = courts.map((c) => c.id);
+  // One lookup per booking instead of a courts.find() scan inside every
+  // per-booking loop below — and the venue is what carries the timezone
+  // each booking's business day is decided in.
+  const venueByCourtId = new Map(
+    courts.flatMap((c) => {
+      const venue = venuesById.get(c.venue_id);
+      return venue ? ([[c.id, venue]] as [string, (typeof venue)][]) : [];
+    })
+  );
 
-  const thisMonth = utcMonthBounds(0);
-  const lastMonth = utcMonthBounds(1);
+  const now = new Date();
+  // Periods are per-timezone, and an owner's venues need not share one.
+  const periodsByTimezone = new Map<string, VenuePeriods>();
+  const periodsForTimezone = (timezone: string): VenuePeriods => {
+    const cached = periodsByTimezone.get(timezone);
+    if (cached) return cached;
+    const fresh = periodsFor(localDateIn(now, timezone));
+    periodsByTimezone.set(timezone, fresh);
+    return fresh;
+  };
+
+  // The fetch window must be a superset of the venue-local months we
+  // bucket into — and "venue-local", not UTC's, is the operative word.
+  // An earlier version anchored this on monthRange(UTC's date), which
+  // only bounds the *instant* correctly; it does nothing for the window
+  // *endpoints* once a venue's local calendar month has a different
+  // label than UTC's. For a Manila venue (UTC+8) in the first eight
+  // hours of a new local month, "this month" was already September
+  // locally while UTC's date was still August 31st — so fetchTo, built
+  // from August, ended before September's bookings even began, and
+  // every metric fed by monthBookings (occupancy, peak/lowest hour,
+  // most-booked courts, total bookings, repeat customers, cancellation
+  // rate) under-reported along with revenue. A venue behind UTC loses
+  // the opposite end: previousMonth truncates instead.
+  //
+  // So the window is derived from the actual venue-local ranges being
+  // bucketed into, across every timezone this owner's venues use — not
+  // from a single assumed calendar month. One day of slack past the
+  // earliest previousMonth.from and latest thisMonth.to absorbs any real
+  // UTC offset (max ±14h) the venue-local -> instant conversion needs.
+  const timezonesInPlay = [...new Set(courts.map((c) => venuesById.get(c.venue_id)?.timezone ?? "Asia/Manila"))];
+  const { fetchFrom, fetchTo } = fetchWindowFor(timezonesInPlay, (p) => ({ from: p.previousMonth.from, to: p.thisMonth.to }));
 
   const { data: bookings, error: bookingsError } = await supabase
     .from("bookings")
     .select("court_id, user_id, price_amount, currency, status, start_time, end_time")
     .in("court_id", courtIds)
-    .gte("start_time", lastMonth.start.toISOString())
-    .lt("start_time", thisMonth.end.toISOString());
+    .gte("start_time", fetchFrom)
+    .lte("start_time", fetchTo);
   if (bookingsError) throw bookingsError;
-  const bookingRows = (bookings ?? []) as BookingRow[];
 
-  const currency = bookingRows.find((b) => b.status === "confirmed")?.currency ?? DEFAULT_CURRENCY;
+  const datedBookings: DatedBooking[] = ((bookings ?? []) as BookingRow[]).map((row) => {
+    const timezone = venueByCourtId.get(row.court_id)?.timezone ?? "Asia/Manila";
+    return {
+      ...row,
+      localDate: localDateIn(new Date(row.start_time), timezone),
+      periods: periodsForTimezone(timezone),
+    };
+  });
+
+  const currency = datedBookings.find((b) => b.status === "confirmed")?.currency ?? DEFAULT_CURRENCY;
 
   const revenue = {
-    today: revenuePeriod(bookingRows, utcDayBounds(0), utcDayBounds(1)),
-    thisWeek: revenuePeriod(bookingRows, utcWeekBounds(0), utcWeekBounds(1)),
-    thisMonth: revenuePeriod(bookingRows, thisMonth, lastMonth),
+    today: revenuePeriod(
+      datedBookings,
+      (p) => p.today,
+      (p) => p.previousDay
+    ),
+    thisWeek: revenuePeriod(
+      datedBookings,
+      (p) => p.thisWeek,
+      (p) => p.previousWeek
+    ),
+    thisMonth: revenuePeriod(
+      datedBookings,
+      (p) => p.thisMonth,
+      (p) => p.previousMonth
+    ),
   };
 
-  const monthBookings = bookingRows.filter((b) => inRange(b.start_time, thisMonth.start, thisMonth.end));
+  const monthBookings = datedBookings.filter((b) => isWithin(b.localDate, b.periods.thisMonth));
   const activeMonthBookings = monthBookings.filter((b) => b.status !== "cancelled");
 
   const { data: operatingHours, error: ohError } = await supabase
@@ -215,7 +274,6 @@ export async function getOwnerAnalytics(supabase: Client, ownerId: string): Prom
   if (ohError) throw ohError;
   const operatingHoursRows = (operatingHours ?? []) as OperatingHoursRow[];
 
-  const now = new Date();
   const bookedHoursByCourtId = new Map<string, number>();
   const bookingCountByCourtId = new Map<string, number>();
   for (const b of activeMonthBookings) {
@@ -225,7 +283,15 @@ export async function getOwnerAnalytics(supabase: Client, ownerId: string): Prom
 
   const perCourt: CourtOccupancy[] = courts.map((court) => {
     const venue = venuesById.get(court.venue_id);
-    const openHours = venue ? openHoursInRange(operatingHoursRows, venue.id, thisMonth.start, now) : 0;
+    // Month-to-date in the venue's own calendar: from the 1st through
+    // today inclusive. Counting the whole month would compare bookings
+    // that exist against open hours that haven't happened yet.
+    const openHours = venue
+      ? openHoursInRange(operatingHoursRows, venue.id, {
+          from: periodsForTimezone(venue.timezone).thisMonth.from,
+          to: localDateIn(now, venue.timezone),
+        })
+      : 0;
     const bookedHours = bookedHoursByCourtId.get(court.id) ?? 0;
     return {
       courtId: court.id,
@@ -243,8 +309,7 @@ export async function getOwnerAnalytics(supabase: Client, ownerId: string): Prom
 
   const hourCounts = new Map<number, number>();
   for (const b of activeMonthBookings) {
-    const venue = venuesById.get(courts.find((c) => c.id === b.court_id)?.venue_id ?? "");
-    const hour = localStartHour(b.start_time, venue?.timezone ?? "Asia/Manila");
+    const hour = localStartHour(b.start_time, venueByCourtId.get(b.court_id)?.timezone ?? "Asia/Manila");
     hourCounts.set(hour, (hourCounts.get(hour) ?? 0) + 1);
   }
   let peakHour: number | null = null;

@@ -173,6 +173,10 @@ describe("getBookingDetailForOwner", () => {
 });
 
 describe("getOwnerDashboardSummary", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it("returns a zero-state summary without querying courts/bookings when the owner has no venues", async () => {
     const supabase = createTableMockSupabase({ venues: { data: [], error: null } });
     const result = await getOwnerDashboardSummary(supabase, "owner-1");
@@ -183,6 +187,11 @@ describe("getOwnerDashboardSummary", () => {
   });
 
   it("tallies today's occupied/available hours per venue via the schedule RPC, and this week's totals from a direct query", async () => {
+    // Thursday 2026-08-20, noon in Manila (UTC+8) — comfortably inside
+    // the week, away from any day/week boundary so the fixture's dates
+    // don't have to fight the assertion.
+    jest.useFakeTimers().setSystemTime(new Date("2026-08-20T04:00:00.000Z"));
+
     const courts = [
       { id: "court-1", name: "Court 1", venue_id: "venue-1" },
       { id: "court-2", name: "Court 2", venue_id: "venue-1" },
@@ -195,10 +204,12 @@ describe("getOwnerDashboardSummary", () => {
       ],
       error: null,
     };
+    // All three land Wednesday 2026-08-19 in Manila — inside the same
+    // venue-local week as the pinned "now" above.
     const weekBookings = [
-      { court_id: "court-1", price_amount: 1000, currency: "PHP", status: "confirmed" },
-      { court_id: "court-1", price_amount: 500, currency: "PHP", status: "pending" },
-      { court_id: "court-2", price_amount: 2000, currency: "PHP", status: "confirmed" },
+      { court_id: "court-1", price_amount: 1000, currency: "PHP", status: "confirmed", start_time: "2026-08-19T04:00:00.000Z" },
+      { court_id: "court-1", price_amount: 500, currency: "PHP", status: "pending", start_time: "2026-08-19T05:00:00.000Z" },
+      { court_id: "court-2", price_amount: 2000, currency: "PHP", status: "confirmed", start_time: "2026-08-19T06:00:00.000Z" },
     ];
 
     const supabase = createTableMockSupabase(
@@ -218,6 +229,43 @@ describe("getOwnerDashboardSummary", () => {
     expect(result.thisWeek).toEqual({
       totalBookings: 3,
       totalRevenue: 3000,
+      currency: "PHP",
+      mostBookedCourtName: "Court 1",
+    });
+  });
+
+  it("buckets 'this week' by the venue's own local calendar, not a UTC Sunday-to-Sunday window — and matches getOwnerAnalytics' definition of a week", async () => {
+    // Wednesday 2026-09-02, 03:00 in Manila (UTC+8) — barely past the
+    // start of the venue-local week (Sunday 2026-08-30..09-05).
+    jest.useFakeTimers().setSystemTime(new Date("2026-09-01T19:00:00.000Z"));
+
+    const courts = [{ id: "court-1", name: "Court 1", venue_id: "venue-1" }];
+    const scheduleFixture = { data: [], error: null };
+    const weekBookings = [
+      // Sunday 2026-08-30, 10:00 Manila — the first moment of "this
+      // week" venue-local. A UTC Sunday-to-Sunday window computed off a
+      // UTC "now" that's still 2026-09-01 would place this in the
+      // PREVIOUS week and drop it.
+      { court_id: "court-1", price_amount: 1500, currency: "PHP", status: "confirmed", start_time: "2026-08-30T02:00:00.000Z" },
+      // Two days before "this week" venue-local (Friday 2026-08-28) —
+      // must never be counted.
+      { court_id: "court-1", price_amount: 9999, currency: "PHP", status: "confirmed", start_time: "2026-08-28T02:00:00.000Z" },
+    ];
+
+    const supabase = createTableMockSupabase(
+      {
+        venues: { data: [venueRow], error: null },
+        courts: { data: courts, error: null },
+        bookings: { data: weekBookings, error: null },
+      },
+      { get_owner_court_schedule: scheduleFixture }
+    );
+
+    const result = await getOwnerDashboardSummary(supabase, "owner-1");
+
+    expect(result.thisWeek).toEqual({
+      totalBookings: 1,
+      totalRevenue: 1500,
       currency: "PHP",
       mostBookedCourtName: "Court 1",
     });
