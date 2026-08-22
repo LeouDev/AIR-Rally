@@ -79,7 +79,11 @@ describe("getOwnerAnalytics", () => {
     });
   });
 
-  it("computes revenue, occupancy, and booking-insight figures against known UTC boundaries", async () => {
+  // The fixture venue's timezone is "UTC", so its venue-local calendar
+  // and the UTC calendar coincide and every number below is unchanged by
+  // the venue-local period fix. The Manila case further down is what
+  // exercises an offset.
+  it("computes revenue, occupancy, and booking-insight figures against known boundaries", async () => {
     const supabase = createTableMockSupabase({
       venues: { data: [venueRow], error: null },
       courts: { data: courts, error: null },
@@ -128,6 +132,66 @@ describe("getOwnerAnalytics", () => {
     // hour 10 has 4 bookings (A,C,E,H); hour 14 and 18 each have 1.
     expect(result.occupancy.peakHour).toBe(10);
     expect(result.occupancy.lowestHour).toBe(14);
+  });
+
+  /**
+   * Revenue periods are venue-local calendar days, not UTC ones.
+   *
+   * The regression: these bounds used to be sliced on UTC midnight. For
+   * a Manila venue (UTC+8) that meant an owner's "Today" actually ran
+   * 8 AM to 8 AM, so every booking starting before 8 AM local was
+   * counted against YESTERDAY — and, at a month boundary, against the
+   * previous MONTH, which dragged the comparison percentages with it.
+   */
+  describe("venue-local period boundaries", () => {
+    const manilaVenue = { id: "venue-1", name: "BGC Smash", timezone: "Asia/Manila", owner_id: "owner-1" };
+    const oneCourt = [{ id: "court-1", name: "Court 1", venue_id: "venue-1" }];
+
+    function analyticsFor(bookings: Record<string, unknown>[]) {
+      return getOwnerAnalytics(
+        createTableMockSupabase({
+          venues: { data: [manilaVenue], error: null },
+          courts: { data: oneCourt, error: null },
+          bookings: { data: bookings, error: null },
+          venue_operating_hours: { data: operatingHours, error: null },
+        }),
+        "owner-1"
+      );
+    }
+
+    it("counts an early-morning Manila booking as today, not yesterday", async () => {
+      // NOW is 2026-08-19T12:00Z = 8 PM Manila on the 19th.
+      // 2026-08-18T23:00Z is 7 AM Manila on the 19th — the same Manila
+      // day, but the previous UTC day.
+      const result = await analyticsFor([
+        booking({ price_amount: 1000, start_time: "2026-08-18T23:00:00Z", end_time: "2026-08-19T00:00:00Z" }),
+      ]);
+
+      expect(result.revenue.today.amount).toBe(1000);
+      expect(result.revenue.today.previousAmount).toBe(0);
+    });
+
+    it("still counts a genuinely-previous Manila day as yesterday", async () => {
+      // 2026-08-17T23:00Z is 7 AM Manila on the 18th — one Manila day back.
+      const result = await analyticsFor([
+        booking({ price_amount: 800, start_time: "2026-08-17T23:00:00Z", end_time: "2026-08-18T00:00:00Z" }),
+      ]);
+
+      expect(result.revenue.today.amount).toBe(0);
+      expect(result.revenue.today.previousAmount).toBe(800);
+    });
+
+    it("keeps a first-of-the-month Manila morning booking in the new month", async () => {
+      jest.setSystemTime(new Date("2026-09-01T04:00:00Z")); // noon Manila, 1 Sep
+      // 2026-08-31T23:00Z is 7 AM Manila on 1 September — under UTC
+      // bounds this landed in AUGUST.
+      const result = await analyticsFor([
+        booking({ price_amount: 600, start_time: "2026-08-31T23:00:00Z", end_time: "2026-09-01T00:00:00Z" }),
+      ]);
+
+      expect(result.revenue.thisMonth.amount).toBe(600);
+      expect(result.revenue.thisMonth.previousAmount).toBe(0);
+    });
   });
 
   it("leaves occupancyPct null for a court whose venue has no operating hours configured", async () => {
