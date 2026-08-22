@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Booking, Database, BookingStatus } from "@/lib/supabase/types";
 import { listVenuesByOwner } from "@/lib/services/venues";
 import { getOwnerCourtSchedule, todayInTimezone } from "@/lib/services/ownerAvailability";
+import { type LocalDateRange, localDateIn, isWithin, periodsFor, fetchWindowFor } from "@/lib/services/venueLocalPeriods";
 
 type Client = SupabaseClient<Database>;
 
@@ -231,18 +232,6 @@ export type OwnerDashboardSummary = {
   };
 };
 
-/** Sunday-to-Sunday, computed off UTC "now" — a deliberately simple
- * calendar-week boundary shared across every venue regardless of its own
- * timezone, rather than per-venue-timezone week math. Good enough for a
- * "this week" operational summary; not worth the complexity this phase. */
-function currentWeekBoundsUtc(): { start: string; end: string } {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - now.getUTCDay()));
-  const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 7);
-  return { start: start.toISOString(), end: end.toISOString() };
-}
-
 /**
  * Phase 3.3 dashboard summary. "Today, per venue" reuses
  * get_owner_court_schedule() — the same RPC the availability calendar
@@ -304,18 +293,46 @@ export async function getOwnerDashboardSummary(supabase: Client, ownerId: string
   let mostBookedCourtName: string | null = null;
 
   if (allCourtIds.length > 0) {
-    const { start, end } = currentWeekBoundsUtc();
+    // "This week" is venue-local, the same definition getOwnerAnalytics
+    // uses (venueLocalPeriods.ts) — this summary and the analytics page
+    // must never compute a different week for the same owner's revenue.
+    // The fetch window is a superset across however many distinct
+    // timezones this owner's venues use, same reasoning as
+    // getOwnerAnalytics: a single UTC-derived window only bounds the
+    // instant correctly, not the venue-local range endpoints.
+    const venueByCourtId = new Map((courts ?? []).map((c) => [c.id, venues.find((v) => v.id === c.venue_id)] as const));
+    const timezonesInPlay = [...new Set(venues.map((v) => v.timezone))];
+    const { fetchFrom, fetchTo } = fetchWindowFor(timezonesInPlay, (p) => p.thisWeek);
+
     const { data: weekBookings, error: weekError } = await supabase
       .from("bookings")
-      .select("court_id, price_amount, currency, status")
+      .select("court_id, price_amount, currency, status, start_time")
       .in("court_id", allCourtIds)
-      .gte("start_time", start)
-      .lt("start_time", end);
+      .gte("start_time", fetchFrom)
+      .lte("start_time", fetchTo);
     if (weekError) throw weekError;
 
-    totalBookings = (weekBookings ?? []).length;
+    // periodsFor() is per-timezone; cache it the same way getOwnerAnalytics
+    // does rather than recomputing Intl formatting per booking.
+    const now = new Date();
+    const thisWeekRangeByTimezone = new Map<string, LocalDateRange>();
+    function thisWeekRangeFor(timezone: string): LocalDateRange {
+      const cached = thisWeekRangeByTimezone.get(timezone);
+      if (cached) return cached;
+      const fresh = periodsFor(localDateIn(now, timezone)).thisWeek;
+      thisWeekRangeByTimezone.set(timezone, fresh);
+      return fresh;
+    }
+
+    const thisWeekBookings = (weekBookings ?? []).filter((b) => {
+      const timezone = venueByCourtId.get(b.court_id)?.timezone ?? "Asia/Manila";
+      const localDate = localDateIn(new Date(b.start_time), timezone);
+      return isWithin(localDate, thisWeekRangeFor(timezone));
+    });
+
+    totalBookings = thisWeekBookings.length;
     const countByCourtId = new Map<string, number>();
-    for (const b of weekBookings ?? []) {
+    for (const b of thisWeekBookings) {
       if (b.status === "confirmed") {
         totalRevenue += b.price_amount;
         currency = b.currency;

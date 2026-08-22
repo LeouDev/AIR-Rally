@@ -4,6 +4,54 @@
 import { getOwnerAnalytics } from "../ownerAnalytics";
 import { createTableMockSupabase } from "../../test-helpers/mockSupabase";
 
+/**
+ * The shared mock's query builder (createTableMockSupabase) ignores every
+ * filter method — .gte()/.lte()/.in() are all no-ops that just return the
+ * fixture verbatim. That is fine for tests that only care about the SHAPE
+ * of a query, but it means a bug in the fetch window itself — the exact
+ * class of bug this file exists to catch — can never fail against it: the
+ * mock would hand back an out-of-window booking regardless of what dates
+ * the code actually asked for.
+ *
+ * This wraps the same fixture, but the "bookings" table's builder really
+ * filters by the recorded .gte("start_time", x)/.lte("start_time", y)
+ * calls before resolving — so a wrong fetchFrom/fetchTo genuinely drops
+ * rows here, the same way Postgres would drop them for real.
+ */
+function createFetchWindowAwareMockSupabase(tables: {
+  venues: unknown[];
+  courts: unknown[];
+  bookings: Record<string, unknown>[];
+  venue_operating_hours: unknown[];
+}) {
+  const filters: Array<(row: Record<string, unknown>) => boolean> = [];
+  const bookingsBuilder: Record<string, unknown> = {
+    select: jest.fn(() => bookingsBuilder),
+    in: jest.fn(() => bookingsBuilder),
+    gte: jest.fn((column: string, value: string) => {
+      if (column === "start_time") filters.push((row) => (row.start_time as string) >= value);
+      return bookingsBuilder;
+    }),
+    lte: jest.fn((column: string, value: string) => {
+      if (column === "start_time") filters.push((row) => (row.start_time as string) <= value);
+      return bookingsBuilder;
+    }),
+    then: (onfulfilled?: (v: unknown) => unknown, onrejected?: (r: unknown) => unknown) =>
+      Promise.resolve({ data: tables.bookings.filter((row) => filters.every((f) => f(row))), error: null }).then(onfulfilled, onrejected),
+  };
+
+  const other = createTableMockSupabase({
+    venues: { data: tables.venues, error: null },
+    courts: { data: tables.courts, error: null },
+    venue_operating_hours: { data: tables.venue_operating_hours, error: null },
+  });
+
+  return {
+    ...other,
+    from: jest.fn((table: string) => (table === "bookings" ? bookingsBuilder : (other.from as (t: string) => unknown)(table))),
+  } as unknown as Parameters<typeof getOwnerAnalytics>[0];
+}
+
 // Wednesday, 2026-08-19, 12:00 UTC — chosen so "today"/"this week"/"this
 // month" all land on unambiguous, hand-computable UTC boundaries:
 // this week = Aug 16 (Sun) .. Aug 23; this month = Aug 1 .. Sep 1.
@@ -191,6 +239,138 @@ describe("getOwnerAnalytics", () => {
 
       expect(result.revenue.thisMonth.amount).toBe(600);
       expect(result.revenue.thisMonth.previousAmount).toBe(0);
+    });
+  });
+
+  /**
+   * The fetch window itself — not just how a returned booking gets
+   * bucketed. Every test above uses createTableMockSupabase, which
+   * ignores .gte()/.lte() entirely, so none of them can fail against a
+   * wrong fetchFrom/fetchTo — the exact reason the original
+   * venue-local-periods branch shipped green at 6/6 while its fetch
+   * window was still anchored on UTC's month. These use
+   * createFetchWindowAwareMockSupabase instead, which really filters by
+   * the dates the code asks for, so a regression here fails for real.
+   */
+  describe("fetch window — must be a superset of every venue-local period, not just UTC's month", () => {
+    const manilaVenue = { id: "venue-1", name: "BGC Smash", timezone: "Asia/Manila", owner_id: "owner-1" };
+    const nyVenue = { id: "venue-2", name: "Brooklyn Baseline", timezone: "America/New_York", owner_id: "owner-1" };
+    const manilaCourt = { id: "court-1", name: "Court 1", venue_id: "venue-1" };
+    const nyCourt = { id: "court-2", name: "Court 2", venue_id: "venue-2" };
+
+    it("fetches a Manila booking on the 1st of the local month even when UTC is still on the last day of the prior month", async () => {
+      // 2026-09-01T03:00 Manila = 2026-08-31T19:00Z. Venue-local "this
+      // month" is already September; UTC's date is still August 31st. A
+      // fetch window anchored on monthRange(UTC's date) ends before this
+      // booking's start_time, so the DB would never return it.
+      jest.setSystemTime(new Date("2026-08-31T19:00:00Z"));
+      const midMonthBooking = booking({
+        court_id: "court-1",
+        price_amount: 1234,
+        start_time: "2026-09-15T05:00:00Z", // Sept 15, 1 PM Manila — deep in "this month"
+        end_time: "2026-09-15T06:00:00Z",
+      });
+
+      const result = await getOwnerAnalytics(
+        createFetchWindowAwareMockSupabase({
+          venues: [manilaVenue],
+          courts: [manilaCourt],
+          bookings: [midMonthBooking],
+          venue_operating_hours: operatingHours,
+        }),
+        "owner-1"
+      );
+
+      expect(result.revenue.thisMonth.amount).toBe(1234);
+      // Not just revenue: everything monthBookings feeds is exposed to
+      // the same hole.
+      expect(result.bookingInsights.totalBookings).toBe(1);
+      expect(result.occupancy.mostBookedCourts).toEqual([{ courtId: "court-1", courtName: "Court 1", bookingCount: 1 }]);
+      expect(result.occupancy.peakHour).toBe(13); // 1 PM Manila
+    });
+
+    it("fetches a Manila booking on the first day of the local week under the same boundary", async () => {
+      jest.setSystemTime(new Date("2026-08-31T19:00:00Z")); // Sep 1, 03:00 Manila
+      // Venue-local "this week" starting Sunday would be Aug 30 .. Sep 5.
+      // Sept 3, 2 PM Manila is well inside it, but comfortably after the
+      // UTC-month-anchored window's old end (Aug 31).
+      const thisWeekBooking = booking({
+        court_id: "court-1",
+        price_amount: 777,
+        start_time: "2026-09-03T06:00:00Z",
+        end_time: "2026-09-03T07:00:00Z",
+      });
+
+      const result = await getOwnerAnalytics(
+        createFetchWindowAwareMockSupabase({
+          venues: [manilaVenue],
+          courts: [manilaCourt],
+          bookings: [thisWeekBooking],
+          venue_operating_hours: operatingHours,
+        }),
+        "owner-1"
+      );
+
+      expect(result.revenue.thisWeek.amount).toBe(777);
+    });
+
+    it("fetches the head of 'previous month' for a venue BEHIND UTC (New York), the opposite-direction truncation", async () => {
+      // 2026-08-31T22:00 New York (UTC-4 in August) = 2026-09-01T02:00Z.
+      // Venue-local "today" is still Aug 31, so "previous month" is July
+      // 1-31. A window anchored on UTC's date (already September) and
+      // shifted back by monthRange(utcToday, 1) would land on August, not
+      // July — truncating July down to nothing.
+      jest.setSystemTime(new Date("2026-09-01T02:00:00Z"));
+      const earlyJulyBooking = booking({
+        court_id: "court-2",
+        price_amount: 555,
+        start_time: "2026-07-02T14:00:00Z", // July 2, 10 AM New York
+        end_time: "2026-07-02T15:00:00Z",
+      });
+
+      const result = await getOwnerAnalytics(
+        createFetchWindowAwareMockSupabase({
+          venues: [nyVenue],
+          courts: [nyCourt],
+          bookings: [earlyJulyBooking],
+          venue_operating_hours: [],
+        }),
+        "owner-1"
+      );
+
+      // "This month" is venue-local August (empty); "previous month" is
+      // venue-local July, and must include the booking so the
+      // month-over-month comparison isn't silently zeroed.
+      expect(result.revenue.thisMonth.previousAmount).toBe(555);
+    });
+
+    it("unions the fetch window across an owner whose venues span two timezones, dropping neither", async () => {
+      jest.setSystemTime(new Date("2026-08-31T19:00:00Z")); // Sep 1, 03:00 Manila / Aug 31, 15:00 New York
+      const manilaBooking = booking({
+        court_id: "court-1",
+        price_amount: 1000,
+        start_time: "2026-09-20T05:00:00Z", // deep in Manila's September
+        end_time: "2026-09-20T06:00:00Z",
+      });
+      const nyBooking = booking({
+        court_id: "court-2",
+        price_amount: 2000,
+        start_time: "2026-07-05T14:00:00Z", // deep in New York's previous month (July)
+        end_time: "2026-07-05T15:00:00Z",
+      });
+
+      const result = await getOwnerAnalytics(
+        createFetchWindowAwareMockSupabase({
+          venues: [manilaVenue, nyVenue],
+          courts: [manilaCourt, nyCourt],
+          bookings: [manilaBooking, nyBooking],
+          venue_operating_hours: operatingHours,
+        }),
+        "owner-1"
+      );
+
+      expect(result.revenue.thisMonth.amount).toBe(1000); // Manila's September booking
+      expect(result.revenue.thisMonth.previousAmount).toBe(2000); // New York's July booking
     });
   });
 

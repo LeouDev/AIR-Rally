@@ -1,6 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/types";
 import { listOwnerCourtsWithVenue } from "@/lib/services/ownerBookings";
+import {
+  type LocalDateRange,
+  type VenuePeriods,
+  localDateIn,
+  shiftDate,
+  weekdayOf,
+  isWithin,
+  periodsFor,
+  fetchWindowFor,
+} from "@/lib/services/venueLocalPeriods";
 
 type Client = SupabaseClient<Database>;
 
@@ -66,95 +76,13 @@ type BookingRow = {
 
 type OperatingHoursRow = { venue_id: string; day_of_week: number; start_time: string; end_time: string };
 
-/* -------------------------------------------------------------------------
- * Business periods.
- *
- * "Today" is a VENUE-LOCAL calendar day, never a UTC one. Every other
- * date surface in the product already works that way — availability
- * search takes a venue-local date, and localStartHour below already
- * derived the peak booking hour in the venue's own zone. Revenue was the
- * odd one out: it sliced on UTC midnight, so for a Manila venue (UTC+8)
- * an owner's "Today" actually ran 8 AM to 8 AM and every morning booking
- * landed in yesterday's total, dragging the comparison arrows with it.
- * At a month boundary the same skew moved revenue between months.
- *
- * Periods are handled as date-only "YYYY-MM-DD" strings rather than
- * instants: a calendar day has no single UTC extent once venues can sit
- * in different zones, and zero-padded ISO dates compare correctly with
- * plain string operators. Ranges are INCLUSIVE at both ends.
- *
- * The period shapes are unchanged from the UTC version — a full calendar
- * day/week/month containing now, each compared against the immediately
- * preceding full period, weeks starting Sunday to match day_of_week.
- * ---------------------------------------------------------------------- */
-
-export type LocalDateRange = { from: string; to: string };
-
-/** "YYYY-MM-DD" for an instant as seen in `timeZone`. */
-export function localDateIn(instant: Date, timeZone: string): string {
-  // en-CA formats as YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(instant);
-}
-
-function toYmd(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-/** Calendar arithmetic on a date-only value. Safe to run through UTC:
- * the input carries no time and no zone, so adding days can never cross
- * a DST transition the way shifting a real instant can. */
-export function shiftDate(ymd: string, days: number): string {
-  const [y, m, d] = ymd.split("-").map(Number);
-  return toYmd(new Date(Date.UTC(y, m - 1, d + days)));
-}
-
-/** 0 = Sunday, matching day_of_week in venue_operating_hours. */
-export function weekdayOf(ymd: string): number {
-  const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-}
-
-export function dayRange(today: string, daysAgo: number): LocalDateRange {
-  const day = shiftDate(today, -daysAgo);
-  return { from: day, to: day };
-}
-
-export function weekRange(today: string, weeksAgo: number): LocalDateRange {
-  const from = shiftDate(today, -weekdayOf(today) - weeksAgo * 7);
-  return { from, to: shiftDate(from, 6) };
-}
-
-export function monthRange(today: string, monthsAgo: number): LocalDateRange {
-  const [y, m] = today.split("-").map(Number);
-  const first = new Date(Date.UTC(y, m - 1 - monthsAgo, 1));
-  // Day 0 of the following month is the last day of this one.
-  const last = new Date(Date.UTC(y, m - monthsAgo, 0));
-  return { from: toYmd(first), to: toYmd(last) };
-}
-
-export function isWithin(ymd: string, range: LocalDateRange): boolean {
-  return ymd >= range.from && ymd <= range.to;
-}
-
-type VenuePeriods = {
-  today: LocalDateRange;
-  previousDay: LocalDateRange;
-  thisWeek: LocalDateRange;
-  previousWeek: LocalDateRange;
-  thisMonth: LocalDateRange;
-  previousMonth: LocalDateRange;
-};
-
-export function periodsFor(today: string): VenuePeriods {
-  return {
-    today: dayRange(today, 0),
-    previousDay: dayRange(today, 1),
-    thisWeek: weekRange(today, 0),
-    previousWeek: weekRange(today, 1),
-    thisMonth: monthRange(today, 0),
-    previousMonth: monthRange(today, 1),
-  };
-}
+/**
+ * "Today"/"this week"/"this month" are VENUE-LOCAL calendar periods, never
+ * UTC ones — see venueLocalPeriods.ts for why and for the date-math these
+ * share with getOwnerDashboardSummary (ownerBookings.ts), which buckets
+ * "this week" through the exact same LocalDateRange/periodsFor so the two
+ * owner-facing revenue surfaces can't disagree about what week it is.
+ */
 
 /** A booking annotated with the venue context every period decision needs. */
 type DatedBooking = BookingRow & {
@@ -277,12 +205,27 @@ export async function getOwnerAnalytics(supabase: Client, ownerId: string): Prom
     return fresh;
   };
 
-  // The fetch window is instant-based and only has to be a SUPERSET of
-  // the venue-local months we bucket into — one day of slack each side
-  // covers every real UTC offset (max ±14h).
-  const utcNow = localDateIn(now, "UTC");
-  const fetchFrom = `${shiftDate(monthRange(utcNow, 1).from, -1)}T00:00:00.000Z`;
-  const fetchTo = `${shiftDate(monthRange(utcNow, 0).to, 1)}T23:59:59.999Z`;
+  // The fetch window must be a superset of the venue-local months we
+  // bucket into — and "venue-local", not UTC's, is the operative word.
+  // An earlier version anchored this on monthRange(UTC's date), which
+  // only bounds the *instant* correctly; it does nothing for the window
+  // *endpoints* once a venue's local calendar month has a different
+  // label than UTC's. For a Manila venue (UTC+8) in the first eight
+  // hours of a new local month, "this month" was already September
+  // locally while UTC's date was still August 31st — so fetchTo, built
+  // from August, ended before September's bookings even began, and
+  // every metric fed by monthBookings (occupancy, peak/lowest hour,
+  // most-booked courts, total bookings, repeat customers, cancellation
+  // rate) under-reported along with revenue. A venue behind UTC loses
+  // the opposite end: previousMonth truncates instead.
+  //
+  // So the window is derived from the actual venue-local ranges being
+  // bucketed into, across every timezone this owner's venues use — not
+  // from a single assumed calendar month. One day of slack past the
+  // earliest previousMonth.from and latest thisMonth.to absorbs any real
+  // UTC offset (max ±14h) the venue-local -> instant conversion needs.
+  const timezonesInPlay = [...new Set(courts.map((c) => venuesById.get(c.venue_id)?.timezone ?? "Asia/Manila"))];
+  const { fetchFrom, fetchTo } = fetchWindowFor(timezonesInPlay, (p) => ({ from: p.previousMonth.from, to: p.thisMonth.to }));
 
   const { data: bookings, error: bookingsError } = await supabase
     .from("bookings")
