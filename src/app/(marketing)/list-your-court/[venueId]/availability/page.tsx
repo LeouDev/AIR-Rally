@@ -79,7 +79,7 @@ export default async function VenueAvailabilityPage({
         </div>
       </div>
 
-      <OwnerAvailabilityCalendar venueId={venueId} date={date} courts={courts} schedulesByCourt={schedulesByCourt} />
+      <OwnerAvailabilityCalendar venueId={venueId} date={date} timezone={venue.timezone} courts={courts} schedulesByCourt={schedulesByCourt} />
     </div>
   );
 }
