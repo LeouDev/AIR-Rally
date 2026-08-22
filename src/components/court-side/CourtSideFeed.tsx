@@ -24,7 +24,19 @@ import type { EventWithDetails } from "@/lib/services/events";
 import type { Club, EventAttendeeStatus, PublicProfile } from "@/lib/supabase/types";
 import { suggestedPlayersFromFeed, postCountLabel } from "@/lib/suggestedPlayers";
 
-const FEED_TABS = ["For you", "Following", "Near you"] as const;
+// 'Near you' is not offered: it needs a device location, which the web
+// client has no way to ask a browser for on every visit without a
+// permission prompt no one asked to see. Mobile removed the same tab
+// for the same reason (expo-location would be a new native dependency
+// moving the OTA fingerprint) — see its court-side/index.tsx. Both
+// remaining tabs are also unfiltered today: the feed always comes from
+// court_side_feed(p_limit, p_cursor) (lib/services/posts.ts), which has
+// no scope parameter yet, so switching tabs below moves the selection
+// and nothing else. That gap gets closed when the RPC learns a scope
+// argument (see migration 20260810000077); this component announcing
+// otherwise in the meantime — the toast this replaced — was the actual
+// bug, not the missing filter itself.
+const FEED_TABS = ["For you", "Following"] as const;
 
 function formatEventDate(iso: string) {
   const date = new Date(iso);
@@ -472,10 +484,7 @@ export function CourtSideFeed({
 
         <Tabs
           value={activeTab}
-          onValueChange={(value) => {
-            setActiveTab(value as (typeof FEED_TABS)[number]);
-            toast(`${value} feed selected`);
-          }}
+          onValueChange={(value) => setActiveTab(value as (typeof FEED_TABS)[number])}
           className="mt-6"
         >
           <TabsList variant="line">
