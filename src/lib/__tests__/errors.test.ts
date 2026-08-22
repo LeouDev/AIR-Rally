@@ -13,6 +13,45 @@ describe("getFriendlyErrorMessage", () => {
     );
   });
 
+  it("maps invalid credentials by code, not message text", () => {
+    expect(getFriendlyErrorMessage({ code: "invalid_credentials", message: "Invalid login credentials" })).toBe(
+      "That email or password is incorrect."
+    );
+  });
+
+  it("maps a duplicate signup by code", () => {
+    expect(getFriendlyErrorMessage({ code: "user_already_exists" })).toBe(
+      "An account with that email already exists."
+    );
+  });
+
+  it("maps an unconfirmed email by code", () => {
+    expect(getFriendlyErrorMessage({ code: "email_not_confirmed" })).toBe(
+      "Please confirm your email before signing in — check your inbox for the confirmation link."
+    );
+  });
+
+  it("maps a rate limit by code", () => {
+    expect(getFriendlyErrorMessage({ code: "over_request_rate_limit" })).toBe(
+      "Too many attempts. Please wait a moment and try again."
+    );
+  });
+
+  it("maps an expired session by code", () => {
+    expect(getFriendlyErrorMessage({ code: "refresh_token_not_found" })).toBe(
+      "Your session has expired. Please sign in again."
+    );
+  });
+
+  it("prefers the auth error code over message text when they'd disagree", () => {
+    // A message that reads like something else entirely — the code must win,
+    // since the code is the SDK's stable contract and the message is prose
+    // Supabase can reword without notice.
+    expect(
+      getFriendlyErrorMessage({ code: "invalid_credentials", message: 'relation "auth.users" does not exist' })
+    ).toBe("That email or password is incorrect.");
+  });
+
   it("maps a Postgres unique_violation code regardless of message text", () => {
     expect(getFriendlyErrorMessage({ code: "23505", message: 'duplicate key value violates unique constraint "favorites_pkey"' })).toBe(
       "That already exists."

@@ -13,6 +13,28 @@ function asErrorLike(error: unknown): ErrorLike {
   return {};
 }
 
+// The auth entries below are keyed on @supabase/auth-js's ErrorCode
+// union (invalid_credentials, user_already_exists, ...) — a stable
+// machine-readable string every AuthApiError carries — rather than on
+// `message`, which is prose Supabase is free to reword in any release
+// with no signal that it happened. When that wording changes, a
+// message-only match silently stops matching and a raw SDK string
+// starts reaching users again; the code can't drift the same way.
+// Mirrors lib/auth-errors.ts on the mobile side, which found this the
+// hard way. The regex patterns further down stay as a fallback for the
+// rarer case where an error arrives with no `code` at all.
+const AUTH_CODE_MESSAGES: Record<string, string> = {
+  invalid_credentials: "That email or password is incorrect.",
+  user_already_exists: "An account with that email already exists.",
+  email_exists: "An account with that email already exists.",
+  email_not_confirmed: "Please confirm your email before signing in — check your inbox for the confirmation link.",
+  over_request_rate_limit: "Too many attempts. Please wait a moment and try again.",
+  over_email_send_rate_limit: "Too many attempts. Please wait a moment and try again.",
+  session_expired: "Your session has expired. Please sign in again.",
+  session_not_found: "Your session has expired. Please sign in again.",
+  refresh_token_not_found: "Your session has expired. Please sign in again.",
+};
+
 const PATTERNS: Array<{ test: (e: ErrorLike) => boolean; message: string }> = [
   {
     test: (e) => /invalid login credentials/i.test(e.message ?? ""),
@@ -70,6 +92,7 @@ export function getFriendlyErrorMessage(
   fallback = "Something went wrong. Please try again."
 ): string {
   const e = asErrorLike(error);
+  if (e.code && AUTH_CODE_MESSAGES[e.code]) return AUTH_CODE_MESSAGES[e.code];
   return PATTERNS.find((p) => p.test(e))?.message ?? fallback;
 }
 
