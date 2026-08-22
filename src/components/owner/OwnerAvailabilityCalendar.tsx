@@ -16,7 +16,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getBookingDetailForOwner, type OwnerBookingWithDetails } from "@/lib/services/ownerBookings";
 import { cn } from "@/lib/utils";
 import type { Court } from "@/lib/supabase/types";
-import type { MergedSlot } from "@/lib/services/ownerAvailability";
+import { shiftLocalDate, todayInTimezone, type MergedSlot } from "@/lib/services/ownerAvailability";
 
 const CELL_WIDTH = 56;
 const ROW_HEADER_WIDTH = 168;
@@ -379,11 +379,16 @@ function MobileAgenda({
 export function OwnerAvailabilityCalendar({
   venueId,
   date,
+  timezone,
   courts,
   schedulesByCourt,
 }: {
   venueId: string;
   date: string;
+  /** The venue's own IANA zone. Every date this component derives is a
+   * venue-local calendar date, never the owner's browser date — an owner
+   * can sit in a different zone from the court they are scheduling. */
+  timezone: string;
   courts: Court[];
   schedulesByCourt: Record<string, MergedSlot[]>;
 }) {
@@ -396,9 +401,7 @@ export function OwnerAvailabilityCalendar({
   }
 
   function shiftDate(days: number) {
-    const d = new Date(`${date}T00:00:00`);
-    d.setDate(d.getDate() + days);
-    goToDate(d.toISOString().slice(0, 10));
+    goToDate(shiftLocalDate(date, days));
   }
 
   async function handleSelectBooking(bookingId: string) {
@@ -425,7 +428,7 @@ export function OwnerAvailabilityCalendar({
           <Button type="button" variant="outline" size="icon" onClick={() => shiftDate(1)} aria-label="Next day">
             <ChevronRight className="size-4" />
           </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={() => goToDate(new Date().toISOString().slice(0, 10))}>
+          <Button type="button" variant="ghost" size="sm" onClick={() => goToDate(todayInTimezone(timezone))}>
             Today
           </Button>
         </div>

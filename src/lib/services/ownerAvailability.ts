@@ -58,6 +58,18 @@ export function todayInTimezone(timezone: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
+/** Calendar-day arithmetic on a date-only "YYYY-MM-DD" value. Routed
+ * through UTC deliberately: the input carries no time and no zone, so
+ * building it this way cannot pick up the host's own offset — which is
+ * exactly what `new Date("2026-09-01T00:00:00")` does, since that parses
+ * as *local* midnight. In a UTC+8 browser that lands on
+ * 2026-08-31T16:00Z, so reading the day back off `.toISOString()` gives
+ * the previous date and the shift silently loses a day. */
+export function shiftLocalDate(ymd: string, days: number): string {
+  const [year, month, day] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
 // --- 4-state calendar: padding real RPC slots with "closed" gaps -------
 //
 // venue_operating_hours is one row per (venue_id, day_of_week) — a
