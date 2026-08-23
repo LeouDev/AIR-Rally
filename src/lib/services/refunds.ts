@@ -52,7 +52,13 @@ export async function getRefundableAmount(supabase: Client, booking: Booking): P
   const { data, error } = await supabase.from("booking_refunds").select("amount").eq("booking_id", booking.id).eq("status", "succeeded");
   if (error) throw error;
   const alreadyRefunded = (data ?? []).reduce((sum, r) => sum + r.amount, 0);
-  return booking.price_amount - alreadyRefunded;
+  // Capped against what was actually captured by the payment provider
+  // (price minus any credit applied), not the gross price — a booking
+  // partly paid with AIR/Rally Credits was never charged the credit
+  // portion to PayMongo, so refunding against the gross price requests
+  // more than the provider ever collected. credit_amount_applied is 0 on
+  // every booking that paid entirely in cash, so this is a no-op there.
+  return booking.price_amount - booking.credit_amount_applied - alreadyRefunded;
 }
 
 export async function listRefundsForBooking(supabase: Client, bookingId: string): Promise<BookingRefund[]> {

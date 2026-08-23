@@ -244,6 +244,20 @@ describe("getRescheduleEligibility", () => {
     });
     await expect(getRescheduleEligibility(supabase, "user-1", ORIGINAL_BOOKING.id)).resolves.toMatchObject({ eligible: false, reason: "reschedule_in_progress" });
   });
+
+  // Regression: complete_reschedule() cancels the original via a raw UPDATE
+  // (confirmed -> cancelled) that never runs through
+  // restore_credit_on_booking_cancel() — that trigger only fires for a
+  // pending -> cancelled transition. Before this guard, a credit-paid
+  // booking's reschedule silently destroyed the applied credit.
+  it("rejects a booking paid with any AIR/Rally Credits", async () => {
+    mockGetBookingById.mockResolvedValue({ ...ORIGINAL_BOOKING, credit_amount_applied: 20000 });
+    const supabase = createTableMockSupabase({});
+    await expect(getRescheduleEligibility(supabase, "user-1", ORIGINAL_BOOKING.id)).resolves.toMatchObject({
+      eligible: false,
+      reason: "credit_booking_not_reschedulable",
+    });
+  });
 });
 
 // ---------------------------------------------------------------------
@@ -475,6 +489,24 @@ describe("createReschedule — pre-flight checks", () => {
       })
     ).rejects.toMatchObject({ reason: "reschedule_in_progress" });
     expect(mockCancelBooking).toHaveBeenCalledWith(supabase, "user-1", REPLACEMENT_BOOKING.id);
+  });
+
+  // The guard belongs at the mutation itself, not only inside
+  // getRescheduleEligibility() — checked explicitly here too, mirroring
+  // cancelBooking()'s own inline credit check in bookings.ts.
+  it("refuses to reschedule a credit-paid booking, without ever calling createBooking", async () => {
+    mockGetBookingById.mockResolvedValue({ ...ORIGINAL_BOOKING, credit_amount_applied: 20000 });
+    const supabase = createTableMockSupabase({});
+    await expect(
+      createReschedule(supabase, "user-1", {
+        bookingId: ORIGINAL_BOOKING.id,
+        newCourtId: "court-2",
+        newStartTime: FAR_FUTURE_START,
+        newEndTime: FAR_FUTURE_END,
+        siteUrl: "https://air-rally.app",
+      })
+    ).rejects.toMatchObject({ reason: "credit_booking_not_reschedulable" });
+    expect(mockCreateBooking).not.toHaveBeenCalled();
   });
 });
 

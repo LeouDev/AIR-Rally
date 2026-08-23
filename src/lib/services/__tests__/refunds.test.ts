@@ -101,6 +101,30 @@ describe("getRefundableAmount", () => {
     } as never;
     await expect(getRefundableAmount(supabase, CONFIRMED_STRIPE_BOOKING)).resolves.toBe(35000);
   });
+
+  // Regression: price_amount is the GROSS price, but a booking partly paid
+  // with AIR/Rally Credits was never charged that full amount to
+  // PayMongo. Before this cap, a ₱1,199 credit + ₱1 cash booking computed
+  // 50000 refundable (the gross price) instead of what was actually
+  // captured — the only thing standing between that and a real over-
+  // refund was PayMongo's own server-side validation, never our own.
+  it("caps against what was actually captured (price minus applied credit), not the gross price", async () => {
+    const supabase = { from: jest.fn(() => ({ select: jest.fn(() => ({ eq: jest.fn(() => ({ eq: jest.fn().mockResolvedValue({ data: [], error: null }) })) })) })) } as never;
+    const partlyCreditPaid = { ...CONFIRMED_STRIPE_BOOKING, price_amount: 50000, credit_amount_applied: 49900 };
+    await expect(getRefundableAmount(supabase, partlyCreditPaid)).resolves.toBe(100);
+  });
+
+  // credit_amount_applied is 0 on every booking today — proves the cap is
+  // a pure no-op for the common case rather than a behavior change riding
+  // along with the fix.
+  it("is unchanged for a booking with no credit applied", async () => {
+    const supabase = {
+      from: jest.fn(() => ({
+        select: jest.fn(() => ({ eq: jest.fn(() => ({ eq: jest.fn().mockResolvedValue({ data: [{ amount: 10000 }], error: null }) })) })),
+      })),
+    } as never;
+    await expect(getRefundableAmount(supabase, CONFIRMED_STRIPE_BOOKING)).resolves.toBe(40000);
+  });
 });
 
 describe("requestRefund", () => {

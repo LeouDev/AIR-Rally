@@ -37,7 +37,8 @@ export type RescheduleErrorReason =
   | "refund_failed"
   | "completion_pending_retry"
   | "reschedule_not_found"
-  | "reschedule_not_resumable";
+  | "reschedule_not_resumable"
+  | "credit_booking_not_reschedulable";
 
 /** Typed domain error for the rescheduling layer, mirroring BookingError/RefundError's shape — `message` is already user-safe. */
 export class RescheduleError extends Error {
@@ -68,6 +69,28 @@ export async function getRescheduleEligibility(supabase: Client, userId: string,
   }
   if (booking.status !== "confirmed") {
     return { eligible: false, reason: "booking_not_confirmed", message: "Only a confirmed booking can be rescheduled." };
+  }
+  // STOPGAP, not the fix: complete_reschedule() cancels the original via a
+  // raw UPDATE (confirmed -> cancelled) that never runs through
+  // restore_credit_on_booking_cancel() — that trigger only fires for a
+  // pending -> cancelled transition (20260810000037), because a
+  // confirmed booking's credit decision is supposed to be issued
+  // explicitly by a server action, never implicitly by a trigger. This
+  // reschedule path is exactly such an implicit path the trigger was
+  // never told about, so today it silently destroys the applied credit
+  // with nothing to restore it. The correct fix carries the credit
+  // forward onto the replacement booking; that's real work in the money
+  // path and out of scope this close to launch. Blocking is strictly
+  // better than the status quo (which silently loses the customer's
+  // credit), mirroring cancelBooking()'s own credit_amount_applied rule
+  // in bookings.ts — but a credit-paid booking currently can't be
+  // rescheduled at all.
+  if (booking.credit_amount_applied > 0) {
+    return {
+      eligible: false,
+      reason: "credit_booking_not_reschedulable",
+      message: "Bookings paid with AIR/Rally Credits can't be rescheduled yet.",
+    };
   }
   if (new Date(booking.start_time).getTime() < Date.now() + RESCHEDULE_CUTOFF_HOURS * 60 * 60_000) {
     return {
@@ -352,6 +375,19 @@ export async function createReschedule(supabase: Client, userId: string, input: 
   const original = await getBookingById(supabase, input.bookingId);
   if (!original) {
     throw new RescheduleError("booking_not_found", "We couldn't find that booking.");
+  }
+  // Re-checked explicitly at the mutation itself — not only inside
+  // getRescheduleEligibility() above — the same way cancelBooking()'s own
+  // credit_amount_applied guard lives directly in bookings.ts rather than
+  // in a separate eligibility helper. See getRescheduleEligibility()'s
+  // comment on this same check for why: complete_reschedule() cancels the
+  // original through a path restore_credit_on_booking_cancel() never
+  // observes, so nothing else in this call chain would catch it.
+  if (original.credit_amount_applied > 0) {
+    throw new RescheduleError(
+      "credit_booking_not_reschedulable",
+      "Bookings paid with AIR/Rally Credits can't be rescheduled yet."
+    );
   }
 
   const { data: originalCourt, error: originalCourtError } = await supabase
