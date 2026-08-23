@@ -94,6 +94,13 @@ export default async function AdminSupportPage({ searchParams }: { searchParams:
 
               <p className="mt-3 text-xs text-muted-foreground">From {request.user?.display_name ?? "a player"}</p>
 
+              {request.resolution_note && (
+                <div className="mt-3 rounded-lg border border-border bg-muted/30 p-3">
+                  <p className="text-xs font-medium text-foreground">Your reply</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{request.resolution_note}</p>
+                </div>
+              )}
+
               <div className="mt-4">
                 <SupportStatusButtons requestId={request.id} status={request.status} />
               </div>

@@ -786,6 +786,8 @@ export type SupportRequest = {
   status: SupportStatus;
   resolved_by: string | null;
   resolved_at: string | null;
+  /** The admin's single reply (20260810000088) — required when status is resolved/closed, null otherwise. */
+  resolution_note: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1259,7 +1261,7 @@ export type Database = {
       support_requests: TableDef<
         SupportRequest,
         Pick<SupportRequest, "user_id" | "category" | "subject" | "message">,
-        Partial<Pick<SupportRequest, "status" | "resolved_by" | "resolved_at">>
+        Partial<Pick<SupportRequest, "status" | "resolved_by" | "resolved_at" | "resolution_note">>
       >;
       // Ranked: read-only to every client role. See the block comment above
       // RankedTier for why, and the RPCs below for the write surface.

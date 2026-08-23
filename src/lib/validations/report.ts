@@ -50,6 +50,31 @@ export const resolveReportSchema = z.object({
 
 export type ResolveReportValues = z.infer<typeof resolveReportSchema>;
 
+/**
+ * Unlike resolveReportSchema's optional note, this one is required for
+ * 'resolved'/'closed' — support_resolution_complete
+ * (20260810000088) enforces the same thing at the database layer; this
+ * is the friendly, pre-round-trip version of that same requirement, not
+ * a looser or stricter one. 'open'/'in_progress' need no note at all
+ * (moving a request along isn't a reply), so this only requires one
+ * conditionally rather than making it a blanket required field.
+ */
+export const setSupportStatusSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    status: z.enum(["open", "in_progress", "resolved", "closed"]),
+    resolutionNote: z.string().trim().max(1000, "Please keep this under 1000 characters.").optional(),
+  })
+  .refine(
+    (values) => {
+      if (values.status !== "resolved" && values.status !== "closed") return true;
+      return Boolean(values.resolutionNote && values.resolutionNote.length > 0);
+    },
+    { message: "Write a reply before resolving or closing this request.", path: ["resolutionNote"] }
+  );
+
+export type SetSupportStatusValues = z.infer<typeof setSupportStatusSchema>;
+
 export const SUPPORT_CATEGORIES = ["booking", "payment", "account", "venue", "safety", "bug", "other"] as const;
 
 export const SUPPORT_CATEGORY_LABELS: Record<(typeof SUPPORT_CATEGORIES)[number], string> = {

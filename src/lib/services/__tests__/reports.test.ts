@@ -1,5 +1,5 @@
-import { createReport, createSupportRequest, describeReportTarget, ReportError } from "../reports";
-import { createReportSchema, createSupportRequestSchema, resolveReportSchema } from "../../validations/report";
+import { createReport, createSupportRequest, setSupportRequestStatus, describeReportTarget, ReportError } from "../reports";
+import { createReportSchema, createSupportRequestSchema, resolveReportSchema, setSupportStatusSchema } from "../../validations/report";
 
 /**
  * The behaviour that lives in TypeScript rather than in the database.
@@ -128,5 +128,73 @@ describe("validation schemas", () => {
   it("requires enough of a support message to be actionable", () => {
     const tooShort = createSupportRequestSchema.safeParse({ category: "bug", subject: "Hi", message: "broken" });
     expect(tooShort.success).toBe(false);
+  });
+});
+
+describe("setSupportStatusSchema", () => {
+  const requestId = VALUES.targetId;
+
+  it("rejects moving to 'resolved' with no note — the exact gap this migration closes", () => {
+    const result = setSupportStatusSchema.safeParse({ requestId, status: "resolved" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects moving to 'closed' with an empty note", () => {
+    const result = setSupportStatusSchema.safeParse({ requestId, status: "closed", resolutionNote: "   " });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts moving to 'resolved' with a real note", () => {
+    const result = setSupportStatusSchema.safeParse({ requestId, status: "resolved", resolutionNote: "Refunded your credit." });
+    expect(result.success).toBe(true);
+  });
+
+  it("does not require a note for 'open' or 'in_progress' — moving a request along isn't a reply", () => {
+    expect(setSupportStatusSchema.safeParse({ requestId, status: "open" }).success).toBe(true);
+    expect(setSupportStatusSchema.safeParse({ requestId, status: "in_progress" }).success).toBe(true);
+  });
+
+  it("rejects a note over 1000 characters, matching support_resolution_complete's own bound", () => {
+    const result = setSupportStatusSchema.safeParse({ requestId, status: "resolved", resolutionNote: "x".repeat(1001) });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("setSupportRequestStatus", () => {
+  /** Minimal supabase double: update(...).eq(...).select(...).single() resolves to `result`, capturing the update payload. */
+  function updateClient(result: QueryResult) {
+    let captured: unknown;
+    return {
+      client: {
+        from: () => ({
+          update: (payload: unknown) => {
+            captured = payload;
+            return { eq: () => ({ select: () => ({ single: () => Promise.resolve(result) }) }) };
+          },
+        }),
+      } as never,
+      captured: () => captured,
+    };
+  }
+
+  it("writes the resolution note when resolving, alongside resolved_by/resolved_at", async () => {
+    const { client, captured } = updateClient({ data: { id: "r1", status: "resolved" }, error: null });
+    await setSupportRequestStatus(client, "r1", "admin-1", "resolved", "Refunded your credit.");
+    expect(captured()).toMatchObject({
+      status: "resolved",
+      resolved_by: "admin-1",
+      resolution_note: "Refunded your credit.",
+    });
+  });
+
+  it("clears resolved_by/resolved_at/resolution_note on reopen — the row must not claim a resolver or a reply it no longer has", async () => {
+    const { client, captured } = updateClient({ data: { id: "r1", status: "open" }, error: null });
+    await setSupportRequestStatus(client, "r1", "admin-1", "open");
+    expect(captured()).toMatchObject({
+      status: "open",
+      resolved_by: null,
+      resolved_at: null,
+      resolution_note: null,
+    });
   });
 });

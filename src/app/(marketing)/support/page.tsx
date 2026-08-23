@@ -112,6 +112,12 @@ export default async function SupportPage() {
                   </Badge>
                 </div>
                 <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{request.message}</p>
+                {request.resolution_note && (
+                  <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3">
+                    <p className="text-xs font-medium text-foreground">Our reply</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{request.resolution_note}</p>
+                  </div>
+                )}
                 <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Clock className="size-3" aria-hidden="true" />
                   {formatWhen(request.created_at)}

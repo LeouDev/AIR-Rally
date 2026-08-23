@@ -239,17 +239,23 @@ export async function setSupportRequestStatus(
   supabase: Client,
   requestId: string,
   adminId: string,
-  status: SupportStatus
+  status: SupportStatus,
+  resolutionNote?: string
 ): Promise<SupportRequest> {
   const closing = status === "resolved" || status === "closed";
   const { data, error } = await supabase
     .from("support_requests")
     .update({
       status,
-      // The CHECK requires both when closing, and reopening must clear
-      // them or the row would claim a resolver it no longer has.
+      // The CHECK requires all three when closing, and reopening must
+      // clear them or the row would claim a resolver — and a reply — it
+      // no longer has. support_resolution_complete (20260810000088)
+      // enforces resolution_note the same way it already enforced
+      // resolved_by/resolved_at; the friendly validation for a missing
+      // note lives in setSupportRequestStatusAction, one layer up.
       resolved_by: closing ? adminId : null,
       resolved_at: closing ? new Date().toISOString() : null,
+      resolution_note: closing ? resolutionNote : null,
     })
     .eq("id", requestId)
     .select("*")

@@ -12,6 +12,7 @@ import {
   createReportSchema,
   resolveReportSchema,
   createSupportRequestSchema,
+  setSupportStatusSchema,
   type CreateReportValues,
   type ResolveReportValues,
   type CreateSupportRequestValues,
@@ -120,8 +121,14 @@ export async function createSupportRequestAction(
 
 export async function setSupportRequestStatusAction(
   requestId: string,
-  status: SupportStatus
+  status: SupportStatus,
+  resolutionNote?: string
 ): Promise<ActionResult<SupportRequest>> {
+  const parsed = setSupportStatusSchema.safeParse({ requestId, status, resolutionNote });
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Please fix the errors below and try again." };
+  }
+
   const clientResult = await getServerClient();
   if (!clientResult.ok) return { success: false, error: clientResult.error };
   const supabase = clientResult.client;
@@ -133,7 +140,7 @@ export async function setSupportRequestStatusAction(
 
   try {
     await requireAdmin(supabase);
-    const request = await setSupportRequestStatus(supabase, requestId, user.id, status);
+    const request = await setSupportRequestStatus(supabase, requestId, user.id, status, parsed.data.resolutionNote);
     revalidatePath("/admin/support");
     return { success: true, data: request };
   } catch (error) {
