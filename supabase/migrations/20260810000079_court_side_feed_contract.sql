@@ -1,0 +1,27 @@
+-- The CONTRACT half of the expand/contract pair begun in 20260810000077.
+--
+-- Removes the 2-argument court_side_feed. After this, a caller that forgets
+-- the scope argument fails loudly instead of silently receiving an
+-- unfiltered feed. MEASURED on staging: the old call returns HTTP 404 with
+-- Postgres code 42883 ("function does not exist"). It is NOT PGRST202 —
+-- that was the assumption before measuring, and anything matching on the
+-- failure (client check, log filter, alert) must use 42883 — which is the entire point of the change,
+-- and the reason 'Following' could ship as a tab that lied to users.
+--
+-- DO NOT APPLY THIS TO PRODUCTION UNTIL OLD CALLERS HAVE DRAINED.
+--
+-- Specifically: web deployed onto the 4-arg signature, mobile OTA'd onto
+-- it, and enough time passed that shipped builds still calling the 2-arg
+-- version are gone. On mobile that is weeks, not days, and there is no
+-- point at which it is guaranteed — an App Store build cannot be
+-- force-updated. Applying this early does not degrade those users, it
+-- breaks their feed outright and permanently.
+--
+-- Nothing is lost by waiting. The expand window's only cost is that the
+-- 2-arg function keeps behaving exactly as it does today.
+--
+-- Staging is different: it has no external users, and QA needs to verify
+-- that a forgotten scope argument fails loudly, so staging gets this
+-- immediately after the coexistence behaviour has been measured.
+
+drop function if exists public.court_side_feed(integer, timestamptz);
