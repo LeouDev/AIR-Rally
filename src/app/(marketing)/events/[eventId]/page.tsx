@@ -17,7 +17,44 @@ import { BackLink } from "@/components/shared/BackLink";
 const ACTIVE_RANKED_STATUSES = ["lobby", "officiating", "live", "awaiting_confirmation"];
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Game" };
+
+export async function generateMetadata({ params }: { params: Promise<{ eventId: string }> }): Promise<Metadata> {
+  const { eventId } = await params;
+  const supabase = await createClient();
+  // Not the signed-in caller's own identity — a crawler unfurling a
+  // shared link never carries a session, and this query is already
+  // subject to the `events` table's own RLS the same way the page body's
+  // identical query below is: a private club's event that an anonymous
+  // fetch can't see comes back null here exactly as it does there, so no
+  // separate privacy check is needed for this metadata path.
+  const { data: event } = await supabase.from("events").select("title, venue_id").eq("id", eventId).maybeSingle();
+  if (!event) return { title: "Game" };
+
+  const { data: venue } = event.venue_id
+    ? await supabase.from("venues").select("name, city").eq("id", event.venue_id).maybeSingle()
+    : { data: null };
+
+  const description = venue
+    ? `${event.title} at ${venue.name}${venue.city ? `, ${venue.city}` : ""} — join on Air/Rally.`
+    : `${event.title} — join on Air/Rally.`;
+
+  return {
+    title: event.title,
+    description,
+    openGraph: {
+      title: event.title,
+      description,
+      url: `/events/${eventId}`,
+      images: [{ url: "/brand/og-image.png", width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: event.title,
+      description,
+      images: ["/brand/og-image.png"],
+    },
+  };
+}
 
 function formatWhen(iso: string): string {
   return new Date(iso).toLocaleString("en-PH", {

@@ -40,10 +40,39 @@ function upcomingOnly(events: CommunityEvent[]): CommunityEvent[] {
 
 export async function generateMetadata({ params }: PageProps) {
   const { clubId } = await params;
-  const user = await getCurrentUser();
+  // Deliberately NOT the signed-in caller's own identity for this
+  // lookup — a link-unfurl crawler (Messages, Facebook, Instagram) never
+  // carries a session, so it sees exactly what an anonymous visitor
+  // does. getClubForViewer(..., null) is the same call the page body
+  // already makes for that visitor — a private or approval-required
+  // club the anonymous caller isn't a member of already resolves to
+  // null here, the same as it does below, so no separate privacy check
+  // is needed for the metadata path.
   const supabase = await createClient();
-  const club = await getClubForViewer(supabase, clubId, user?.id ?? null);
-  return { title: club?.name ?? "Club" };
+  const club = await getClubForViewer(supabase, clubId, null);
+  if (!club) return { title: "Club" };
+
+  const description = club.description
+    ? club.description.slice(0, 155)
+    : `${club.name} on Air/Rally — ${TYPE_LABELS[club.club_type]} club${club.location ? ` in ${club.location}` : ""}.`;
+  const imageUrl = clubImagePublicUrl(club.image_url) ?? "/brand/og-image.png";
+
+  return {
+    title: club.name,
+    description,
+    openGraph: {
+      title: club.name,
+      description,
+      url: `/clubs/${clubId}`,
+      images: [{ url: imageUrl, width: 1200, height: 630, alt: club.name }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: club.name,
+      description,
+      images: [imageUrl],
+    },
+  };
 }
 
 export default async function ClubDetailPage({ params }: PageProps) {

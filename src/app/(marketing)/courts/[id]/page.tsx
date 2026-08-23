@@ -55,7 +55,35 @@ export async function generateMetadata({ params }: CourtDetailPageProps): Promis
     ? venue.description.slice(0, 155)
     : `Book ${venue.name} in ${venue.city ?? "the Philippines"} on Air/Rally.`;
 
-  return { title: venue.name, description };
+  // A venue/court page is genuinely public — this is exactly the object
+  // type meant to unfurl with its own photo. openGraph/twitter are set
+  // explicitly here (not merged from the root layout's generic ones):
+  // Next.js does not fold a page's plain `title`/`description` into its
+  // `openGraph` fields automatically, so without this every court page
+  // shared anywhere would show the generic site-wide preview instead of
+  // this venue's.
+  // Always a concrete image — the venue's own first photo, or the
+  // branded default — never left unset. Whether an unset field here
+  // would inherit the root layout's image isn't something to assume;
+  // being explicit removes the question.
+  const ogImageUrl = venue.images[0] ? getPublicImageUrl(supabase, venue.images[0].storage_path) : "/brand/og-image.png";
+
+  return {
+    title: venue.name,
+    description,
+    openGraph: {
+      title: venue.name,
+      description,
+      url: `/courts/${id}`,
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: venue.name }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: venue.name,
+      description,
+      images: [ogImageUrl],
+    },
+  };
 }
 
 export default async function CourtDetailPage({ params }: CourtDetailPageProps) {
