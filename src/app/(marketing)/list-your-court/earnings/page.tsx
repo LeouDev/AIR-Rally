@@ -3,8 +3,17 @@ import Link from "next/link";
 import { Download } from "lucide-react";
 import { requireSignedIn } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getOwnerAnalytics, getOwnerYearRevenue, getOwnerRevenueForRange, type RevenuePeriod } from "@/lib/services/ownerAnalytics";
-import { getOwnerSettlementSummary, listOwnerSettlements } from "@/lib/services/settlements";
+import {
+  getOwnerAnalytics,
+  getOwnerYearRevenue,
+  getOwnerRevenueForRange,
+  type RevenuePeriod,
+} from "@/lib/services/ownerAnalytics";
+import {
+  getOwnerSettlementSummary,
+  listOwnerSettlements,
+  countOwnerSettlements,
+} from "@/lib/services/settlements";
 import { getOwnerBatchStatusBySettlement } from "@/lib/services/payouts";
 import { SettlementPanel } from "@/components/owner/SettlementPanel";
 import { Button } from "@/components/ui/button";
@@ -30,16 +39,29 @@ function formatHour(hour: number): string {
   return `${displayHour}:00 ${period}`;
 }
 
-function RevenueCard({ label, period, currency }: { label: string; period: RevenuePeriod; currency: string }) {
+function RevenueCard({
+  label,
+  period,
+  currency,
+}: {
+  label: string;
+  period: RevenuePeriod;
+  currency: string;
+}) {
   const hasComparison = period.changePct !== null;
   const isUp = hasComparison && period.changePct! >= 0;
   return (
     <div className="rounded-2xl border border-border bg-card p-6">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-1 text-2xl font-semibold text-foreground">{formatMoney(period.amount, currency)}</dd>
+      <dd className="mt-1 text-2xl font-semibold text-foreground">
+        {formatMoney(period.amount, currency)}
+      </dd>
       {hasComparison && (
-        <p className={`mt-1 text-xs font-medium ${isUp ? "text-emerald-600" : "text-red-600"}`}>
-          {isUp ? "↑" : "↓"} {formatPct(Math.abs(period.changePct!))} vs. previous period
+        <p
+          className={`mt-1 text-xs font-medium ${isUp ? "text-emerald-600" : "text-red-600"}`}
+        >
+          {isUp ? "↑" : "↓"} {formatPct(Math.abs(period.changePct!))} vs.
+          previous period
         </p>
       )}
     </div>
@@ -51,37 +73,84 @@ function RevenueCard({ label, period, currency }: { label: string; period: Reven
 // rather than guessing at what the owner meant.
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
+// The settlements table's row-count control. "all" is capped, not truly
+// unbounded — see OWNER_SETTLEMENTS_ALL_CAP.
+const SETTLEMENT_COUNT_OPTIONS = ["10", "20", "50", "all"] as const;
+type SettlementCountOption = (typeof SETTLEMENT_COUNT_OPTIONS)[number];
+const DEFAULT_SETTLEMENT_COUNT: SettlementCountOption = "10";
+
+// A safety ceiling for "All", not a real "no limit" — an owner with an
+// implausibly long history still gets a bounded query rather than the
+// unbounded fetch this same page's booking list used to make.
+const OWNER_SETTLEMENTS_ALL_CAP = 10_000;
+
+function parseSettlementCount(raw: string | undefined): SettlementCountOption {
+  return (SETTLEMENT_COUNT_OPTIONS as readonly string[]).includes(raw ?? "")
+    ? (raw as SettlementCountOption)
+    : DEFAULT_SETTLEMENT_COUNT;
+}
+
 export default async function OwnerEarningsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; count?: string }>;
 }) {
-  const { from, to } = await searchParams;
-  const hasCustomRange = Boolean(from && to && DATE_ONLY.test(from) && DATE_ONLY.test(to) && from <= to);
+  const { from, to, count: rawCount } = await searchParams;
+  const hasCustomRange = Boolean(
+    from && to && DATE_ONLY.test(from) && DATE_ONLY.test(to) && from <= to,
+  );
+  const settlementCount = parseSettlementCount(rawCount);
+  const settlementLimit =
+    settlementCount === "all"
+      ? OWNER_SETTLEMENTS_ALL_CAP
+      : Number(settlementCount);
 
   const user = await requireSignedIn("/list-your-court/earnings");
   const supabase = await createClient();
   // Settlement reads carry no owner id: booking_settlements' RLS policy
   // already scopes them to venues this caller owns. Passing an id would
   // imply the filtering happened here rather than in the database.
-  const [analytics, yearRevenue, settlementSummary, settlementRows, batchBySettlement, customRange] = await Promise.all([
+  const [
+    analytics,
+    yearRevenue,
+    settlementSummary,
+    settlementRows,
+    totalSettlements,
+    batchBySettlement,
+    customRange,
+  ] = await Promise.all([
     getOwnerAnalytics(supabase, user.id),
     getOwnerYearRevenue(supabase, user.id),
     getOwnerSettlementSummary(supabase),
-    listOwnerSettlements(supabase),
+    listOwnerSettlements(supabase, settlementLimit),
+    countOwnerSettlements(supabase),
     // RLS scopes payout_batch_items to this owner's own venues, so an
     // owner learns about their own payouts and nobody else's.
     getOwnerBatchStatusBySettlement(supabase),
-    hasCustomRange ? getOwnerRevenueForRange(supabase, user.id, { from: from!, to: to! }) : Promise.resolve(null),
+    hasCustomRange
+      ? getOwnerRevenueForRange(supabase, user.id, { from: from!, to: to! })
+      : Promise.resolve(null),
   ]);
+
+  function buildSettlementCountHref(option: string): string {
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (option !== DEFAULT_SETTLEMENT_COUNT) params.set("count", option);
+    const qs = params.toString();
+    return `/list-your-court/earnings${qs ? `?${qs}` : ""}`;
+  }
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Earnings</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            Earnings
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            What you have earned and what you are owed, plus occupancy and booking activity across your venues.
+            What you have earned and what you are owed, plus occupancy and
+            booking activity across your venues.
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
@@ -95,23 +164,42 @@ export default async function OwnerEarningsPage({
         </Button>
       </div>
 
-      {/* Settlements lead: "what am I owed" is the question an owner opens
-          this page to answer. The revenue/occupancy analytics below are
-          Phase 7.2 and stay exactly as they were. */}
-      <SettlementPanel summary={settlementSummary} rows={settlementRows} batchBySettlement={batchBySettlement} />
-
+      {/* Revenue leads: "how am I doing" is the question an owner opens this
+          page to answer, before the row-by-row settlement history below. */}
       <div className="flex flex-col gap-4">
         <h2 className="text-base font-semibold text-foreground">Revenue</h2>
         <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <RevenueCard label="Today" period={analytics.revenue.today} currency={analytics.currency} />
-          <RevenueCard label="This week" period={analytics.revenue.thisWeek} currency={analytics.currency} />
-          <RevenueCard label="This month" period={analytics.revenue.thisMonth} currency={analytics.currency} />
-          <RevenueCard label="This year" period={yearRevenue} currency={analytics.currency} />
+          <RevenueCard
+            label="Today"
+            period={analytics.revenue.today}
+            currency={analytics.currency}
+          />
+          <RevenueCard
+            label="This week"
+            period={analytics.revenue.thisWeek}
+            currency={analytics.currency}
+          />
+          <RevenueCard
+            label="This month"
+            period={analytics.revenue.thisMonth}
+            currency={analytics.currency}
+          />
+          <RevenueCard
+            label="This year"
+            period={yearRevenue}
+            currency={analytics.currency}
+          />
         </dl>
 
-        <form className="flex flex-wrap items-end gap-3 rounded-2xl border border-border bg-card p-4" action="/list-your-court/earnings">
+        <form
+          className="flex flex-wrap items-end gap-3 rounded-2xl border border-border bg-card p-4"
+          action="/list-your-court/earnings"
+        >
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="earnings-from" className="text-xs text-muted-foreground">
+            <label
+              htmlFor="earnings-from"
+              className="text-xs text-muted-foreground"
+            >
               From
             </label>
             <input
@@ -123,7 +211,10 @@ export default async function OwnerEarningsPage({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="earnings-to" className="text-xs text-muted-foreground">
+            <label
+              htmlFor="earnings-to"
+              className="text-xs text-muted-foreground"
+            >
               To
             </label>
             <input
@@ -148,15 +239,22 @@ export default async function OwnerEarningsPage({
               <span className="text-muted-foreground">
                 {from} to {to}:
               </span>
-              <span className="font-semibold text-foreground">{formatMoney(customRange.amount, analytics.currency)} confirmed</span>
-              <span className="text-muted-foreground">{customRange.bookingCount} booking{customRange.bookingCount === 1 ? "" : "s"}</span>
+              <span className="font-semibold text-foreground">
+                {formatMoney(customRange.amount, analytics.currency)} confirmed
+              </span>
+              <span className="text-muted-foreground">
+                {customRange.bookingCount} booking
+                {customRange.bookingCount === 1 ? "" : "s"}
+              </span>
             </div>
           )}
         </form>
       </div>
 
       <div className="flex flex-col gap-4">
-        <h2 className="text-base font-semibold text-foreground">Occupancy this month</h2>
+        <h2 className="text-base font-semibold text-foreground">
+          Occupancy this month
+        </h2>
         {analytics.occupancy.perCourt.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-6 text-center text-sm text-muted-foreground">
             Add your first venue and court to see occupancy here.
@@ -165,17 +263,26 @@ export default async function OwnerEarningsPage({
           <div className="rounded-2xl border border-border bg-card p-6">
             <dl className="flex flex-col gap-4">
               {analytics.occupancy.perCourt.map((court) => (
-                <div key={court.courtId} className="flex items-center justify-between gap-4">
-                  <dt className="text-sm font-medium text-foreground">{court.courtName}</dt>
+                <div
+                  key={court.courtId}
+                  className="flex items-center justify-between gap-4"
+                >
+                  <dt className="text-sm font-medium text-foreground">
+                    {court.courtName}
+                  </dt>
                   <dd className="flex items-center gap-3">
                     <div className="h-2 w-32 overflow-hidden rounded-full bg-muted">
                       <div
                         className="h-full rounded-full bg-primary"
-                        style={{ width: `${Math.min(100, (court.occupancyPct ?? 0) * 100)}%` }}
+                        style={{
+                          width: `${Math.min(100, (court.occupancyPct ?? 0) * 100)}%`,
+                        }}
                       />
                     </div>
                     <span className="w-12 text-right text-sm text-muted-foreground">
-                      {court.occupancyPct === null ? "—" : formatPct(court.occupancyPct)}
+                      {court.occupancyPct === null
+                        ? "—"
+                        : formatPct(court.occupancyPct)}
                     </span>
                   </dd>
                 </div>
@@ -184,16 +291,26 @@ export default async function OwnerEarningsPage({
           </div>
         )}
 
-        {(analytics.occupancy.mostBookedCourts.length > 0 || analytics.occupancy.peakHour !== null) && (
+        {(analytics.occupancy.mostBookedCourts.length > 0 ||
+          analytics.occupancy.peakHour !== null) && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {analytics.occupancy.mostBookedCourts.length > 0 && (
               <div className="rounded-2xl border border-border bg-card p-6">
-                <h3 className="text-sm font-semibold text-foreground">Most booked courts</h3>
+                <h3 className="text-sm font-semibold text-foreground">
+                  Most booked courts
+                </h3>
                 <ul className="mt-3 flex flex-col gap-2">
                   {analytics.occupancy.mostBookedCourts.map((court) => (
-                    <li key={court.courtId} className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">{court.courtName}</span>
-                      <span className="font-medium text-foreground">{court.bookingCount} bookings</span>
+                    <li
+                      key={court.courtId}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="text-muted-foreground">
+                        {court.courtName}
+                      </span>
+                      <span className="font-medium text-foreground">
+                        {court.bookingCount} bookings
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -201,16 +318,22 @@ export default async function OwnerEarningsPage({
             )}
             {analytics.occupancy.peakHour !== null && (
               <div className="rounded-2xl border border-border bg-card p-6">
-                <h3 className="text-sm font-semibold text-foreground">Peak &amp; quiet hours</h3>
+                <h3 className="text-sm font-semibold text-foreground">
+                  Peak &amp; quiet hours
+                </h3>
                 <dl className="mt-3 flex flex-col gap-2 text-sm">
                   <div className="flex items-center justify-between">
                     <dt className="text-muted-foreground">Busiest</dt>
-                    <dd className="font-medium text-foreground">{formatHour(analytics.occupancy.peakHour)}</dd>
+                    <dd className="font-medium text-foreground">
+                      {formatHour(analytics.occupancy.peakHour)}
+                    </dd>
                   </div>
                   {analytics.occupancy.lowestHour !== null && (
                     <div className="flex items-center justify-between">
                       <dt className="text-muted-foreground">Quietest</dt>
-                      <dd className="font-medium text-foreground">{formatHour(analytics.occupancy.lowestHour)}</dd>
+                      <dd className="font-medium text-foreground">
+                        {formatHour(analytics.occupancy.lowestHour)}
+                      </dd>
                     </div>
                   )}
                 </dl>
@@ -221,26 +344,47 @@ export default async function OwnerEarningsPage({
       </div>
 
       <div className="flex flex-col gap-4">
-        <h2 className="text-base font-semibold text-foreground">Booking insights this month</h2>
+        <h2 className="text-base font-semibold text-foreground">
+          Booking insights this month
+        </h2>
         <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="rounded-2xl border border-border bg-card p-6">
             <dt className="text-xs text-muted-foreground">Total bookings</dt>
-            <dd className="mt-1 text-lg font-semibold text-foreground">{analytics.bookingInsights.totalBookings}</dd>
+            <dd className="mt-1 text-lg font-semibold text-foreground">
+              {analytics.bookingInsights.totalBookings}
+            </dd>
           </div>
           <div className="rounded-2xl border border-border bg-card p-6">
             <dt className="text-xs text-muted-foreground">Repeat customers</dt>
-            <dd className="mt-1 text-lg font-semibold text-foreground">{analytics.bookingInsights.repeatCustomers}</dd>
+            <dd className="mt-1 text-lg font-semibold text-foreground">
+              {analytics.bookingInsights.repeatCustomers}
+            </dd>
           </div>
           <div className="rounded-2xl border border-border bg-card p-6">
             <dt className="text-xs text-muted-foreground">Cancellation rate</dt>
-            <dd className="mt-1 text-lg font-semibold text-foreground">{formatPct(analytics.bookingInsights.cancellationRate)}</dd>
+            <dd className="mt-1 text-lg font-semibold text-foreground">
+              {formatPct(analytics.bookingInsights.cancellationRate)}
+            </dd>
           </div>
         </dl>
       </div>
 
+      {/* Detail below the analytics: an owner checking a specific booking
+          scrolls down for it once the summary above has answered "how am
+          I doing." */}
+      <SettlementPanel
+        summary={settlementSummary}
+        rows={settlementRows}
+        totalCount={totalSettlements}
+        activeCount={settlementCount}
+        countOptions={SETTLEMENT_COUNT_OPTIONS}
+        buildCountHref={buildSettlementCountHref}
+        batchBySettlement={batchBySettlement}
+      />
+
       <p className="text-xs text-muted-foreground">
-        Figures above reflect what customers have paid, not funds settled to your bank account. Payout and settlement
-        tracking are not yet available.
+        Figures above reflect what customers have paid, not funds settled to
+        your bank account. Payout and settlement tracking are not yet available.
       </p>
     </div>
   );

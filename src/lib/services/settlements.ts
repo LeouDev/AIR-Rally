@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, SettlementIssue, SettlementSource, SettlementStatus } from "@/lib/supabase/types";
+import type {
+  Database,
+  SettlementIssue,
+  SettlementSource,
+  SettlementStatus,
+} from "@/lib/supabase/types";
 import { DEFAULT_CURRENCY } from "@/lib/booking-config";
 import { assertRowShape } from "@/lib/postgrestShape";
 
@@ -62,7 +67,11 @@ type SettlementQueryRow = {
   settlement_status: SettlementStatus;
   created_at: string;
   venues: { name: string } | null;
-  bookings: { confirmation_code: string; start_time: string; courts: { name: string } | null } | null;
+  bookings: {
+    confirmation_code: string;
+    start_time: string;
+    courts: { name: string } | null;
+  } | null;
 };
 
 /**
@@ -140,7 +149,9 @@ export type OwnerSettlementSummary = {
  * and keeps the numbers derived from exactly the rows the table below
  * shows, so a card and its table can never disagree.
  */
-export async function getOwnerSettlementSummary(supabase: Client): Promise<OwnerSettlementSummary> {
+export async function getOwnerSettlementSummary(
+  supabase: Client,
+): Promise<OwnerSettlementSummary> {
   const { data, error } = await supabase
     .from("booking_settlements")
     .select("venue_amount, settlement_status, currency");
@@ -176,14 +187,35 @@ export async function getOwnerSettlementSummary(supabase: Client): Promise<Owner
 }
 
 /** A venue owner's settlement history, newest first. RLS scopes this to their venues. */
-export async function listOwnerSettlements(supabase: Client, limit = 100): Promise<SettlementRow[]> {
+export async function listOwnerSettlements(
+  supabase: Client,
+  limit = 100,
+): Promise<SettlementRow[]> {
   const { data, error } = await supabase
     .from("booking_settlements")
     .select(SETTLEMENT_SELECT)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return assertRowShape<SettlementQueryRow>(data ?? [], SETTLEMENT_QUERY_KEYS, "settlements query").map(toRow);
+  return assertRowShape<SettlementQueryRow>(
+    data ?? [],
+    SETTLEMENT_QUERY_KEYS,
+    "settlements query",
+  ).map(toRow);
+}
+
+/**
+ * How many settlement rows this owner has in total, regardless of the
+ * limit `listOwnerSettlements` was called with — lets the earnings page
+ * show "10 of 42" and offer a real "All" rather than a limit that quietly
+ * hides rows with no indication more exist. RLS scopes this the same way.
+ */
+export async function countOwnerSettlements(supabase: Client): Promise<number> {
+  const { count, error } = await supabase
+    .from("booking_settlements")
+    .select("id", { count: "exact", head: true });
+  if (error) throw error;
+  return count ?? 0;
 }
 
 // --- Admin -----------------------------------------------------------------
@@ -244,10 +276,14 @@ export type AdminSettlementSummary = {
  * them. If the ledger grows past what one request should scan, this is the
  * function to move into a SQL aggregate — not the table to denormalise.
  */
-export async function getAdminSettlementSummary(supabase: Client): Promise<AdminSettlementSummary> {
+export async function getAdminSettlementSummary(
+  supabase: Client,
+): Promise<AdminSettlementSummary> {
   const { data, error } = await supabase
     .from("booking_settlements")
-    .select("venue_amount, paymongo_amount, cash_position, settlement_status, currency");
+    .select(
+      "venue_amount, paymongo_amount, cash_position, settlement_status, currency",
+    );
   if (error) throw error;
 
   const summary: AdminSettlementSummary = {
@@ -284,13 +320,20 @@ export async function getAdminSettlementSummary(supabase: Client): Promise<Admin
     // reversed booking's cash, if any was ever collected, isn't owed to a
     // venue anymore, so it doesn't belong in a "what we owe vs. what we
     // collected" comparison.
-    if (row.settlement_status === "pending" || row.settlement_status === "payable") {
+    if (
+      row.settlement_status === "pending" ||
+      row.settlement_status === "payable"
+    ) {
       summary.totalCollectedAmount += row.paymongo_amount;
     }
 
     // Exposure counts only live entitlement. A reversed settlement is no
     // longer owed, so its shortfall is not an obligation.
-    if ((row.settlement_status === "pending" || row.settlement_status === "payable") && row.cash_position < 0) {
+    if (
+      (row.settlement_status === "pending" ||
+        row.settlement_status === "payable") &&
+      row.cash_position < 0
+    ) {
       summary.creditFundedExposure += -row.cash_position;
     }
   }
@@ -302,14 +345,21 @@ export async function getAdminSettlementSummary(supabase: Client): Promise<Admin
 /** Every settlement, newest first, optionally narrowed to one status. Admin-only. */
 export async function listAllSettlements(
   supabase: Client,
-  options: { status?: SettlementStatus; limit?: number } = {}
+  options: { status?: SettlementStatus; limit?: number } = {},
 ): Promise<SettlementRow[]> {
-  let query = supabase.from("booking_settlements").select(SETTLEMENT_SELECT).order("created_at", { ascending: false });
+  let query = supabase
+    .from("booking_settlements")
+    .select(SETTLEMENT_SELECT)
+    .order("created_at", { ascending: false });
   if (options.status) query = query.eq("settlement_status", options.status);
 
   const { data, error } = await query.limit(options.limit ?? 200);
   if (error) throw error;
-  return assertRowShape<SettlementQueryRow>(data ?? [], SETTLEMENT_QUERY_KEYS, "settlements query").map(toRow);
+  return assertRowShape<SettlementQueryRow>(
+    data ?? [],
+    SETTLEMENT_QUERY_KEYS,
+    "settlements query",
+  ).map(toRow);
 }
 
 export type SettlementIssueGroups = {
@@ -330,7 +380,9 @@ export type SettlementIssueGroups = {
  * The rules live in SQL rather than here on purpose: rules that are only
  * written down in application code don't get checked by anything else.
  */
-export async function getSettlementIssues(supabase: Client): Promise<SettlementIssueGroups> {
+export async function getSettlementIssues(
+  supabase: Client,
+): Promise<SettlementIssueGroups> {
   const { data, error } = await supabase.rpc("reconcile_settlements");
   if (error) throw error;
 

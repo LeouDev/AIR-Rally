@@ -4,6 +4,7 @@
 import {
   getOwnerSettlementSummary,
   listOwnerSettlements,
+  countOwnerSettlements,
   getAdminSettlementSummary,
   listAllSettlements,
   getSettlementIssues,
@@ -146,6 +147,23 @@ describe("listOwnerSettlements", () => {
       venueAmount: 47500,
       settlementSource: "paymongo",
     });
+  });
+});
+
+describe("countOwnerSettlements", () => {
+  it("returns the exact count independent of any row limit", async () => {
+    const supabase = createMockSupabase({ data: null, error: null, count: 42 });
+    await expect(countOwnerSettlements(supabase)).resolves.toBe(42);
+  });
+
+  it("returns 0 rather than null when the owner has no settlements", async () => {
+    const supabase = createMockSupabase({ data: null, error: null, count: null });
+    await expect(countOwnerSettlements(supabase)).resolves.toBe(0);
+  });
+
+  it("propagates a query error rather than reporting zero", async () => {
+    const supabase = createMockSupabase({ data: null, error: postgrestError("42501", "boom"), count: null });
+    await expect(countOwnerSettlements(supabase)).rejects.toMatchObject({ message: "boom", code: "42501" });
   });
 });
 
