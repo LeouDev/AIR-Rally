@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { Download } from "lucide-react";
 import { requireSignedIn } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getOwnerAnalytics, type RevenuePeriod } from "@/lib/services/ownerAnalytics";
+import { getOwnerAnalytics, getOwnerYearRevenue, getOwnerRevenueForRange, type RevenuePeriod } from "@/lib/services/ownerAnalytics";
 import { getOwnerSettlementSummary, listOwnerSettlements } from "@/lib/services/settlements";
 import { getOwnerBatchStatusBySettlement } from "@/lib/services/payouts";
 import { SettlementPanel } from "@/components/owner/SettlementPanel";
+import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
@@ -43,28 +46,53 @@ function RevenueCard({ label, period, currency }: { label: string; period: Reven
   );
 }
 
-export default async function OwnerEarningsPage() {
+// YYYY-MM-DD, the only shape a <input type="date"> ever submits — a
+// malformed or absent value falls back to no custom-range fetch at all
+// rather than guessing at what the owner meant.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+export default async function OwnerEarningsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
+  const { from, to } = await searchParams;
+  const hasCustomRange = Boolean(from && to && DATE_ONLY.test(from) && DATE_ONLY.test(to) && from <= to);
+
   const user = await requireSignedIn("/list-your-court/earnings");
   const supabase = await createClient();
   // Settlement reads carry no owner id: booking_settlements' RLS policy
   // already scopes them to venues this caller owns. Passing an id would
   // imply the filtering happened here rather than in the database.
-  const [analytics, settlementSummary, settlementRows, batchBySettlement] = await Promise.all([
+  const [analytics, yearRevenue, settlementSummary, settlementRows, batchBySettlement, customRange] = await Promise.all([
     getOwnerAnalytics(supabase, user.id),
+    getOwnerYearRevenue(supabase, user.id),
     getOwnerSettlementSummary(supabase),
     listOwnerSettlements(supabase),
     // RLS scopes payout_batch_items to this owner's own venues, so an
     // owner learns about their own payouts and nobody else's.
     getOwnerBatchStatusBySettlement(supabase),
+    hasCustomRange ? getOwnerRevenueForRange(supabase, user.id, { from: from!, to: to! }) : Promise.resolve(null),
   ]);
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Earnings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          What you have earned and what you are owed, plus occupancy and booking activity across your venues.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Earnings</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            What you have earned and what you are owed, plus occupancy and booking activity across your venues.
+          </p>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          {/* A real browser download, not a page — Link's client-side
+              routing is the wrong tool for a route that returns a file. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/list-your-court/earnings/export">
+            <Download className="size-4" aria-hidden="true" />
+            Export CSV
+          </a>
+        </Button>
       </div>
 
       {/* Settlements lead: "what am I owed" is the question an owner opens
@@ -74,11 +102,57 @@ export default async function OwnerEarningsPage() {
 
       <div className="flex flex-col gap-4">
         <h2 className="text-base font-semibold text-foreground">Revenue</h2>
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <RevenueCard label="Today" period={analytics.revenue.today} currency={analytics.currency} />
           <RevenueCard label="This week" period={analytics.revenue.thisWeek} currency={analytics.currency} />
           <RevenueCard label="This month" period={analytics.revenue.thisMonth} currency={analytics.currency} />
+          <RevenueCard label="This year" period={yearRevenue} currency={analytics.currency} />
         </dl>
+
+        <form className="flex flex-wrap items-end gap-3 rounded-2xl border border-border bg-card p-4" action="/list-your-court/earnings">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="earnings-from" className="text-xs text-muted-foreground">
+              From
+            </label>
+            <input
+              id="earnings-from"
+              type="date"
+              name="from"
+              defaultValue={from ?? ""}
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="earnings-to" className="text-xs text-muted-foreground">
+              To
+            </label>
+            <input
+              id="earnings-to"
+              type="date"
+              name="to"
+              defaultValue={to ?? ""}
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+          <Button type="submit" size="sm">
+            Filter
+          </Button>
+          {hasCustomRange && (
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/list-your-court/earnings">Clear</Link>
+            </Button>
+          )}
+
+          {customRange && (
+            <div className="flex w-full flex-wrap items-center gap-6 border-t border-border pt-3 text-sm">
+              <span className="text-muted-foreground">
+                {from} to {to}:
+              </span>
+              <span className="font-semibold text-foreground">{formatMoney(customRange.amount, analytics.currency)} confirmed</span>
+              <span className="text-muted-foreground">{customRange.bookingCount} booking{customRange.bookingCount === 1 ? "" : "s"}</span>
+            </div>
+          )}
+        </form>
       </div>
 
       <div className="flex flex-col gap-4">

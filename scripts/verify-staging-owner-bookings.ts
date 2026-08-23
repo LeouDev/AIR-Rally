@@ -145,7 +145,7 @@ async function main() {
     console.log(`Created real confirmed booking ${bookingBId} at owner B's court`);
 
     console.log("\nCalling listBookingsForOwner() as ownerA (real session, real RLS)...");
-    const ownerAUpcoming = await listBookingsForOwner(ownerA.client, ownerAId, "upcoming");
+    const ownerAUpcoming = (await listBookingsForOwner(ownerA.client, ownerAId, "upcoming")).bookings;
     const ownerASeesOwnBooking = ownerAUpcoming.some((b) => b.id === bookingAId);
     const ownerASeesOtherBooking = ownerAUpcoming.some((b) => b.id === bookingBId);
     record("[owner A] sees their own booking via listBookingsForOwner", ownerASeesOwnBooking, `found=${ownerASeesOwnBooking}`);
@@ -172,14 +172,14 @@ async function main() {
     record("[owner A] getBookingDetailForOwner returns null for owner B's booking (RLS-hidden, not an error)", crossDetail === null, `result=${JSON.stringify(crossDetail)}`);
 
     console.log("\nCalling listBookingsForOwner() as ownerB — proving the reverse direction too...");
-    const ownerBUpcoming = await listBookingsForOwner(ownerB.client, ownerBId, "upcoming");
+    const ownerBUpcoming = (await listBookingsForOwner(ownerB.client, ownerBId, "upcoming")).bookings;
     const ownerBSeesOwnBooking = ownerBUpcoming.some((b) => b.id === bookingBId);
     const ownerBSeesOtherBooking = ownerBUpcoming.some((b) => b.id === bookingAId);
     record("[owner B] sees their own booking", ownerBSeesOwnBooking, `found=${ownerBSeesOwnBooking}`);
     record("[owner B] does NOT see owner A's booking", !ownerBSeesOtherBooking, `leaked=${ownerBSeesOtherBooking}`);
 
     console.log("\nCalling listBookingsForOwner() as the CUSTOMER (a player, not an owner) — must get []...");
-    const customerAsOwner = await listBookingsForOwner(customer.client, customerId, "upcoming");
+    const customerAsOwner = (await listBookingsForOwner(customer.client, customerId, "upcoming")).bookings;
     record("[player] a non-owner account gets zero rows from listBookingsForOwner (no venues of their own)", customerAsOwner.length === 0, `rows=${customerAsOwner.length}`);
 
     const failed = results.filter((r) => !r.pass);

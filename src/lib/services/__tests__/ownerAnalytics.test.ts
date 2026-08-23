@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { getOwnerAnalytics } from "../ownerAnalytics";
+import { getOwnerAnalytics, getOwnerRevenueForRange, getOwnerYearRevenue } from "../ownerAnalytics";
 import { createTableMockSupabase } from "../../test-helpers/mockSupabase";
 
 /**
@@ -384,5 +384,55 @@ describe("getOwnerAnalytics", () => {
 
     const result = await getOwnerAnalytics(supabase, "owner-1");
     expect(result.occupancy.perCourt).toEqual([{ courtId: "court-1", courtName: "Court 1", bookedHours: 1, openHours: 0, occupancyPct: null }]);
+  });
+});
+
+describe("getOwnerRevenueForRange", () => {
+  it("returns a zero-state result when the owner has no venues", async () => {
+    const supabase = createTableMockSupabase({ venues: { data: [], error: null } });
+    const result = await getOwnerRevenueForRange(supabase, "owner-1", { from: "2026-08-01", to: "2026-08-31" });
+    expect(result).toEqual({ amount: 0, bookingCount: 0, currency: "PHP" });
+  });
+
+  it("sums only confirmed bookings inside the given range, but counts every status inside it", async () => {
+    const supabase = createFetchWindowAwareMockSupabase({
+      venues: [venueRow],
+      courts,
+      bookings: [
+        booking({ price_amount: 1000, status: "confirmed", start_time: "2026-08-05T10:00:00Z" }), // inside, confirmed
+        booking({ price_amount: 9999, status: "confirmed", start_time: "2026-07-31T10:00:00Z" }), // outside (before range)
+        booking({ price_amount: 500, status: "pending", start_time: "2026-08-10T10:00:00Z" }), // inside, not confirmed
+      ],
+      venue_operating_hours: operatingHours,
+    });
+
+    const result = await getOwnerRevenueForRange(supabase, "owner-1", { from: "2026-08-01", to: "2026-08-31" });
+    expect(result).toEqual({ amount: 1000, bookingCount: 2, currency: "PHP" });
+  });
+});
+
+describe("getOwnerYearRevenue", () => {
+  it("returns a zero-state result when the owner has no venues", async () => {
+    const supabase = createTableMockSupabase({ venues: { data: [], error: null } });
+    const result = await getOwnerYearRevenue(supabase, "owner-1");
+    expect(result).toEqual({ amount: 0, previousAmount: 0, changePct: null });
+  });
+
+  it("splits confirmed revenue between this year and last year, and computes the % change", async () => {
+    // NOW = 2026-08-19: this year = 2026, previous year = 2025.
+    const supabase = createFetchWindowAwareMockSupabase({
+      venues: [venueRow],
+      courts,
+      bookings: [
+        booking({ price_amount: 1000, status: "confirmed", start_time: "2026-03-01T10:00:00Z" }), // this year
+        booking({ price_amount: 500, status: "confirmed", start_time: "2025-06-01T10:00:00Z" }), // previous year
+        booking({ price_amount: 9999, status: "confirmed", start_time: "2024-06-01T10:00:00Z" }), // neither — must be excluded
+        booking({ price_amount: 300, status: "pending", start_time: "2026-04-01T10:00:00Z" }), // this year, not confirmed — excluded from amount
+      ],
+      venue_operating_hours: operatingHours,
+    });
+
+    const result = await getOwnerYearRevenue(supabase, "owner-1");
+    expect(result).toEqual({ amount: 1000, previousAmount: 500, changePct: 1 });
   });
 });

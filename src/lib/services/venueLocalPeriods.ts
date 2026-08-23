@@ -61,6 +61,13 @@ export function weekRange(today: string, weeksAgo: number): LocalDateRange {
   return { from, to: shiftDate(from, 6) };
 }
 
+/** January 1 to December 31, matching monthRange/weekRange's own shape — a full calendar period, not "to date". */
+export function yearRange(today: string, yearsAgo: number): LocalDateRange {
+  const [y] = today.split("-").map(Number);
+  const year = y - yearsAgo;
+  return { from: `${year}-01-01`, to: `${year}-12-31` };
+}
+
 export function monthRange(today: string, monthsAgo: number): LocalDateRange {
   const [y, m] = today.split("-").map(Number);
   const first = new Date(Date.UTC(y, m - 1 - monthsAgo, 1));

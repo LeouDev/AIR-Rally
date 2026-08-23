@@ -55,7 +55,7 @@ describe("listBookingsForOwner", () => {
   it("returns an empty list without querying courts/bookings when the owner has no venues", async () => {
     const supabase = createTableMockSupabase({ venues: { data: [], error: null } });
     const result = await listBookingsForOwner(supabase, "owner-1", "upcoming");
-    expect(result).toEqual([]);
+    expect(result).toEqual({ bookings: [], totalPages: 0 });
   });
 
   it("returns an empty list when the owner has venues but no courts", async () => {
@@ -64,7 +64,7 @@ describe("listBookingsForOwner", () => {
       courts: { data: [], error: null },
     });
     const result = await listBookingsForOwner(supabase, "owner-1", "upcoming");
-    expect(result).toEqual([]);
+    expect(result).toEqual({ bookings: [], totalPages: 0 });
   });
 
   it("maps bookings joined with court/venue/customer names, and never exposes payment-provider secret columns", async () => {
@@ -77,7 +77,7 @@ describe("listBookingsForOwner", () => {
 
     const result = await listBookingsForOwner(supabase, "owner-1", "upcoming");
 
-    expect(result).toEqual([
+    expect(result.bookings).toEqual([
       {
         id: "booking-1",
         courtId: "court-1",
@@ -99,8 +99,8 @@ describe("listBookingsForOwner", () => {
         createdAt: "2026-08-18T00:00:00Z",
       },
     ]);
-    expect(Object.keys(result[0]).sort()).toEqual(SAFE_BOOKING_KEYS);
-    const serialized = JSON.stringify(result);
+    expect(Object.keys(result.bookings[0]).sort()).toEqual(SAFE_BOOKING_KEYS);
+    const serialized = JSON.stringify(result.bookings);
     expect(serialized).not.toMatch(/stripe_|paymongo_venue_account_id|checkout_session|payment_intent/);
   });
 
@@ -126,10 +126,31 @@ describe("listBookingsForOwner", () => {
       public_profiles: { data: [], error: null },
     });
     const result = await listBookingsForOwner(supabase, "owner-1", "upcoming");
-    expect(result[0].courtName).toBe("Court");
-    expect(result[0].venueName).toBe("Venue");
-    expect(result[0].venueTimezone).toBe("Asia/Manila");
-    expect(result[0].customerName).toBe("Player");
+    expect(result.bookings[0].courtName).toBe("Court");
+    expect(result.bookings[0].venueName).toBe("Venue");
+    expect(result.bookings[0].venueTimezone).toBe("Asia/Manila");
+    expect(result.bookings[0].customerName).toBe("Player");
+  });
+
+  // Regression: this query used to have no .range()/.limit() at all —
+  // every booking across every one of an owner's courts, in one
+  // unbounded fetch. Invisible at low volume, a real problem at scale.
+  it("pages the bookings query — page 2 requests the second page's offset, and totalPages is derived from the real row count", async () => {
+    const supabase = createTableMockSupabase({
+      venues: { data: [venueRow], error: null },
+      courts: { data: [courtRow], error: null },
+      bookings: { data: [bookingRow], error: null, count: 57 },
+      public_profiles: { data: [profileRow], error: null },
+    });
+    const fromSpy = supabase.from as unknown as jest.Mock;
+    const result = await listBookingsForOwner(supabase, "owner-1", "upcoming", 2);
+
+    const bookingsCallIndex = fromSpy.mock.calls.findIndex(([table]: [string]) => table === "bookings");
+    const builder = fromSpy.mock.results[bookingsCallIndex].value as { range: jest.Mock };
+    // Page size is 25 (OWNER_BOOKINGS_PAGE_SIZE) — page 2 is rows 25-49.
+    expect(builder.range).toHaveBeenCalledWith(25, 49);
+    // ceil(57 / 25) = 3.
+    expect(result.totalPages).toBe(3);
   });
 });
 

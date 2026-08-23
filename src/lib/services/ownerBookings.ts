@@ -92,19 +92,39 @@ export async function listOwnerCourtsWithVenue(
  * this returns a flat, sorted list, since the grouping is a rendering
  * concern, not a second query.
  */
+/** One page of this list, per {@link listBookingsForOwner}'s own page size. */
+export const OWNER_BOOKINGS_PAGE_SIZE = 25;
+
+export type OwnerBookingsPage = {
+  bookings: OwnerBookingWithDetails[];
+  totalPages: number;
+};
+
 export async function listBookingsForOwner(
   supabase: Client,
   ownerId: string,
-  when: "upcoming" | "past"
-): Promise<OwnerBookingWithDetails[]> {
+  when: "upcoming" | "past",
+  page = 1
+): Promise<OwnerBookingsPage> {
+  const empty: OwnerBookingsPage = { bookings: [], totalPages: 0 };
   const { courts, venuesById } = await listOwnerCourtsWithVenue(supabase, ownerId);
-  if (courts.length === 0) return [];
+  if (courts.length === 0) return empty;
   const courtById = new Map(courts.map((c) => [c.id, c]));
+
+  // No `.limit()` at all here used to mean every booking across every
+  // one of an owner's courts, forever, in one fetch — invisible while
+  // production held a handful of bookings, a real ticking issue once a
+  // venue has a year of history. Same page-number/`?page=` idiom
+  // Explore's own search results already use (ExplorePagination), not a
+  // new pattern — an owner's booking list is exactly the same shape of
+  // "too many rows for one page" problem.
+  const from = (page - 1) * OWNER_BOOKINGS_PAGE_SIZE;
+  const to = from + OWNER_BOOKINGS_PAGE_SIZE - 1;
 
   const nowIso = new Date().toISOString();
   let query = supabase
     .from("bookings")
-    .select(BOOKING_COLUMNS)
+    .select(BOOKING_COLUMNS, { count: "exact" })
     .in(
       "court_id",
       courts.map((c) => c.id)
@@ -113,10 +133,12 @@ export async function listBookingsForOwner(
     when === "upcoming"
       ? query.gte("start_time", nowIso).order("start_time", { ascending: true })
       : query.lt("start_time", nowIso).order("start_time", { ascending: false });
+  query = query.range(from, to);
 
-  const { data: bookings, error: bookingsError } = await query;
+  const { data: bookings, count, error: bookingsError } = await query;
   if (bookingsError) throw bookingsError;
-  if (!bookings || bookings.length === 0) return [];
+  const totalPages = Math.max(1, Math.ceil((count ?? 0) / OWNER_BOOKINGS_PAGE_SIZE));
+  if (!bookings || bookings.length === 0) return { bookings: [], totalPages };
 
   const userIds = Array.from(new Set(bookings.map((b) => b.user_id)));
   const { data: profiles, error: profilesError } = await supabase
@@ -126,7 +148,7 @@ export async function listBookingsForOwner(
   if (profilesError) throw profilesError;
   const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
 
-  return bookings.map((b) => {
+  const rows = bookings.map((b) => {
     const court = courtById.get(b.court_id);
     const venue = court ? venuesById.get(court.venue_id) : undefined;
     const profile = profileById.get(b.user_id);
@@ -151,6 +173,8 @@ export async function listBookingsForOwner(
       createdAt: b.created_at,
     };
   });
+
+  return { bookings: rows, totalPages };
 }
 
 /**

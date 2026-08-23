@@ -10,6 +10,7 @@ import {
   isWithin,
   periodsFor,
   fetchWindowFor,
+  yearRange,
 } from "@/lib/services/venueLocalPeriods";
 
 type Client = SupabaseClient<Database>;
@@ -345,4 +346,142 @@ export async function getOwnerAnalytics(supabase: Client, ownerId: string): Prom
       cancellationRate: totalBookings === 0 ? 0 : cancelledCount / totalBookings,
     },
   };
+}
+
+export type RangeSummary = {
+  amount: number;
+  bookingCount: number;
+  currency: string;
+};
+
+/**
+ * Revenue + booking count for one arbitrary venue-local date range —
+ * the custom-range filter on the earnings page. Deliberately separate
+ * from getOwnerAnalytics() above rather than folded into its existing
+ * fixed today/week/month window: that function's fetch window is
+ * already carefully tuned to the narrowest range those three periods
+ * need, and widening it to cover an arbitrary caller-supplied range
+ * would risk the exact class of bug this module's own history is about
+ * (see the header comment on getOwnerAnalytics) for no benefit — this
+ * is a second, independent fetch, not a fourth period bolted onto the
+ * first.
+ *
+ * No prior-period comparison, unlike the three fixed periods: an
+ * arbitrary custom range has no obvious "previous" range to compare
+ * against (unlike a week or a month, which have a clear predecessor).
+ * Simpler figure, not a missing feature.
+ */
+export async function getOwnerRevenueForRange(supabase: Client, ownerId: string, range: LocalDateRange): Promise<RangeSummary> {
+  const empty: RangeSummary = { amount: 0, bookingCount: 0, currency: DEFAULT_CURRENCY };
+  const { courts, venuesById } = await listOwnerCourtsWithVenue(supabase, ownerId);
+  if (courts.length === 0) return empty;
+
+  const venueByCourtId = new Map(
+    courts.flatMap((c) => {
+      const venue = venuesById.get(c.venue_id);
+      return venue ? ([[c.id, venue]] as [string, (typeof venue)][]) : [];
+    })
+  );
+
+  const timezonesInPlay = [...new Set(courts.map((c) => venuesById.get(c.venue_id)?.timezone ?? "Asia/Manila"))];
+  const { fetchFrom, fetchTo } = fetchWindowFor(timezonesInPlay, () => range);
+
+  const { data: bookings, error } = await supabase
+    .from("bookings")
+    .select("court_id, price_amount, currency, status, start_time")
+    .in(
+      "court_id",
+      courts.map((c) => c.id)
+    )
+    .gte("start_time", fetchFrom)
+    .lte("start_time", fetchTo);
+  if (error) throw error;
+
+  let amount = 0;
+  let bookingCount = 0;
+  let currency = DEFAULT_CURRENCY;
+  for (const b of bookings ?? []) {
+    const timezone = venueByCourtId.get(b.court_id)?.timezone ?? "Asia/Manila";
+    const localDate = localDateIn(new Date(b.start_time), timezone);
+    if (!isWithin(localDate, range)) continue;
+    bookingCount += 1;
+    if (b.status === "confirmed") {
+      amount += b.price_amount;
+      currency = b.currency;
+    }
+  }
+  return { amount, bookingCount, currency };
+}
+
+/**
+ * "This year" revenue, with a same-length prior-year comparison — the
+ * one fixed period the founder asked for that getOwnerAnalytics() above
+ * doesn't already cover. Its own fetch (this year plus last year, one
+ * query) rather than reusing getOwnerRevenueForRange() twice, for the
+ * same reason today/week/month share one fetch above: one dataset,
+ * bucketed twice, instead of two round trips.
+ */
+export async function getOwnerYearRevenue(supabase: Client, ownerId: string): Promise<RevenuePeriod> {
+  const empty: RevenuePeriod = { amount: 0, previousAmount: 0, changePct: null };
+  const { courts, venuesById } = await listOwnerCourtsWithVenue(supabase, ownerId);
+  if (courts.length === 0) return empty;
+
+  const venueByCourtId = new Map(
+    courts.flatMap((c) => {
+      const venue = venuesById.get(c.venue_id);
+      return venue ? ([[c.id, venue]] as [string, (typeof venue)][]) : [];
+    })
+  );
+
+  const now = new Date();
+  const timezonesInPlay = [...new Set(courts.map((c) => venuesById.get(c.venue_id)?.timezone ?? "Asia/Manila"))];
+  const periodsByTimezone = new Map<string, { thisYear: LocalDateRange; previousYear: LocalDateRange }>();
+  const yearsForTimezone = (timezone: string) => {
+    const cached = periodsByTimezone.get(timezone);
+    if (cached) return cached;
+    const today = localDateIn(now, timezone);
+    const fresh = { thisYear: yearRange(today, 0), previousYear: yearRange(today, 1) };
+    periodsByTimezone.set(timezone, fresh);
+    return fresh;
+  };
+
+  // fetchWindowFor's callback signature expects VenuePeriods, and years
+  // aren't part of that shape — the widest window across every
+  // timezone in play (previous year's start to this year's end) is
+  // computed directly instead of forcing this into fetchWindowFor's own
+  // type, same ±1-day padding it applies.
+  let earliest = "9999-12-31";
+  let latest = "0000-01-01";
+  for (const timezone of timezonesInPlay) {
+    const { thisYear, previousYear } = yearsForTimezone(timezone);
+    if (previousYear.from < earliest) earliest = previousYear.from;
+    if (thisYear.to > latest) latest = thisYear.to;
+  }
+  const realFetchFrom = `${shiftDate(earliest, -1)}T00:00:00.000Z`;
+  const realFetchTo = `${shiftDate(latest, 1)}T23:59:59.999Z`;
+
+  const { data: bookings, error } = await supabase
+    .from("bookings")
+    .select("court_id, price_amount, currency, status, start_time")
+    .in(
+      "court_id",
+      courts.map((c) => c.id)
+    )
+    .gte("start_time", realFetchFrom)
+    .lte("start_time", realFetchTo);
+  if (error) throw error;
+
+  let amount = 0;
+  let previousAmount = 0;
+  for (const b of bookings ?? []) {
+    if (b.status !== "confirmed") continue;
+    const timezone = venueByCourtId.get(b.court_id)?.timezone ?? "Asia/Manila";
+    const localDate = localDateIn(new Date(b.start_time), timezone);
+    const { thisYear, previousYear } = yearsForTimezone(timezone);
+    if (isWithin(localDate, thisYear)) amount += b.price_amount;
+    else if (isWithin(localDate, previousYear)) previousAmount += b.price_amount;
+  }
+
+  const changePct = previousAmount === 0 ? null : (amount - previousAmount) / previousAmount;
+  return { amount, previousAmount, changePct };
 }
