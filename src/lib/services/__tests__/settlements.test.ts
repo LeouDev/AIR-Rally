@@ -5,11 +5,13 @@ import {
   getOwnerSettlementSummary,
   listOwnerSettlements,
   countOwnerSettlements,
+  getOwnerSettlementsForExport,
+  OWNER_SETTLEMENTS_SAFETY_CAP,
   getAdminSettlementSummary,
   listAllSettlements,
   getSettlementIssues,
 } from "../settlements";
-import { createMockSupabase, createRpcMockSupabase, postgrestError } from "../../test-helpers/mockSupabase";
+import { createMockSupabase, createRpcMockSupabase, createTableMockSupabase, postgrestError } from "../../test-helpers/mockSupabase";
 
 /**
  * These cover the aggregation and shaping. The security boundary itself is
@@ -164,6 +166,182 @@ describe("countOwnerSettlements", () => {
   it("propagates a query error rather than reporting zero", async () => {
     const supabase = createMockSupabase({ data: null, error: postgrestError("42501", "boom"), count: null });
     await expect(countOwnerSettlements(supabase)).rejects.toMatchObject({ message: "boom", code: "42501" });
+  });
+});
+
+describe("getOwnerSettlementsForExport", () => {
+  function rawRow(id: string, overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+    return {
+      id,
+      booking_id: `b-${id}`,
+      venue_id: "v1",
+      currency: "PHP",
+      gross_booking_amount: 50000,
+      paymongo_amount: 50000,
+      credit_amount: 0,
+      platform_fee: 2500,
+      venue_amount: 47500,
+      cash_position: 2500,
+      settlement_source: "paymongo",
+      settlement_status: "pending",
+      created_at: "2026-08-16T00:00:00Z",
+      venues: null,
+      bookings: null,
+      ...overrides,
+    };
+  }
+
+  /**
+   * Genuinely enforces `.limit(n)` (unlike createMockSupabase, which
+   * ignores it and hands back the fixture verbatim) — the whole point of
+   * this test is to fail if the export ever regresses to a display-sized
+   * cap, which a mock that can't truncate could never catch.
+   */
+  function createLimitAwareSettlementsMock(allRows: Record<string, unknown>[]) {
+    let appliedLimit = allRows.length;
+    const builder: Record<string, unknown> = {
+      select: jest.fn(() => builder),
+      order: jest.fn(() => builder),
+      in: jest.fn(() => builder),
+      limit: jest.fn((n: number) => {
+        appliedLimit = n;
+        return builder;
+      }),
+      then: (onfulfilled?: (v: unknown) => unknown, onrejected?: (r: unknown) => unknown) =>
+        Promise.resolve({ data: allRows.slice(0, appliedLimit), count: allRows.length, error: null }).then(
+          onfulfilled,
+          onrejected
+        ),
+    };
+    return { from: jest.fn(() => builder) } as unknown as Parameters<typeof getOwnerSettlementsForExport>[0];
+  }
+
+  // This is the exact regression the CTO flagged: an export silently
+  // capped well below a realistic history, with nothing on screen to
+  // contradict it. Fails against the old default (100) — passes only
+  // once the export reads through the raised safety ceiling instead.
+  it("returns every row up to the safety cap, not the on-page table's small display limit", async () => {
+    const allRows = Array.from({ length: 150 }, (_, i) => rawRow(`s${i}`));
+    const supabase = createLimitAwareSettlementsMock(allRows);
+
+    const result = await getOwnerSettlementsForExport(supabase, "owner-1");
+
+    expect(result.rows).toHaveLength(150);
+    expect(result.totalMatching).toBe(150);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("flags truncation honestly rather than silently stopping, if a real result ever exceeds the safety cap", async () => {
+    const allRows = Array.from({ length: OWNER_SETTLEMENTS_SAFETY_CAP + 5 }, (_, i) => rawRow(`s${i}`));
+    const supabase = createLimitAwareSettlementsMock(allRows);
+
+    const result = await getOwnerSettlementsForExport(supabase, "owner-1");
+
+    expect(result.rows).toHaveLength(OWNER_SETTLEMENTS_SAFETY_CAP);
+    expect(result.totalMatching).toBe(OWNER_SETTLEMENTS_SAFETY_CAP + 5);
+    expect(result.truncated).toBe(true);
+  });
+
+  /**
+   * Real filtering on `bookings.start_time` (like ownerAnalytics.test.ts's
+   * own fetch-window-aware mock) — a mock that ignored `.gte()`/`.lte()`
+   * could never catch the bug this exists to prevent: an export that
+   * ignores the owner's on-screen date filter and returns recent rows
+   * regardless of what range was requested.
+   */
+  function createDateRangeAwareMock(tables: {
+    venues: unknown[];
+    courts: unknown[];
+    bookings: Record<string, unknown>[];
+    settlements: Record<string, unknown>[];
+  }) {
+    const bookingFilters: Array<(row: Record<string, unknown>) => boolean> = [];
+    const bookingsBuilder: Record<string, unknown> = {
+      select: jest.fn(() => bookingsBuilder),
+      in: jest.fn(() => bookingsBuilder),
+      gte: jest.fn((column: string, value: string) => {
+        if (column === "start_time") bookingFilters.push((row) => (row.start_time as string) >= value);
+        return bookingsBuilder;
+      }),
+      lte: jest.fn((column: string, value: string) => {
+        if (column === "start_time") bookingFilters.push((row) => (row.start_time as string) <= value);
+        return bookingsBuilder;
+      }),
+      then: (onfulfilled?: (v: unknown) => unknown, onrejected?: (r: unknown) => unknown) =>
+        Promise.resolve({ data: tables.bookings.filter((row) => bookingFilters.every((f) => f(row))), error: null }).then(
+          onfulfilled,
+          onrejected
+        ),
+    };
+
+    let settlementBookingIds: string[] | null = null;
+    const settlementsBuilder: Record<string, unknown> = {
+      select: jest.fn(() => settlementsBuilder),
+      order: jest.fn(() => settlementsBuilder),
+      limit: jest.fn(() => settlementsBuilder),
+      in: jest.fn((column: string, ids: string[]) => {
+        if (column === "booking_id") settlementBookingIds = ids;
+        return settlementsBuilder;
+      }),
+      then: (onfulfilled?: (v: unknown) => unknown, onrejected?: (r: unknown) => unknown) => {
+        const rows = settlementBookingIds
+          ? tables.settlements.filter((row) => settlementBookingIds!.includes(row.booking_id as string))
+          : tables.settlements;
+        return Promise.resolve({ data: rows, count: rows.length, error: null }).then(onfulfilled, onrejected);
+      },
+    };
+
+    const other = createTableMockSupabase({
+      venues: { data: tables.venues, error: null },
+      courts: { data: tables.courts, error: null },
+    });
+
+    return {
+      ...other,
+      from: jest.fn((table: string) => {
+        if (table === "bookings") return bookingsBuilder;
+        if (table === "booking_settlements") return settlementsBuilder;
+        return (other.from as (t: string) => unknown)(table);
+      }),
+    } as unknown as Parameters<typeof getOwnerSettlementsForExport>[0];
+  }
+
+  const VENUE = { id: "v1", name: "Court Central", owner_id: "owner-1", timezone: "Asia/Manila" };
+  const COURT = { id: "c1", name: "Court A", venue_id: "v1" };
+
+  it("exports only the settlements whose booking falls in the requested range", async () => {
+    const supabase = createDateRangeAwareMock({
+      venues: [VENUE],
+      courts: [COURT],
+      bookings: [
+        { id: "in-range", court_id: "c1", start_time: "2026-08-15T04:00:00Z" }, // Aug 15 in Asia/Manila
+        { id: "out-of-range", court_id: "c1", start_time: "2026-09-01T04:00:00Z" },
+      ],
+      settlements: [rawRow("s-in", { booking_id: "in-range" }), rawRow("s-out", { booking_id: "out-of-range" })],
+    });
+
+    const result = await getOwnerSettlementsForExport(supabase, "owner-1", {
+      dateRange: { from: "2026-08-01", to: "2026-08-31" },
+    });
+
+    expect(result.rows.map((r) => r.settlementId)).toEqual(["s-in"]);
+    expect(result.totalMatching).toBe(1);
+  });
+
+  it("returns nothing, not everything, when the owner has no bookings in the requested range", async () => {
+    const supabase = createDateRangeAwareMock({
+      venues: [VENUE],
+      courts: [COURT],
+      bookings: [{ id: "b1", court_id: "c1", start_time: "2026-09-01T04:00:00Z" }],
+      settlements: [rawRow("s1", { booking_id: "b1" })],
+    });
+
+    const result = await getOwnerSettlementsForExport(supabase, "owner-1", {
+      dateRange: { from: "2026-08-01", to: "2026-08-31" },
+    });
+
+    expect(result.rows).toEqual([]);
+    expect(result.totalMatching).toBe(0);
   });
 });
 

@@ -7,6 +7,21 @@ import type {
 } from "@/lib/supabase/types";
 import { DEFAULT_CURRENCY } from "@/lib/booking-config";
 import { assertRowShape } from "@/lib/postgrestShape";
+import { listOwnerCourtsWithVenue } from "@/lib/services/ownerBookings";
+import {
+  type LocalDateRange,
+  localDateIn,
+  isWithin,
+  fetchWindowFor,
+} from "@/lib/services/venueLocalPeriods";
+
+/**
+ * Safety ceiling for "give me everything" reads (the earnings page's "All"
+ * row-count option, and the CSV export) — not a real unlimited query. An
+ * owner past this in one read is a scale this app doesn't have yet; when
+ * it does, this is the number to revisit, not the pattern.
+ */
+export const OWNER_SETTLEMENTS_SAFETY_CAP = 10_000;
 
 type Client = SupabaseClient<Database>;
 
@@ -216,6 +231,121 @@ export async function countOwnerSettlements(supabase: Client): Promise<number> {
     .select("id", { count: "exact", head: true });
   if (error) throw error;
   return count ?? 0;
+}
+
+export type OwnerSettlementsExport = {
+  rows: SettlementRow[];
+  /** True rows-matching count, independent of `rows.length` — lets a caller detect truncation even when it can't show every row. */
+  totalMatching: number;
+  /** True when `totalMatching` exceeds what was actually returned — the export hit OWNER_SETTLEMENTS_SAFETY_CAP. */
+  truncated: boolean;
+};
+
+/**
+ * The CSV export's own read — not `listOwnerSettlements()`, which exists
+ * for the on-page table and its small 10/20/50 display limits. An export
+ * exists specifically for "further analytics" (the founder's own phrase),
+ * so it needs the full picture: every settlement up to a real safety
+ * ceiling rather than a display-sized page, an accurate range filter when
+ * the owner has one applied on-screen, and an honest signal if it was
+ * ever forced to cut off rather than silently stopping.
+ *
+ * Without `dateRange`, this is `listOwnerSettlements` with the ceiling
+ * raised from a display default to OWNER_SETTLEMENTS_SAFETY_CAP.
+ *
+ * With `dateRange`, filtering happens through `bookings` first — the same
+ * two-flat-queries shape `getOwnerRevenueForRange` already uses, and for
+ * the same reason: it reproduces exactly the booking set that range's own
+ * revenue figure summarizes (venue-local calendar days, not raw UTC), so
+ * "export this range" and "the revenue shown for this range" can never
+ * quietly disagree. This is also why the date filter can't be pushed into
+ * the `booking_settlements` query itself via its embedded `bookings`
+ * relation — that would filter on raw UTC instants, not venue-local days,
+ * which is exactly the kind of off-by-a-timezone mismatch this function
+ * exists to avoid.
+ */
+export async function getOwnerSettlementsForExport(
+  supabase: Client,
+  ownerId: string,
+  options: { dateRange?: LocalDateRange } = {},
+): Promise<OwnerSettlementsExport> {
+  const cap = OWNER_SETTLEMENTS_SAFETY_CAP;
+
+  if (!options.dateRange) {
+    const { data, count, error } = await supabase
+      .from("booking_settlements")
+      .select(SETTLEMENT_SELECT, { count: "exact" })
+      .order("created_at", { ascending: false })
+      .limit(cap);
+    if (error) throw error;
+    const rows = assertRowShape<SettlementQueryRow>(
+      data ?? [],
+      SETTLEMENT_QUERY_KEYS,
+      "settlements query",
+    ).map(toRow);
+    const totalMatching = count ?? rows.length;
+    return { rows, totalMatching, truncated: totalMatching > rows.length };
+  }
+
+  const dateRange = options.dateRange;
+  const { courts, venuesById } = await listOwnerCourtsWithVenue(
+    supabase,
+    ownerId,
+  );
+  if (courts.length === 0)
+    return { rows: [], totalMatching: 0, truncated: false };
+
+  const venueByCourtId = new Map(
+    courts.flatMap((c) => {
+      const venue = venuesById.get(c.venue_id);
+      return venue ? ([[c.id, venue]] as [string, typeof venue][]) : [];
+    }),
+  );
+  const timezonesInPlay = [
+    ...new Set(
+      courts.map((c) => venuesById.get(c.venue_id)?.timezone ?? "Asia/Manila"),
+    ),
+  ];
+  const { fetchFrom, fetchTo } = fetchWindowFor(
+    timezonesInPlay,
+    () => dateRange,
+  );
+
+  const { data: bookings, error: bookingsError } = await supabase
+    .from("bookings")
+    .select("id, court_id, start_time")
+    .in(
+      "court_id",
+      courts.map((c) => c.id),
+    )
+    .gte("start_time", fetchFrom)
+    .lte("start_time", fetchTo);
+  if (bookingsError) throw bookingsError;
+
+  const matchingBookingIds = (bookings ?? [])
+    .filter((b) => {
+      const timezone =
+        venueByCourtId.get(b.court_id)?.timezone ?? "Asia/Manila";
+      return isWithin(localDateIn(new Date(b.start_time), timezone), dateRange);
+    })
+    .map((b) => b.id);
+  if (matchingBookingIds.length === 0)
+    return { rows: [], totalMatching: 0, truncated: false };
+
+  const { data, count, error } = await supabase
+    .from("booking_settlements")
+    .select(SETTLEMENT_SELECT, { count: "exact" })
+    .in("booking_id", matchingBookingIds)
+    .order("created_at", { ascending: false })
+    .limit(cap);
+  if (error) throw error;
+  const rows = assertRowShape<SettlementQueryRow>(
+    data ?? [],
+    SETTLEMENT_QUERY_KEYS,
+    "settlements query",
+  ).map(toRow);
+  const totalMatching = count ?? rows.length;
+  return { rows, totalMatching, truncated: totalMatching > rows.length };
 }
 
 // --- Admin -----------------------------------------------------------------

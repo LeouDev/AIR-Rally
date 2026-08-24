@@ -13,6 +13,7 @@ import {
   getOwnerSettlementSummary,
   listOwnerSettlements,
   countOwnerSettlements,
+  OWNER_SETTLEMENTS_SAFETY_CAP,
 } from "@/lib/services/settlements";
 import { getOwnerBatchStatusBySettlement } from "@/lib/services/payouts";
 import { SettlementPanel } from "@/components/owner/SettlementPanel";
@@ -79,11 +80,6 @@ const SETTLEMENT_COUNT_OPTIONS = ["10", "20", "50", "all"] as const;
 type SettlementCountOption = (typeof SETTLEMENT_COUNT_OPTIONS)[number];
 const DEFAULT_SETTLEMENT_COUNT: SettlementCountOption = "10";
 
-// A safety ceiling for "All", not a real "no limit" — an owner with an
-// implausibly long history still gets a bounded query rather than the
-// unbounded fetch this same page's booking list used to make.
-const OWNER_SETTLEMENTS_ALL_CAP = 10_000;
-
 function parseSettlementCount(raw: string | undefined): SettlementCountOption {
   return (SETTLEMENT_COUNT_OPTIONS as readonly string[]).includes(raw ?? "")
     ? (raw as SettlementCountOption)
@@ -102,7 +98,7 @@ export default async function OwnerEarningsPage({
   const settlementCount = parseSettlementCount(rawCount);
   const settlementLimit =
     settlementCount === "all"
-      ? OWNER_SETTLEMENTS_ALL_CAP
+      ? OWNER_SETTLEMENTS_SAFETY_CAP
       : Number(settlementCount);
 
   const user = await requireSignedIn("/list-your-court/earnings");
@@ -141,6 +137,13 @@ export default async function OwnerEarningsPage({
     return `/list-your-court/earnings${qs ? `?${qs}` : ""}`;
   }
 
+  // The export must reflect whatever range the owner has applied on this
+  // page — exporting "the most recent rows" regardless of a filter the
+  // owner can see on screen would silently disagree with it.
+  const exportHref = hasCustomRange
+    ? `/list-your-court/earnings/export?from=${from}&to=${to}`
+    : "/list-your-court/earnings/export";
+
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -156,8 +159,7 @@ export default async function OwnerEarningsPage({
         <Button asChild variant="outline" size="sm">
           {/* A real browser download, not a page — Link's client-side
               routing is the wrong tool for a route that returns a file. */}
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-          <a href="/list-your-court/earnings/export">
+          <a href={exportHref}>
             <Download className="size-4" aria-hidden="true" />
             Export CSV
           </a>

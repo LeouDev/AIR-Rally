@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
-import { listOwnerSettlements } from "@/lib/services/settlements";
+import { getOwnerSettlementsForExport } from "@/lib/services/settlements";
 import { toCsv } from "@/lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -11,12 +11,19 @@ function toMajorUnits(minorUnits: number): number {
   return Math.round(minorUnits) / 100;
 }
 
+// Same shape a <input type="date"> ever submits, matching the earnings
+// page's own validation — a malformed or partial pair is treated as no
+// range at all rather than guessed at.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * CSV export for "further analytics" (the founder's own phrase) — real
  * row-level data, not the aggregate cards the earnings page already
- * shows. Reuses listOwnerSettlements() as-is; RLS is what scopes this to
- * the signed-in owner's own venues, same trust boundary that function's
- * own doc comment already establishes for the page that renders it.
+ * shows. Calls getOwnerSettlementsForExport(), not listOwnerSettlements()
+ * — that function's default limit exists for the on-page table's small
+ * display sizes, and silently capped this export at 100 rows before an
+ * owner with more history than that ever noticed. RLS is what scopes this
+ * to the signed-in owner's own venues either way.
  *
  * A route handler, not a Server Action returning a string for the client
  * to blob-and-download — this is a plain GET a <a href> can point at
@@ -39,8 +46,23 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.redirect(loginUrl);
   }
 
+  const url = new URL(request.url);
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+  const hasRange = Boolean(
+    from && to && DATE_ONLY.test(from) && DATE_ONLY.test(to) && from <= to,
+  );
+
   const supabase = await createClient();
-  const settlements = await listOwnerSettlements(supabase);
+  const {
+    rows: settlements,
+    totalMatching,
+    truncated,
+  } = await getOwnerSettlementsForExport(
+    supabase,
+    user.id,
+    hasRange ? { dateRange: { from: from!, to: to! } } : {},
+  );
 
   const csv = toCsv(
     [
@@ -66,13 +88,22 @@ export async function GET(request: Request): Promise<Response> {
       toMajorUnits(s.platformFee),
       toMajorUnits(s.venueAmount),
       s.settlementStatus,
-    ])
+    ]),
   );
+
+  // A truncated file must say so in the one place a plain download link
+  // can: its own name. Silence here is exactly the bug this replaces —
+  // an export that stops early with nothing on screen to contradict it.
+  const rangeSuffix = hasRange ? `-${from}-to-${to}` : "";
+  const truncationSuffix = truncated
+    ? `-first-${settlements.length}-of-${totalMatching}`
+    : "";
+  const filename = `air-rally-earnings-${new Date().toISOString().slice(0, 10)}${rangeSuffix}${truncationSuffix}.csv`;
 
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="air-rally-earnings-${new Date().toISOString().slice(0, 10)}.csv"`,
+      "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
 }
