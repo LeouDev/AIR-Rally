@@ -29,7 +29,10 @@ const CASH = (overrides: Record<string, number> = {}) => ({
 
 describe("getPayoutReadiness", () => {
   it("is ready when the ledger has no issues", async () => {
-    const supabase = createTableMockSupabase({}, { reconcile_settlements: NO_ISSUES, payout_cash_position: CASH() });
+    const supabase = createTableMockSupabase(
+      {},
+      { reconcile_settlements: NO_ISSUES, payout_cash_position: CASH() },
+    );
     const readiness = await getPayoutReadiness(supabase);
 
     expect(readiness.ready).toBe(true);
@@ -49,7 +52,7 @@ describe("getPayoutReadiness", () => {
           error: null,
         },
         payout_cash_position: CASH(),
-      }
+      },
     );
 
     const readiness = await getPayoutReadiness(supabase);
@@ -64,11 +67,20 @@ describe("getPayoutReadiness", () => {
       {},
       {
         reconcile_settlements: {
-          data: [{ issue: "unfunded_entitlement", booking_id: "b1", detail: "owed 38000 collected 0" }],
+          data: [
+            {
+              issue: "unfunded_entitlement",
+              booking_id: "b1",
+              detail: "owed 38000 collected 0",
+            },
+          ],
           error: null,
         },
-        payout_cash_position: CASH({ credit_funded_exposure: 2500000, cash_position_total: -2500000 }),
-      }
+        payout_cash_position: CASH({
+          credit_funded_exposure: 2500000,
+          cash_position_total: -2500000,
+        }),
+      },
     );
 
     const readiness = await getPayoutReadiness(supabase);
@@ -80,7 +92,10 @@ describe("getPayoutReadiness", () => {
   it("warns in pesos when the cash position is negative", async () => {
     const supabase = createTableMockSupabase(
       {},
-      { reconcile_settlements: NO_ISSUES, payout_cash_position: CASH({ cash_position_total: -2500000 }) }
+      {
+        reconcile_settlements: NO_ISSUES,
+        payout_cash_position: CASH({ cash_position_total: -2500000 }),
+      },
     );
 
     const readiness = await getPayoutReadiness(supabase);
@@ -91,7 +106,10 @@ describe("getPayoutReadiness", () => {
   it("warns about on-hold money that cannot be paid yet", async () => {
     const supabase = createTableMockSupabase(
       {},
-      { reconcile_settlements: NO_ISSUES, payout_cash_position: CASH({ on_hold_amount: 47500 }) }
+      {
+        reconcile_settlements: NO_ISSUES,
+        payout_cash_position: CASH({ on_hold_amount: 47500 }),
+      },
     );
 
     const readiness = await getPayoutReadiness(supabase);
@@ -99,7 +117,13 @@ describe("getPayoutReadiness", () => {
   });
 
   it("reports zeroes rather than failing when nothing has settled yet", async () => {
-    const supabase = createTableMockSupabase({}, { reconcile_settlements: NO_ISSUES, payout_cash_position: { data: [], error: null } });
+    const supabase = createTableMockSupabase(
+      {},
+      {
+        reconcile_settlements: NO_ISSUES,
+        payout_cash_position: { data: [], error: null },
+      },
+    );
     const readiness = await getPayoutReadiness(supabase);
 
     expect(readiness.ready).toBe(true);
@@ -109,10 +133,35 @@ describe("getPayoutReadiness", () => {
 });
 
 describe("validatePayoutBatch", () => {
-  function mock(settlements: { id: string; settlement_status: string }[], committed: unknown[] = []) {
+  const READY_ACCOUNT = {
+    venue_id: "v1",
+    status: "verified",
+    bank_name: "BDO Unibank",
+  };
+
+  /**
+   * Every settlement defaults to venue "v1", and the account table defaults
+   * to one fully payable venue account — so existing tests about
+   * settlement-status eligibility don't also have to think about venue
+   * payout readiness. Tests about venue readiness itself pass their own
+   * `accounts` array.
+   */
+  function mock(
+    settlements: { id: string; settlement_status: string; venue_id?: string }[],
+    committed: unknown[] = [],
+    accounts: {
+      venue_id: string;
+      status: string;
+      bank_name: string | null;
+    }[] = [READY_ACCOUNT],
+  ) {
     return createTableMockSupabase({
-      booking_settlements: { data: settlements, error: null },
+      booking_settlements: {
+        data: settlements.map((s) => ({ venue_id: "v1", ...s })),
+        error: null,
+      },
       payout_batch_items: { data: committed, error: null },
+      venue_payment_accounts: { data: accounts, error: null },
     });
   }
 
@@ -123,7 +172,11 @@ describe("validatePayoutBatch", () => {
     ]);
 
     const result = await validatePayoutBatch(supabase, ["s1", "s2"]);
-    expect(result).toMatchObject({ valid: true, eligible: ["s1", "s2"], rejected: [] });
+    expect(result).toMatchObject({
+      valid: true,
+      eligible: ["s1", "s2"],
+      rejected: [],
+    });
   });
 
   // Pending means the court time has not been delivered, so the venue has
@@ -137,18 +190,26 @@ describe("validatePayoutBatch", () => {
     expect(result.rejected[0].reason).toMatch(/not been delivered/i);
   });
 
-  it.each(["reversed", "on_hold", "settled"])("rejects a %s settlement", async (status) => {
-    const supabase = mock([{ id: "s1", settlement_status: status }]);
+  it.each(["reversed", "on_hold", "settled"])(
+    "rejects a %s settlement",
+    async (status) => {
+      const supabase = mock([{ id: "s1", settlement_status: status }]);
 
-    const result = await validatePayoutBatch(supabase, ["s1"]);
-    expect(result.valid).toBe(false);
-    expect(result.rejected[0].reason).toContain(status);
-  });
+      const result = await validatePayoutBatch(supabase, ["s1"]);
+      expect(result.valid).toBe(false);
+      expect(result.rejected[0].reason).toContain(status);
+    },
+  );
 
   it("rejects a settlement already committed to a live batch", async () => {
     const supabase = mock(
       [{ id: "s1", settlement_status: "payable" }],
-      [{ settlement_id: "s1", payout_batches: { batch_reference: "PB-000001", status: "approved" } }]
+      [
+        {
+          settlement_id: "s1",
+          payout_batches: { batch_reference: "PB-000001", status: "approved" },
+        },
+      ],
     );
 
     const result = await validatePayoutBatch(supabase, ["s1"]);
@@ -161,7 +222,12 @@ describe("validatePayoutBatch", () => {
   it("allows a settlement whose previous batch was cancelled", async () => {
     const supabase = mock(
       [{ id: "s1", settlement_status: "payable" }],
-      [{ settlement_id: "s1", payout_batches: { batch_reference: "PB-000001", status: "cancelled" } }]
+      [
+        {
+          settlement_id: "s1",
+          payout_batches: { batch_reference: "PB-000001", status: "cancelled" },
+        },
+      ],
     );
 
     const result = await validatePayoutBatch(supabase, ["s1"]);
@@ -174,7 +240,9 @@ describe("validatePayoutBatch", () => {
 
     const result = await validatePayoutBatch(supabase, ["s1", "s1"]);
     expect(result.valid).toBe(false);
-    expect(result.rejected.some((r) => r.reason.includes("more than once"))).toBe(true);
+    expect(
+      result.rejected.some((r) => r.reason.includes("more than once")),
+    ).toBe(true);
   });
 
   it("rejects a settlement that doesn't exist", async () => {
@@ -187,7 +255,10 @@ describe("validatePayoutBatch", () => {
 
   it("treats an empty selection as invalid", async () => {
     const supabase = mock([]);
-    await expect(validatePayoutBatch(supabase, [])).resolves.toMatchObject({ valid: false, eligible: [] });
+    await expect(validatePayoutBatch(supabase, [])).resolves.toMatchObject({
+      valid: false,
+      eligible: [],
+    });
   });
 
   it("keeps the eligible ones separate from the rejected ones", async () => {
@@ -203,22 +274,95 @@ describe("validatePayoutBatch", () => {
     // problem, not silently get a smaller batch than they chose.
     expect(result.valid).toBe(false);
   });
+
+  // The gap found while scoping the payout redesign: PayMongo activation
+  // and having bank details on file are different questions, and a venue
+  // can satisfy one without the other.
+  it("rejects a payable settlement whose venue is not PayMongo-verified", async () => {
+    const supabase = mock(
+      [{ id: "s1", settlement_status: "payable" }],
+      [],
+      [{ venue_id: "v1", status: "pending_verification", bank_name: null }],
+    );
+
+    const result = await validatePayoutBatch(supabase, ["s1"]);
+    expect(result.valid).toBe(false);
+    expect(result.rejected[0].reason).toMatch(/not verified/i);
+  });
+
+  it("rejects a payable settlement whose venue is verified but has no bank details on file", async () => {
+    const supabase = mock(
+      [{ id: "s1", settlement_status: "payable" }],
+      [],
+      [{ venue_id: "v1", status: "verified", bank_name: null }],
+    );
+
+    const result = await validatePayoutBatch(supabase, ["s1"]);
+    expect(result.valid).toBe(false);
+    expect(result.rejected[0].reason).toMatch(/no bank details/i);
+  });
+
+  it("rejects a payable settlement whose venue has no payment account row at all", async () => {
+    const supabase = mock([{ id: "s1", settlement_status: "payable" }], [], []);
+
+    const result = await validatePayoutBatch(supabase, ["s1"]);
+    expect(result.valid).toBe(false);
+    expect(result.rejected[0].reason).toMatch(/not verified/i);
+  });
+
+  it("accepts a payable settlement once its venue is both verified and has bank details", async () => {
+    const supabase = mock(
+      [{ id: "s1", settlement_status: "payable" }],
+      [],
+      [{ venue_id: "v1", status: "verified", bank_name: "BDO Unibank" }],
+    );
+
+    const result = await validatePayoutBatch(supabase, ["s1"]);
+    expect(result).toMatchObject({ valid: true, eligible: ["s1"] });
+  });
 });
 
 // The financial shapes from the brief, restated at the payout boundary:
 // what a venue is owed never depends on how the customer funded it.
 describe("payout amounts across funding shapes", () => {
   const CASES = [
-    { name: "PayMongo only", gross: 50000, paymongo: 50000, credit: 0, fee: 2500, venue: 47500, cash: 2500 },
-    { name: "Credit only", gross: 50000, paymongo: 0, credit: 50000, fee: 2500, venue: 47500, cash: -47500 },
-    { name: "Mixed", gross: 50000, paymongo: 20000, credit: 30000, fee: 2500, venue: 47500, cash: -27500 },
+    {
+      name: "PayMongo only",
+      gross: 50000,
+      paymongo: 50000,
+      credit: 0,
+      fee: 2500,
+      venue: 47500,
+      cash: 2500,
+    },
+    {
+      name: "Credit only",
+      gross: 50000,
+      paymongo: 0,
+      credit: 50000,
+      fee: 2500,
+      venue: 47500,
+      cash: -47500,
+    },
+    {
+      name: "Mixed",
+      gross: 50000,
+      paymongo: 20000,
+      credit: 30000,
+      fee: 2500,
+      venue: 47500,
+      cash: -27500,
+    },
   ];
 
-  it.each(CASES)("$name pays the venue ₱475 and reports cash position $cash", ({ paymongo, credit, gross, fee, venue, cash }) => {
-    expect(paymongo + credit).toBe(gross);
-    expect(fee + venue).toBe(gross);
-    expect(paymongo - venue).toBe(cash);
-  });
+  it.each(CASES)(
+    "$name pays the venue ₱475 and reports cash position $cash",
+    ({ paymongo, credit, gross, fee, venue, cash }) => {
+      expect(paymongo + credit).toBe(gross);
+      expect(fee + venue).toBe(gross);
+      expect(paymongo - venue).toBe(cash);
+    },
+  );
 
   it("makes the payable amount independent of funding source", () => {
     expect(new Set(CASES.map((c) => c.venue)).size).toBe(1);
@@ -227,7 +371,10 @@ describe("payout amounts across funding shapes", () => {
   // Two credit-funded bookings mean the platform must find ₱75,500 of cash
   // it never collected. That total is the point of the readiness check.
   it("accumulates exposure across credit-funded bookings", () => {
-    const exposure = CASES.filter((c) => c.cash < 0).reduce((sum, c) => sum + -c.cash, 0);
+    const exposure = CASES.filter((c) => c.cash < 0).reduce(
+      (sum, c) => sum + -c.cash,
+      0,
+    );
     expect(exposure).toBe(75000);
   });
 });

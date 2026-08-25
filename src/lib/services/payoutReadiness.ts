@@ -63,7 +63,9 @@ function formatPeso(minorUnits: number): string {
 }
 
 /** Admin-only — payout_cash_position() enforces that itself. */
-export async function getPayoutReadiness(supabase: Client): Promise<PayoutReadiness> {
+export async function getPayoutReadiness(
+  supabase: Client,
+): Promise<PayoutReadiness> {
   const [issues, { data, error }] = await Promise.all([
     getSettlementIssues(supabase),
     supabase.rpc("payout_cash_position"),
@@ -81,21 +83,27 @@ export async function getPayoutReadiness(supabase: Client): Promise<PayoutReadin
     batchedAmount: Number(raw?.batched_amount ?? 0),
   };
 
-  const blockers = issues.errors.map((e) => ({ issue: e.issue, bookingId: e.booking_id, detail: e.detail }));
+  const blockers = issues.errors.map((e) => ({
+    issue: e.issue,
+    bookingId: e.booking_id,
+    detail: e.detail,
+  }));
 
   const warnings: string[] = [];
   if (cash.cashPositionTotal < 0) {
     warnings.push(
-      `Live settlements are ${formatPeso(cash.cashPositionTotal)} short in cash — paying them out draws on funds collected from other bookings.`
+      `Live settlements are ${formatPeso(cash.cashPositionTotal)} short in cash — paying them out draws on funds collected from other bookings.`,
     );
   }
   if (cash.creditFundedExposure > 0) {
     warnings.push(
-      `${formatPeso(cash.creditFundedExposure)} of entitlement was funded by AIR/Rally Credits, so no cash was collected for it at booking time.`
+      `${formatPeso(cash.creditFundedExposure)} of entitlement was funded by AIR/Rally Credits, so no cash was collected for it at booking time.`,
     );
   }
   if (cash.onHoldAmount > 0) {
-    warnings.push(`${formatPeso(cash.onHoldAmount)} is on hold and needs manual review before it can be paid.`);
+    warnings.push(
+      `${formatPeso(cash.onHoldAmount)} is on hold and needs manual review before it can be paid.`,
+    );
   }
 
   return { ready: blockers.length === 0, blockers, warnings, cash };
@@ -120,7 +128,10 @@ export type BatchValidation = {
  * and the create is still rejected. Anything else would be a time-of-check
  * to time-of-use hole in a financial path.
  */
-export async function validatePayoutBatch(supabase: Client, settlementIds: string[]): Promise<BatchValidation> {
+export async function validatePayoutBatch(
+  supabase: Client,
+  settlementIds: string[],
+): Promise<BatchValidation> {
   if (settlementIds.length === 0) {
     return { valid: false, eligible: [], rejected: [] };
   }
@@ -129,16 +140,19 @@ export async function validatePayoutBatch(supabase: Client, settlementIds: strin
   const rejected: { settlementId: string; reason: string }[] = [];
 
   if (unique.length !== settlementIds.length) {
-    rejected.push({ settlementId: "—", reason: "The same settlement was selected more than once." });
+    rejected.push({
+      settlementId: "—",
+      reason: "The same settlement was selected more than once.",
+    });
   }
 
   const { data: settlements, error } = await supabase
     .from("booking_settlements")
-    .select("id, settlement_status")
+    .select("id, settlement_status, venue_id")
     .in("id", unique);
   if (error) throw error;
 
-  const byId = new Map((settlements ?? []).map((s) => [s.id, s.settlement_status]));
+  const byId = new Map((settlements ?? []).map((s) => [s.id, s]));
 
   const { data: committed, error: committedError } = await supabase
     .from("payout_batch_items")
@@ -151,32 +165,76 @@ export async function validatePayoutBatch(supabase: Client, settlementIds: strin
     payout_batches: { batch_reference: string; status: string } | null;
   };
   const alreadyBatched = new Map<string, string>();
-  for (const item of assertRowShape<CommittedRow>(committed ?? [], ["settlement_id"], "committed settlements query")) {
+  for (const item of assertRowShape<CommittedRow>(
+    committed ?? [],
+    ["settlement_id"],
+    "committed settlements query",
+  )) {
     const batch = item.payout_batches;
     if (batch && batch.status !== "cancelled" && batch.status !== "failed") {
       alreadyBatched.set(item.settlement_id, batch.batch_reference);
     }
   }
 
+  // Whether a venue can be paid at all — same two conditions
+  // enforce_payout_batch_item() checks, so a settlement never gets past
+  // this courtesy check only to be rejected by the real one anyway. PayMongo
+  // activation (`status`) and having bank details on file (`bank_name`) are
+  // different questions with different fixes, so they get different
+  // messages rather than one generic "not ready".
+  const venueIds = [...new Set((settlements ?? []).map((s) => s.venue_id))];
+  const { data: accounts, error: accountsError } = await supabase
+    .from("venue_payment_accounts")
+    .select("venue_id, status, bank_name")
+    .eq("provider", "paymongo")
+    .in("venue_id", venueIds);
+  if (accountsError) throw accountsError;
+  const accountByVenue = new Map((accounts ?? []).map((a) => [a.venue_id, a]));
+
   const eligible: string[] = [];
   for (const id of unique) {
-    const status = byId.get(id);
-    if (!status) {
+    const settlement = byId.get(id);
+    if (!settlement) {
       rejected.push({ settlementId: id, reason: "Settlement not found." });
-    } else if (status !== "payable") {
+      continue;
+    }
+    if (settlement.settlement_status !== "payable") {
       rejected.push({
         settlementId: id,
         reason:
-          status === "pending"
+          settlement.settlement_status === "pending"
             ? "Court time has not been delivered yet, so this is not earned."
-            : `Settlement is ${status} and cannot be paid.`,
+            : `Settlement is ${settlement.settlement_status} and cannot be paid.`,
       });
-    } else if (alreadyBatched.has(id)) {
-      rejected.push({ settlementId: id, reason: `Already in payout batch ${alreadyBatched.get(id)}.` });
+      continue;
+    }
+    if (alreadyBatched.has(id)) {
+      rejected.push({
+        settlementId: id,
+        reason: `Already in payout batch ${alreadyBatched.get(id)}.`,
+      });
+      continue;
+    }
+    const account = accountByVenue.get(settlement.venue_id);
+    if (account?.status !== "verified") {
+      rejected.push({
+        settlementId: id,
+        reason: "Venue's payment account is not verified.",
+      });
+    } else if (!account.bank_name) {
+      rejected.push({
+        settlementId: id,
+        reason:
+          "Venue has no bank details on file — nowhere to send this payout.",
+      });
     } else {
       eligible.push(id);
     }
   }
 
-  return { valid: rejected.length === 0 && eligible.length > 0, eligible, rejected };
+  return {
+    valid: rejected.length === 0 && eligible.length > 0,
+    eligible,
+    rejected,
+  };
 }

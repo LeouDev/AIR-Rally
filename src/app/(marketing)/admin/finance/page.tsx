@@ -30,9 +30,17 @@ function Card({
   tone?: "neutral" | "warning";
 }) {
   return (
-    <div className={`rounded-2xl border p-6 ${tone === "warning" ? "border-warning/40 bg-warning/5" : "border-border bg-card"}`}>
-      <dt className={`text-xs ${tone === "warning" ? "text-warning" : "text-muted-foreground"}`}>{label}</dt>
-      <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{formatSettlementMoney(amount, currency)}</dd>
+    <div
+      className={`rounded-2xl border p-6 ${tone === "warning" ? "border-warning/40 bg-warning/5" : "border-border bg-card"}`}
+    >
+      <dt
+        className={`text-xs ${tone === "warning" ? "text-warning" : "text-muted-foreground"}`}
+      >
+        {label}
+      </dt>
+      <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
+        {formatSettlementMoney(amount, currency)}
+      </dd>
       <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
     </div>
   );
@@ -57,9 +65,12 @@ export default async function AdminFinancePage() {
     <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12 sm:px-6 lg:px-8">
       <BackLink href="/admin" label="Back to moderation dashboard" />
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Finance</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          Finance
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          What AIR/Rally owes venues, what it holds in cash, and whether a payout can responsibly be prepared.
+          What AIR/Rally owes venues, what it holds in cash, and whether a
+          payout can responsibly be prepared.
         </p>
       </div>
 
@@ -70,7 +81,12 @@ export default async function AdminFinancePage() {
           currency={cash.currency}
           hint="Everything owed and not yet paid."
         />
-        <Card label="Pending settlements" amount={cash.pendingAmount} currency={cash.currency} hint="Court time not yet delivered." />
+        <Card
+          label="Pending settlements"
+          amount={cash.pendingAmount}
+          currency={cash.currency}
+          hint="Court time not yet delivered."
+        />
         <Card
           label="Ready for payout"
           amount={cash.availablePayableAmount}
@@ -103,10 +119,14 @@ export default async function AdminFinancePage() {
           own row rather than buried among the cards above. */}
       <div
         className={`rounded-2xl border p-6 ${
-          cash.cashPositionTotal < 0 ? "border-warning/40 bg-warning/5" : "border-success/40 bg-success/5"
+          cash.cashPositionTotal < 0
+            ? "border-warning/40 bg-warning/5"
+            : "border-success/40 bg-success/5"
         }`}
       >
-        <p className="text-xs text-muted-foreground">Net cash position on live settlements</p>
+        <p className="text-xs text-muted-foreground">
+          Net cash position on live settlements
+        </p>
         <p className="mt-1 text-3xl font-semibold tabular-nums text-foreground">
           {formatSettlementMoney(cash.cashPositionTotal, cash.currency)}
         </p>
@@ -122,66 +142,103 @@ export default async function AdminFinancePage() {
           nowhere to receive it. */}
       <section className="flex flex-col gap-4">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Venue payout readiness</h2>
+          <h2 className="text-base font-semibold text-foreground">
+            Venue payout readiness
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Earnings can only be batched for venues whose payment account is verified.
+            Earnings can only be batched for venues that are both
+            PayMongo-verified and have bank details on file.
           </p>
         </div>
         <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="rounded-2xl border border-border bg-card p-6">
             <dt className="text-xs text-muted-foreground">Venues ready</dt>
-            <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{venueReadiness.venuesReady}</dd>
+            <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
+              {venueReadiness.venuesReady}
+            </dd>
           </div>
           <div className="rounded-2xl border border-warning/40 bg-warning/5 p-6">
             <dt className="text-xs text-warning">Missing payment setup</dt>
-            <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{venueReadiness.venuesMissingSetup}</dd>
-            <p className="mt-1 text-xs text-muted-foreground">{venueReadiness.venuesRestricted} restricted or disabled.</p>
+            <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
+              {venueReadiness.venuesMissingSetup}
+            </dd>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {venueReadiness.venuesRestricted} restricted or disabled.
+            </p>
           </div>
           <div className="rounded-2xl border border-warning/40 bg-warning/5 p-6">
             <dt className="text-xs text-warning">Blocked settlements</dt>
             <dd className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
-              {formatSettlementMoney(venueReadiness.blockedSettlementAmount, cash.currency)}
+              {formatSettlementMoney(
+                venueReadiness.blockedSettlementAmount,
+                cash.currency,
+              )}
             </dd>
             <p className="mt-1 text-xs text-muted-foreground">
-              {venueReadiness.blockedSettlementCount} earned settlement(s) with nowhere to send the money.
+              {venueReadiness.blockedSettlementCount} earned settlement(s) with
+              nowhere to send the money.
             </p>
           </div>
         </dl>
-        <Link href="/admin/payment-accounts" className="text-sm font-medium text-primary hover:underline">
+        <Link
+          href="/admin/payment-accounts"
+          className="text-sm font-medium text-primary hover:underline"
+        >
           Manage payment accounts →
         </Link>
       </section>
 
       <section className="flex flex-col gap-4">
-        <h2 className="text-base font-semibold text-foreground">Ledger readiness</h2>
+        <h2 className="text-base font-semibold text-foreground">
+          Ledger readiness
+        </h2>
 
         {readiness.ready ? (
           <div className="flex items-start gap-3 rounded-2xl border border-success/40 bg-success/5 px-5 py-4">
-            <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" aria-hidden />
+            <CheckCircle2
+              className="mt-0.5 size-5 shrink-0 text-success"
+              aria-hidden
+            />
             <div>
-              <p className="text-sm font-medium text-foreground">Ready for payout preparation</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">No reconciliation issues found.</p>
+              <p className="text-sm font-medium text-foreground">
+                Ready for payout preparation
+              </p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                No reconciliation issues found.
+              </p>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-3 rounded-2xl border border-destructive/40 bg-destructive/5 px-5 py-4">
             <div className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" aria-hidden />
+              <AlertTriangle
+                className="mt-0.5 size-5 shrink-0 text-destructive"
+                aria-hidden
+              />
               <div>
-                <p className="text-sm font-medium text-foreground">Payout blocked</p>
+                <p className="text-sm font-medium text-foreground">
+                  Payout blocked
+                </p>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                  {readiness.blockers.length} unresolved reconciliation issue(s) must be fixed first.
+                  {readiness.blockers.length} unresolved reconciliation issue(s)
+                  must be fixed first.
                 </p>
               </div>
             </div>
             <ul className="ml-8 list-disc text-sm text-muted-foreground">
               {readiness.blockers.slice(0, 5).map((blocker, index) => (
                 <li key={`${blocker.issue}-${blocker.bookingId}-${index}`}>
-                  <span className="font-medium text-foreground">{blocker.issue}</span> — {blocker.detail}
+                  <span className="font-medium text-foreground">
+                    {blocker.issue}
+                  </span>{" "}
+                  — {blocker.detail}
                 </li>
               ))}
             </ul>
-            <Link href="/admin/settlements/reconciliation" className="ml-8 text-sm font-medium text-primary hover:underline">
+            <Link
+              href="/admin/settlements/reconciliation"
+              className="ml-8 text-sm font-medium text-primary hover:underline"
+            >
               Open reconciliation →
             </Link>
           </div>
@@ -220,8 +277,8 @@ export default async function AdminFinancePage() {
       </section>
 
       <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-        No payout automation exists. Batches are internal preparation records — approving one does not transfer money or mark any
-        settlement as paid.
+        No payout automation exists. Batches are internal preparation records —
+        approving one does not transfer money or mark any settlement as paid.
       </p>
     </div>
   );
