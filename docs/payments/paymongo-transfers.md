@@ -186,11 +186,24 @@ discipline the booking flow already applies to payments.
 4. **Model processing fees.** PayMongo deducts fees before funds land, so cash received is
    below the recorded `paymongo_amount`. Minimum payout to a bank account is **PHP 80.00**.
 
-   > ⚠️ **UNVERIFIED — August 2026 re-check.** The PHP 80.00 minimum could not be
-   > confirmed against any PayMongo public source: not the pricing page, not the
-   > wallet page, not the Money Movement API docs. It may have come from a support
-   > conversation or a dashboard message, but it is not published, so **do not enforce
-   > a payout floor on this figure** until PayMongo confirms it.
+   > **SETTLED 2026-08-26 — the floor IS enforced now.** The founder states the rule
+   > directly: "Minimum amount per recipient is PHP 1.00 for PayMongo Wallet
+   > transactions and PHP 80.00 for direct bank payouts." We pay to bank accounts, so
+   > PHP 80.00 applies, and `src/lib/payouts/pesonetExport.ts` refuses to generate a
+   > file containing a row below it. This paragraph previously said "do not enforce a
+   > payout floor on this figure" — that instruction is superseded.
+   >
+   > **One honest caveat about the sourcing.** This figure and the founder's statement
+   > may not be independent: the earlier note guessed it "may have come from a support
+   > conversation or a dashboard message", which could be the same origin the founder
+   > is quoting. Treat it as ONE well-attested source, not two agreeing ones.
+   >
+   > PayMongo's own template workbook (`docs/paymongo/pesonet_template.xlsx`) states no
+   > minimum either way — context, not contradiction.
+   >
+   > The cost of being wrong is bounded and visible: a legitimate payout under PHP 80
+   > would be refused with a message naming the amount and the floor, rather than
+   > silently failing at upload.
    >
    > **The transfer fee is SETTLED: PHP 10, verified by observation 2026-08-26.** The
    > founder made real transfers on their own PayMongo account and PHP 10 was charged

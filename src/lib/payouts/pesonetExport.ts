@@ -54,10 +54,18 @@ export const PESONET_MAX_ROWS = 1000;
  * bank payouts over PESONet. Using ₱1 would let a below-floor row through and
  * the whole file would be rejected on upload.
  *
- * ⚠️ The ₱80 figure is from PayMongo's documentation and has NOT been
- * confirmed by a live below-floor transfer, unlike the ₱10 fee which was
- * verified empirically (see transferFee.ts). Treat it as the best available
- * number rather than a measured one.
+ * SOURCED, AND THE DISTINCTION FROM THE ₱10 IS WORTH KEEPING. The founder
+ * states the rule directly: "₱1.00 for PayMongo Wallet transactions and
+ * ₱80.00 for direct bank payouts". We pay to bank accounts, so ₱80 applies,
+ * and docs/payments/paymongo-transfers.md records the same number.
+ *
+ * The ₱10 fee was MEASURED — a live transfer was made and the charge
+ * observed. The ₱80 is DOCUMENTED. Both are reasonable to act on; only one
+ * was proven by doing it.
+ *
+ * For context rather than doubt: PayMongo's own template workbook states no
+ * minimum at all, either way. The one artifact that could have confirmed it
+ * simply does not mention the subject.
  */
 export const PESONET_MIN_TRANSFER_CENTAVOS = 8000;
 
