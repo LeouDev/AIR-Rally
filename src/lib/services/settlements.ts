@@ -148,7 +148,18 @@ export type OwnerSettlementSummary = {
   pending: number;
   /** status = payable: court time delivered, entitlement earned. */
   available: number;
-  /** status = settled. Always 0 today — no payout writer exists. */
+  /**
+   * status = settled — the venue has actually been paid.
+   *
+   * This was "always 0, no payout writer exists" until 2026-08-26. Migration
+   * 20260810000093 made attest_payout_settled() move the batch's settlements
+   * payable → settled in the same transaction as the transfer attestation, so
+   * this figure is now real and populates the owner's Paid card.
+   *
+   * There is still NO automated payout: an admin exports the file, uploads it
+   * to PayMongo by hand, and attests each transfer. What changed is that the
+   * attestation writes through to the ledger.
+   */
   paid: number;
   pendingCount: number;
   availableCount: number;

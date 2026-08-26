@@ -240,7 +240,8 @@ export default async function AdminSettlementsPage({ searchParams }: { searchPar
       </div>
 
       <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-        Payout automation is not built. Nothing on this page moves money — settlements never reach &ldquo;settled&rdquo; today.
+        Nothing on this page moves money. Settlements reach &ldquo;settled&rdquo; only when an
+        admin attests a transfer as sent on its payout batch — there is no automated payout.
       </p>
     </div>
   );

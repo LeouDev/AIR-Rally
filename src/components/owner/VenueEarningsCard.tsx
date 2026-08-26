@@ -45,8 +45,8 @@ export function VenueEarningsCard({ earnings }: VenueEarningsCardProps) {
         <div className="rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-foreground">
           <strong className="font-medium text-warning">This is not a statement of funds paid out to you.</strong> A booking showing
           as &quot;Paid&quot; means the customer&apos;s payment succeeded — it does not mean AIR/Rally has settled or
-          transferred any amount to you. Payout automation is not yet live; contact AIR/Rally directly about
-          compensation for confirmed bookings. The same applies to any refund figure shown below: it reflects what
+          transferred any amount to you. Payouts are sent weekly and you are emailed a payslip when one
+          goes out; contact AIR/Rally if a payout you expected has not arrived. The same applies to any refund figure shown below: it reflects what
           PayMongo&apos;s own refund response reported, not a confirmed debit from your bank account.
         </div>
 

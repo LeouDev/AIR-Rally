@@ -277,8 +277,9 @@ export default async function AdminFinancePage() {
       </section>
 
       <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-        No payout automation exists. Batches are internal preparation records —
-        approving one does not transfer money or mark any settlement as paid.
+        There is no automated payout. Approving a batch transfers nothing and marks
+        nothing as paid — money moves only when an admin uploads the file to PayMongo
+        and attests each transfer, which is what settles the batch&apos;s settlements.
       </p>
     </div>
   );

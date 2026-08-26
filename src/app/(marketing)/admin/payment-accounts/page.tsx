@@ -244,7 +244,8 @@ export default async function AdminPaymentAccountsPage({
 
       <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
         Marking an account verified only makes its settlements eligible for a
-        payout batch. No payout automation exists, so nothing here moves money.
+        payout batch. There is no automated payout, so nothing here moves money — a transfer
+        happens only when an admin uploads the file to PayMongo and attests it.
       </p>
     </div>
   );

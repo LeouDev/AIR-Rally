@@ -68,14 +68,39 @@ describe("getOwnerSettlementSummary", () => {
     });
   });
 
-  // Payout automation doesn't exist, so this must stay empty rather than
-  // quietly borrowing from another status.
-  it("reports nothing as paid, because no payout writer exists", async () => {
+  // Earned-but-unpaid must never be shown as paid: an owner reading "Paid"
+  // against money still sitting with us is the worst possible misreading of
+  // this card. The assertion was always right; its old name said "because no
+  // payout writer exists", which stopped being true on 2026-08-26.
+  it("does not count pending or payable as paid", async () => {
     const supabase = createMockSupabase({
       data: [row({ settlement_status: "pending" }), row({ settlement_status: "payable" })],
       error: null,
     });
     await expect(getOwnerSettlementSummary(supabase)).resolves.toMatchObject({ paid: 0, paidCount: 0 });
+  });
+
+  /**
+   * The case that could not happen until migration 20260810000093, and was
+   * therefore never asserted: attest_payout_settled() now moves a batch's
+   * settlements payable -> settled in the same transaction as the transfer
+   * attestation, so `paid` is real money that actually left.
+   *
+   * Without this, the suite would still pass with `paid` hardcoded to 0 --
+   * which is precisely what the old comment claimed it was.
+   */
+  it("counts settled as paid, now that attestation writes it", async () => {
+    const supabase = createMockSupabase({
+      data: [
+        row({ settlement_status: "settled" }),
+        row({ settlement_status: "settled" }),
+        row({ settlement_status: "payable" }),
+      ],
+      error: null,
+    });
+    const summary = await getOwnerSettlementSummary(supabase);
+    expect(summary.paidCount).toBe(2);
+    expect(summary.paid).toBeGreaterThan(0);
   });
 
   // Neither is money the owner should expect, so neither may inflate a card.

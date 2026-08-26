@@ -2,9 +2,20 @@
 
 How money reaches AIR/Rally today, and where a future PayMongo payout would plug in.
 
-> **Payout execution is NOT IMPLEMENTED.** Nothing in AIR/Rally can send money to a
-> venue. No settlement can reach `settled`. Every method on the payout provider throws.
-> This document describes what exists and what is deliberately missing.
+> **UPDATED 2026-08-26 — two of these three claims are no longer true.**
+>
+> **Still true:** there is no AUTOMATED payout. Every method on the PayMongo payout
+> provider still throws, and nothing in AIR/Rally calls an API to send money.
+>
+> **No longer true:** settlements *do* reach `settled`, and money *does* reach venues.
+> A human does it. An admin exports a PESONet file, uploads it to PayMongo by hand,
+> and attests each transfer — and migration `20260810000093` makes that attestation
+> move the batch's settlements `payable → settled` in the same transaction.
+>
+> The distinction that matters: **the payout PROVIDER is unimplemented; the payout
+> PROCESS exists and is manual.** Read the sections below with that in mind — the
+> parts describing an absent provider are accurate, the parts implying nothing can
+> ever be paid are not.
 
 ---
 

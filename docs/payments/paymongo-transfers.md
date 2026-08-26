@@ -4,6 +4,12 @@ Research conducted **August 2026**, against PayMongo's live documentation and AI
 own test-mode API key.
 
 > **Transfers are NOT implemented and cannot be executed.** Every provider method throws.
+> That remains true, and this document is about the unbuilt API integration.
+>
+> **It does not mean venues cannot be paid.** Since 2026-08-26 there is a manual,
+> human-attested payout path — export a PESONet file, upload it to PayMongo, attest
+> each transfer — which settles the batch's settlements. See
+> `docs/payments/payout-readiness.md`.
 > The adapter is disabled by default and additionally refuses to run against a non-test
 > key. No settlement can be marked `settled`.
 
