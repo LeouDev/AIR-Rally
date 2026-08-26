@@ -4,8 +4,23 @@
  * change — every new signup will then be recorded against the new
  * version, and (once a re-acceptance flow exists) existing users could
  * be compared against it. Bumping this alone never requires a migration.
+ *
+ * "SINGLE SOURCE OF TRUTH" IS ASPIRATIONAL, NOT STRUCTURAL — and it has
+ * already failed once. The mobile app carries its own copy of this
+ * constant and its own copy of the Terms text. Between 2026-08-17 and
+ * 2026-08-26 the two disagreed: mobile said "2026-08-23" and carried a
+ * corrected §7, while this repo still said "2026-08-17" and carried §7's
+ * superseded wording. Since both clients write to the same
+ * agreement_acceptances table, the version recorded against a user
+ * depended on which app they signed up in rather than on what they
+ * agreed to.
+ *
+ * Nothing enforces that the two stay in step. Until a shared source or a
+ * content hash on the acceptance row exists, THIS CONSTANT AND MOBILE'S
+ * MUST BE CHANGED TOGETHER, in the same breath, or the next divergence
+ * will be as invisible as the last.
  */
-export const CURRENT_AGREEMENT_VERSION = "2026-08-17";
+export const CURRENT_AGREEMENT_VERSION = "2026-08-23";
 
 /**
  * Same idea as CURRENT_AGREEMENT_VERSION, but for the Venue Owner

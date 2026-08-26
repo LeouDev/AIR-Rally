@@ -98,7 +98,7 @@ export const TERMS: LegalDocument = {
       body: [
         "Credits are a balance held in your AIR/Rally account that can be applied against future bookings on the platform.",
         "Credits are not money, not legal tender, and not redeemable for cash. They cannot be transferred to another person or sold. They are issued at AIR/Rally's discretion, principally as compensation under the cancellation terms above.",
-        "Credits applied to a booking reduce the amount you pay at checkout. Where a booking paid partly with Credits is later cancelled, the Credits portion is returned to your Credits balance.",
+        "Credits are applied automatically at checkout and reduce the amount you pay. A confirmed booking that used any Credits cannot be cancelled or rescheduled, and those Credits are not returned. Credits are themselves issued as compensation when a booking is cancelled, so allowing a Credit-paid booking to be cancelled or rescheduled for further Credits would let a balance be held indefinitely while court time is repeatedly reserved and released.",
       ],
       reviewNote:
         "Counsel should confirm whether a stored balance of this kind attracts stored-value, e-money or gift-cheque regulation in the Philippines, and whether an expiry period is permitted or required. Credits currently do not expire.",
