@@ -1,4 +1,9 @@
-import { TERMS_VERSIONS, hashLegalDocument, currentTermsHash } from "../versions";
+import {
+  TERMS_VERSIONS,
+  ALL_LEGAL_VERSIONS,
+  hashLegalDocument,
+  currentTermsHash,
+} from "../versions";
 import { TERMS } from "@/lib/legalContent";
 import { CURRENT_AGREEMENT_VERSION } from "@/lib/legal";
 import manifest from "../manifest.json";
@@ -16,25 +21,46 @@ import manifest from "../manifest.json";
  * fails, and the only way to make it pass is to add a new version — which
  * is a visible, deliberate act rather than a side effect of a copy edit.
  */
+type DocKey = keyof typeof ALL_LEGAL_VERSIONS;
+const DOC_KEYS = Object.keys(ALL_LEGAL_VERSIONS) as DocKey[];
+const hashes = manifest as unknown as Record<string, Record<string, string>>;
+
 describe("legal version integrity", () => {
-  it.each(Object.keys(manifest.terms))("%s still hashes to its manifest entry", (version) => {
-    const doc = TERMS_VERSIONS[version];
-    expect(doc).toBeDefined();
-    expect(hashLegalDocument(doc)).toBe(manifest.terms[version as keyof typeof manifest.terms]);
+  // EVERY document, not only the Terms. The Venue Owner Agreement is the
+  // next one due to change (payout clauses 3.9-3.12), and covering only
+  // Terms would have meant the very next legal edit bypassed the machinery
+  // built to catch exactly that.
+  it.each(
+    DOC_KEYS.flatMap((doc) =>
+      Object.keys(hashes[doc]).map((v) => [doc, v] as const),
+    ),
+  )("%s/%s still hashes to its manifest entry", (doc, version) => {
+    const found = ALL_LEGAL_VERSIONS[doc][version];
+    expect(found).toBeDefined();
+    expect(hashLegalDocument(found)).toBe(hashes[doc][version]);
   });
 
   // Catches the reverse: a version added to the code without a manifest
   // entry would otherwise be unprotected, since the loop above only walks
   // the manifest.
-  it("every version in the code has a manifest entry", () => {
-    for (const version of Object.keys(TERMS_VERSIONS)) {
-      expect(Object.keys(manifest.terms)).toContain(version);
-    }
+  it.each(DOC_KEYS)(
+    "every %s version in the code has a manifest entry",
+    (doc) => {
+      for (const version of Object.keys(ALL_LEGAL_VERSIONS[doc])) {
+        expect(Object.keys(hashes[doc])).toContain(version);
+      }
+    },
+  );
+
+  it("covers all three documents, so none is silently unprotected", () => {
+    expect(DOC_KEYS.sort()).toEqual(["ownerAgreement", "privacy", "terms"]);
   });
 
   it("the current version constant resolves to a real document", () => {
     expect(TERMS_VERSIONS[CURRENT_AGREEMENT_VERSION]).toBe(TERMS);
-    expect(currentTermsHash()).toBe(manifest.terms[CURRENT_AGREEMENT_VERSION as keyof typeof manifest.terms]);
+    expect(currentTermsHash()).toBe(
+      manifest.terms[CURRENT_AGREEMENT_VERSION as keyof typeof manifest.terms],
+    );
   });
 });
 
@@ -47,20 +73,32 @@ describe("the superseded text is actually preserved", () => {
    * they agreed to would be git history.
    */
   it("2026-08-17 still says Credits are returned on cancellation", () => {
-    const credits = TERMS_VERSIONS["2026-08-17"].sections.find((s) => s.heading.startsWith("7."));
-    expect(credits?.body.join(" ")).toContain("the Credits portion is returned to your Credits balance");
+    const credits = TERMS_VERSIONS["2026-08-17"].sections.find((s) =>
+      s.heading.startsWith("7."),
+    );
+    expect(credits?.body.join(" ")).toContain(
+      "the Credits portion is returned to your Credits balance",
+    );
   });
 
   it("and the current version says the opposite, which is what the code does", () => {
-    const credits = TERMS_VERSIONS[CURRENT_AGREEMENT_VERSION].sections.find((s) => s.heading.startsWith("7."));
-    expect(credits?.body.join(" ")).toContain("cannot be cancelled or rescheduled");
-    expect(credits?.body.join(" ")).not.toContain("the Credits portion is returned");
+    const credits = TERMS_VERSIONS[CURRENT_AGREEMENT_VERSION].sections.find(
+      (s) => s.heading.startsWith("7."),
+    );
+    expect(credits?.body.join(" ")).toContain(
+      "cannot be cancelled or rescheduled",
+    );
+    expect(credits?.body.join(" ")).not.toContain(
+      "the Credits portion is returned",
+    );
   });
 
   // Two versions hashing the same would mean the freeze silently aliased
   // rather than preserving — the failure would look like success.
   it("the two versions are genuinely different documents", () => {
-    expect(hashLegalDocument(TERMS_VERSIONS["2026-08-17"])).not.toBe(currentTermsHash());
+    expect(hashLegalDocument(TERMS_VERSIONS["2026-08-17"])).not.toBe(
+      currentTermsHash(),
+    );
   });
 });
 
@@ -76,7 +114,10 @@ describe("hashing ignores formatting but not words", () => {
   it("changing a single word does change it", () => {
     const altered = {
       ...TERMS,
-      intro: [TERMS.intro[0].replace("AIR/Rally", "AIR/Rallyy"), ...TERMS.intro.slice(1)],
+      intro: [
+        TERMS.intro[0].replace("AIR/Rally", "AIR/Rallyy"),
+        ...TERMS.intro.slice(1),
+      ],
     };
     expect(hashLegalDocument(altered)).not.toBe(currentTermsHash());
   });
@@ -87,7 +128,9 @@ describe("hashing ignores formatting but not words", () => {
   it("a reviewNote is not part of the accepted document", () => {
     const withNote = {
       ...TERMS,
-      sections: TERMS.sections.map((s, i) => (i === 0 ? { ...s, reviewNote: "ask counsel about this" } : s)),
+      sections: TERMS.sections.map((s, i) =>
+        i === 0 ? { ...s, reviewNote: "ask counsel about this" } : s,
+      ),
     };
     expect(hashLegalDocument(withNote)).toBe(currentTermsHash());
   });

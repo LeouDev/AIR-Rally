@@ -1,7 +1,13 @@
 {
-  "_comment": "SHA-256 of every User Agreement version, normalised for whitespace. DO NOT edit an existing entry to make a test pass — a changed hash means the text of a document users have already accepted was altered, which is the failure this file exists to prevent. To change the Terms, add a NEW version to CURRENT_AGREEMENT_VERSION, freeze the old text in legal/frozen.ts, and add its hash here.",
+  "_comment": "SHA-256 of every legal document version, normalised for whitespace, excluding reviewNote. DO NOT edit an existing entry to make a test pass — a changed hash means the text of a document was altered, which is the failure this file exists to prevent. To change a document that people ACCEPT (terms, ownerAgreement): add a NEW version, freeze the old text in legal/frozen.ts, and add the new hash here. The privacy policy has no acceptance record and so no version scheme; changing its hash here is the deliberate act that makes the edit visible in review.",
   "terms": {
     "2026-08-17": "eadbd8d438628f00f17e7aef492c8d7d6ee39e854cd3333df36b332c157dbaa0",
     "2026-08-23": "e69ae7275e7f33dd60d5d25372a08503706874cf2e8a284e38591b3f676e2d14"
+  },
+  "ownerAgreement": {
+    "1.0": "bd0d9b5a9bd462bc188701fb41dde8ef6925ed88c1bc9b4a2dbe7b4de3c05ee5"
+  },
+  "privacy": {
+    "current": "3271945a876cbe6153c35757494a167b9a09673655257d4cc2e80d9f5afe98a9"
   }
 }

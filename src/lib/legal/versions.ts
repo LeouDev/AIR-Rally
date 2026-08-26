@@ -1,7 +1,10 @@
 import { createHash } from "crypto";
 import type { LegalDocument } from "@/lib/legalContent";
-import { TERMS } from "@/lib/legalContent";
-import { CURRENT_AGREEMENT_VERSION } from "@/lib/legal";
+import { TERMS, OWNER_AGREEMENT, PRIVACY } from "@/lib/legalContent";
+import {
+  CURRENT_AGREEMENT_VERSION,
+  CURRENT_OWNER_AGREEMENT_VERSION,
+} from "@/lib/legal";
 import { TERMS_2026_08_17 } from "./frozen";
 
 /**
@@ -35,6 +38,40 @@ export const TERMS_VERSIONS: Record<string, LegalDocument> = {
   // rather than an in-place edit.
   [CURRENT_AGREEMENT_VERSION]: TERMS,
 };
+
+/**
+ * Every version of the Venue Owner Agreement. Owners accept this at
+ * application time and the version is recorded on
+ * `owner_applications.agreement_version`.
+ *
+ * `1.0` is the only version so far, and it is the LIVE text rather than a
+ * frozen copy — nothing has superseded it yet. The moment it is amended,
+ * the manifest below will fail, and making it pass means bumping to `1.1`
+ * and freezing `1.0` in ./frozen.ts. That is the machinery doing its job on
+ * its first real use rather than being bypassed by it.
+ */
+export const OWNER_AGREEMENT_VERSIONS: Record<string, LegalDocument> = {
+  [CURRENT_OWNER_AGREEMENT_VERSION]: OWNER_AGREEMENT,
+};
+
+/**
+ * The Privacy Policy, which nobody "accepts" — there is no acceptance row
+ * and so no version constant. It is covered here anyway so that an edit is
+ * a deliberate act rather than a quiet one: changing it fails the manifest,
+ * and the fix is updating the recorded hash, which is visible in review as
+ * "I changed the privacy policy" rather than one line inside a wall of
+ * prose. Keyed "current" because there is no version scheme to key it by.
+ */
+export const PRIVACY_VERSIONS: Record<string, LegalDocument> = {
+  current: PRIVACY,
+};
+
+/** Every legal document under hash protection, by the manifest's own keys. */
+export const ALL_LEGAL_VERSIONS = {
+  terms: TERMS_VERSIONS,
+  ownerAgreement: OWNER_AGREEMENT_VERSIONS,
+  privacy: PRIVACY_VERSIONS,
+} as const;
 
 /**
  * A stable fingerprint of a document's words.
