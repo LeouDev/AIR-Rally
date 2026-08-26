@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { exportPesonetCsvAction } from "@/lib/actions/pesonetExport";
+import { PESONET_RAIL_WARNING } from "@/lib/payouts/pesonetExport";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -120,6 +122,28 @@ export function PayoutTransferSteps({
   const [cancelling, setCancelling] = useState<TransferRow | null>(null);
   const [reference, setReference] = useState("");
   const [reason, setReason] = useState("");
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  function handleExport() {
+    setExportError(null);
+    startTransition(async () => {
+      const result = await exportPesonetCsvAction({ batchId });
+      if (!result.ok) {
+        setExportError(result.error);
+        return;
+      }
+      // Written as a Blob and revoked immediately: the file is generated per
+      // click rather than held, so a stale copy can never be downloaded after
+      // the batch has moved on.
+      const blob = new Blob([result.data.csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.data.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
 
   const recorded = transfers.some((t) => t.transferId !== null);
   const live = transfers.filter(
@@ -207,12 +231,36 @@ export function PayoutTransferSteps({
         done={false}
         active={recorded && !allUploaded}
       >
-        {/* The export is not built yet. Saying so plainly beats omitting the
-            step and leaving a four-step routine with a hole in the middle. */}
-        <p className="text-sm text-muted-foreground">
-          Not built yet — for now, copy the bank details from the table below
-          into PayMongo by hand.
-        </p>
+        <div className="space-y-3">
+          {/* The rail warning sits ABOVE the button, not beside it. PayMongo's
+              upload screen defaults to InstaPay, and every bank name in this
+              file is a PESONet spelling — choosing the wrong rail fails the
+              whole file, not one row. Someone about to click Download is the
+              person who needs to read this. */}
+          <p className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
+            <strong>{PESONET_RAIL_WARNING}</strong>
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={isPending || !recorded}
+              className="rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background disabled:opacity-40"
+            >
+              {isPending ? "Preparing…" : "Download the PesoNet file"}
+            </button>
+            <span className="text-sm text-muted-foreground">
+              Venues already confirmed sent are left out.
+            </span>
+          </div>
+          {exportError && (
+            /* The whole problem list, preserved. Truncating to the first line
+               means fixing one bank name, regenerating, and finding the next. */
+            <p className="whitespace-pre-line rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {exportError}
+            </p>
+          )}
+        </div>
       </Step>
 
       <Step
