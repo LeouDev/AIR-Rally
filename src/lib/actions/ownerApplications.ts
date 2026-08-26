@@ -6,6 +6,7 @@ import {
   submitOwnerApplication,
   approveOwnerApplication,
   rejectOwnerApplication,
+  OwnerApplicationError,
 } from "@/lib/services/ownerApplications";
 import { recordReferralStart, markReferralCompleted, markReferralApproved } from "@/lib/services/referrals";
 import { submitOwnerApplicationSchema, type SubmitOwnerApplicationValues } from "@/lib/validations/ownerApplication";
@@ -100,6 +101,12 @@ export async function approveOwnerApplicationAction(applicationId: string): Prom
     revalidatePath(`/admin/owner-applications/${applicationId}`);
     return { success: true, data: application };
   } catch (error) {
+    // A missing payout destination is something the admin can act on —
+    // chase the applicant for it — rather than a system failure, so it
+    // says so instead of falling through to the generic message.
+    if (error instanceof OwnerApplicationError) {
+      return { success: false, error: error.message };
+    }
     logServerError("ownerApplications.approve", error);
     return { success: false, error: getFriendlyErrorMessage(error, "We couldn't approve that application.") };
   }

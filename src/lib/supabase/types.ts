@@ -430,6 +430,22 @@ export type OwnerApplication = {
   agreement_accepted_at: string | null;
   agreement_version: string | null;
   has_liability_insurance: boolean | null;
+  /**
+   * Payout destination captured at application time (migration
+   * 20260810000090), carried forward into venue_payment_accounts by the
+   * mirror trigger when the approved owner creates a venue. All three
+   * together or all null — the database rejects a half-filled set.
+   *
+   * PII. Nullable only because existing rows predate the requirement; the
+   * submit and approve paths both require them. NEVER select these in a
+   * LIST — use `bank_details_complete`, which exists precisely so a list
+   * can know the details are present without receiving the account number.
+   */
+  bank_name: string | null;
+  bank_account_name: string | null;
+  bank_account_number: string | null;
+  /** Generated in Postgres from `bank_name is not null`. Read-only. */
+  bank_details_complete: boolean;
 };
 
 /**
@@ -1166,6 +1182,13 @@ export type Database = {
           | "agreement_accepted_at"
           | "agreement_version"
           | "has_liability_insurance"
+          // Required at the type layer even though the columns are nullable
+          // in Postgres: the columns stay nullable only because existing
+          // rows predate the requirement (see migration 20260810000090),
+          // while every NEW application must carry a payout destination.
+          | "bank_name"
+          | "bank_account_name"
+          | "bank_account_number"
         > &
           Partial<
             Omit<
@@ -1182,6 +1205,11 @@ export type Database = {
               | "agreement_accepted_at"
               | "agreement_version"
               | "has_liability_insurance"
+              | "bank_name"
+              | "bank_account_name"
+              | "bank_account_number"
+              // Generated column — Postgres rejects any write to it.
+              | "bank_details_complete"
               | "created_at"
               | "updated_at"
             >

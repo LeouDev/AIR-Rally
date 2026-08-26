@@ -12,13 +12,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { submitOwnerApplicationAction } from "@/lib/actions/ownerApplications";
+import { PESONET_BANKS } from "@/lib/payouts/pesonetBanks";
 import {
   submitOwnerApplicationSchema,
   OWNER_APPLICATION_STEP_FIELDS,
   type SubmitOwnerApplicationValues,
 } from "@/lib/validations/ownerApplication";
 
-const TOTAL_STEPS = 7;
+const TOTAL_STEPS = 8;
 // sessionStorage only (not localStorage) — a draft that outlives the tab
 // is a bigger surprise than one that doesn't; this only guards against an
 // accidental reload mid-application, not a return visit days later.
@@ -63,7 +64,18 @@ export function OwnerApplicationWizard({ onSubmitted }: OwnerApplicationWizardPr
   useEffect(() => {
     const subscription = watch((values) => {
       try {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(values));
+        // Bank details are deliberately NOT persisted. Everything else in
+        // this draft is business contact info an applicant would happily
+        // re-type; an account number is not, and sessionStorage holds it in
+        // plaintext — readable by any script on the origin — for the life
+        // of the tab. A reload safeguard is not worth keeping a payout
+        // destination in the browser, and re-entering three fields is the
+        // smaller cost.
+        const { bankName, bankAccountName, bankAccountNumber, ...persistable } = values;
+        void bankName;
+        void bankAccountName;
+        void bankAccountNumber;
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
       } catch {
         // Storage full/unavailable — the form still works, just without the reload safeguard.
       }
@@ -202,6 +214,60 @@ export function OwnerApplicationWizard({ onSubmitted }: OwnerApplicationWizardPr
             )}
 
             {step === 4 && (
+              <div className="flex flex-col gap-4">
+                <h2 className="text-lg font-semibold text-foreground">Payout details</h2>
+                <p className="text-sm text-muted-foreground">
+                  Where AIR/Rally sends your earnings. We need these before your application can be approved — an
+                  approved venue with no payout destination is one we can&apos;t actually pay.
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="bankName">Bank</Label>
+                  <select
+                    id="bankName"
+                    aria-invalid={!!errors.bankName}
+                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    {...register("bankName")}
+                  >
+                    <option value="">Select your bank…</option>
+                    {PESONET_BANKS.map((bank) => (
+                      <option key={bank} value={bank}>
+                        {bank}
+                      </option>
+                    ))}
+                  </select>
+                  {/* A dropdown, never a text field: PayMongo matches this
+                      string character for character on upload, so a typed
+                      bank name becomes a transfer row rejected at the one
+                      moment nobody is watching. */}
+                  {errors.bankName && <p className="text-xs text-destructive">{errors.bankName.message}</p>}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="bankAccountName">Account holder name</Label>
+                  <Input id="bankAccountName" aria-invalid={!!errors.bankAccountName} {...register("bankAccountName")} />
+                  {errors.bankAccountName && (
+                    <p className="text-xs text-destructive">{errors.bankAccountName.message}</p>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="bankAccountNumber">Account number</Label>
+                  <Input
+                    id="bankAccountNumber"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    aria-invalid={!!errors.bankAccountNumber}
+                    {...register("bankAccountNumber")}
+                  />
+                  {errors.bankAccountNumber && (
+                    <p className="text-xs text-destructive">{errors.bankAccountNumber.message}</p>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Double-check the account number. PayMongo is not liable for transfers sent to incorrect details.
+                </p>
+              </div>
+            )}
+
+            {step === 5 && (
               <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border p-8 text-center">
                 <Camera className="size-8 text-muted-foreground" aria-hidden="true" />
                 <h2 className="text-lg font-semibold text-foreground">Showcase your facility</h2>
@@ -212,7 +278,7 @@ export function OwnerApplicationWizard({ onSubmitted }: OwnerApplicationWizardPr
               </div>
             )}
 
-            {step === 5 && (
+            {step === 6 && (
               <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border p-8 text-center">
                 <Clock className="size-8 text-muted-foreground" aria-hidden="true" />
                 <h2 className="text-lg font-semibold text-foreground">Set your hours</h2>
@@ -223,7 +289,7 @@ export function OwnerApplicationWizard({ onSubmitted }: OwnerApplicationWizardPr
               </div>
             )}
 
-            {step === 6 && (
+            {step === 7 && (
               <div className="flex flex-col gap-4">
                 <h2 className="text-lg font-semibold text-foreground">Review and submit</h2>
                 <dl className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4 text-sm">
@@ -245,6 +311,15 @@ export function OwnerApplicationWizard({ onSubmitted }: OwnerApplicationWizardPr
                     <dt className="text-muted-foreground">Courts</dt>
                     <dd className="text-right text-foreground">{values.courtCount}</dd>
                   </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Payout to</dt>
+                    {/* Last 4 only. The applicant typed it moments ago and
+                        knows what it is; rendering it in full here just puts
+                        an account number on screen for anyone behind them. */}
+                    <dd className="text-right text-foreground">
+                      {values.bankName ? `${values.bankName} ••••${(values.bankAccountNumber ?? "").slice(-4)}` : "—"}
+                    </dd>
+                  </div>
                 </dl>
                 <p className="text-sm text-muted-foreground">
                   Our team reviews your facility before it becomes available to players.
@@ -252,7 +327,7 @@ export function OwnerApplicationWizard({ onSubmitted }: OwnerApplicationWizardPr
               </div>
             )}
 
-            {step === 7 && (
+            {step === 8 && (
               <div className="flex flex-col gap-5">
                 <h2 className="text-lg font-semibold text-foreground">The Venue Owner Agreement</h2>
                 <dl className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4 text-sm">

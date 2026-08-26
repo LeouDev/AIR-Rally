@@ -19,6 +19,12 @@ jest.mock("../../services/ownerApplications", () => ({
   submitOwnerApplication: jest.fn(),
   approveOwnerApplication: jest.fn(),
   rejectOwnerApplication: jest.fn(),
+  // The real class, not a jest.fn(): the action under test branches on
+  // `error instanceof OwnerApplicationError`, and a mocked-away class makes
+  // that `instanceof` throw "Right-hand side is not an object" — which
+  // would fail every OTHER test in this file for a reason unrelated to what
+  // they assert.
+  OwnerApplicationError: jest.requireActual("../../services/ownerApplications").OwnerApplicationError,
 }));
 jest.mock("../../services/referrals", () => ({
   recordReferralStart: jest.fn(),
@@ -62,6 +68,9 @@ const validValues = {
   courtCount: 2,
   hasLiabilityInsurance: true,
   agreedToOwnerAgreement: true,
+  bankName: "BANK OF THE PHILIPPINE ISLANDS",
+  bankAccountName: "Test Owner",
+  bankAccountNumber: "1234567890",
 };
 
 beforeEach(() => {

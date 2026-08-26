@@ -29,6 +29,10 @@ const APPLICATION: OwnerApplication = {
   agreement_accepted_at: "2026-01-01T00:00:00Z",
   agreement_version: "1.0",
   has_liability_insurance: true,
+  bank_name: "BANK OF THE PHILIPPINE ISLANDS",
+  bank_account_name: "Test Owner",
+  bank_account_number: "1234567890",
+  bank_details_complete: true,
 };
 
 describe("requestOwnerAccess", () => {
@@ -58,6 +62,9 @@ describe("submitOwnerApplication", () => {
       venueCity: "Cebu City",
       courtCount: 2,
       hasLiabilityInsurance: true,
+      bankName: "BANK OF THE PHILIPPINE ISLANDS",
+      bankAccountName: "Test Owner",
+      bankAccountNumber: "1234567890",
     });
     expect(result).toEqual(APPLICATION);
   });
@@ -107,7 +114,42 @@ describe("getOwnerApplicationForAdmin", () => {
 describe("approveOwnerApplication", () => {
   it("throws when the application doesn't exist", async () => {
     const supabase = createTableMockSupabase({ owner_applications: { data: null, error: null } });
-    await expect(approveOwnerApplication(supabase, "app-1", "admin-1")).rejects.toThrow("Application not found.");
+    await expect(approveOwnerApplication(supabase, "app-1", "admin-1")).rejects.toMatchObject({
+      name: "OwnerApplicationError",
+      reason: "not_found",
+    });
+  });
+
+  // The founder's own requirement: an admin cannot approve an applicant
+  // the platform would have no way to pay. Asserts the SPECIFIC reason,
+  // not merely that something threw — an approval blocked for the wrong
+  // cause would otherwise look identical to one blocked for this one.
+  it("refuses to approve an application with no bank details, naming why", async () => {
+    const supabase = createTableMockSupabase({
+      owner_applications: { data: { ...APPLICATION, bank_name: null, bank_account_name: null, bank_account_number: null, bank_details_complete: false }, error: null },
+    });
+    await expect(approveOwnerApplication(supabase, "app-1", "admin-1")).rejects.toMatchObject({
+      name: "OwnerApplicationError",
+      reason: "missing_bank_details",
+    });
+  });
+
+  it("does not grant venue_owner when the bank-details check refuses", async () => {
+    const profilesUpdate = jest.fn();
+    const supabase = {
+      from: jest.fn((table: string) => {
+        if (table === "owner_applications") {
+          return { select: jest.fn(() => ({ eq: jest.fn(() => ({ maybeSingle: jest.fn().mockResolvedValue({ data: { ...APPLICATION, bank_name: null, bank_account_name: null, bank_account_number: null, bank_details_complete: false }, error: null }) })) })) };
+        }
+        if (table === "profiles") return { update: profilesUpdate };
+        throw new Error(`unexpected table ${table}`);
+      }),
+    } as unknown as Parameters<typeof approveOwnerApplication>[0];
+
+    await expect(approveOwnerApplication(supabase, "app-1", "admin-1")).rejects.toMatchObject({ reason: "missing_bank_details" });
+    // The refusal must happen BEFORE any grant — a rejected approval that
+    // had already promoted the applicant would be worse than no check.
+    expect(profilesUpdate).not.toHaveBeenCalled();
   });
 
   // The real "distinct admin, distinct applicant" grant was additionally
