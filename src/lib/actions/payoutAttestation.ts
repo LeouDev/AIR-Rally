@@ -218,6 +218,31 @@ export async function cancelPayoutTransferAction(input: {
     return { success: true, data: null };
   } catch (error) {
     logServerError("payoutAttestation.cancel", error);
+
+    // "Already cancelled" and "cancelling failed" need OPPOSITE responses from
+    // the person reading them, and cancel_payout_transfer() cannot tell them
+    // apart: its UPDATE matches `status in ('pending','processing')`, so a
+    // transfer that is ALREADY cancelled produces the same zero-row raise as
+    // one that was never cancellable.
+    //
+    // QA hit this on 2026-08-26: the first click succeeded server-side but the
+    // browser aborted before showing anything, so the operator saw no change,
+    // clicked again, and was told "We couldn't cancel that." That message says
+    // "try again" about an action that had already worked — the wrong
+    // instruction, on a destructive step, delivered after the destruction.
+    //
+    // The underlying no-feedback bug needs a reproduction to fix. This does
+    // not: it stops the message telling someone to repeat something already
+    // done.
+    const e = error as { code?: string } | null;
+    if (e?.code === "P0002") {
+      return {
+        success: false,
+        error:
+          "That transfer is no longer pending — it may already have been cancelled, or confirmed as sent. Refresh the page to see its current state before doing anything else.",
+      };
+    }
+
     return {
       success: false,
       error: getFriendlyErrorMessage(error, "We couldn't cancel that."),
