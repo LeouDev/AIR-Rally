@@ -61,7 +61,10 @@ const ACCOUNTS = [
   { venue_id: "v-b", bank_name: null, bank_account_name: null, bank_account_number: null },
 ];
 
-function mockSupabase(accounts = ACCOUNTS, items = ITEMS) {
+/** Live transfer rows for the batch, if step 1 of the payout routine has run. */
+const NO_TRANSFERS: Record<string, unknown>[] = [];
+
+function mockSupabase(accounts = ACCOUNTS, items = ITEMS, transfers = NO_TRANSFERS) {
   return {
     from: jest.fn((table: string) => {
       if (table === "payout_batches") {
@@ -78,6 +81,13 @@ function mockSupabase(accounts = ACCOUNTS, items = ITEMS) {
         return {
           select: jest.fn(() => ({
             eq: jest.fn(() => ({ in: jest.fn().mockResolvedValue({ data: accounts, error: null }) })),
+          })),
+        };
+      }
+      if (table === "payout_transfers") {
+        return {
+          select: jest.fn(() => ({
+            eq: jest.fn(() => ({ in: jest.fn().mockResolvedValue({ data: transfers, error: null }) })),
           })),
         };
       }
@@ -139,6 +149,42 @@ describe("getPayoutBatchDetail — transfers", () => {
   it("treats a venue with no payment account row at all as unpayable", async () => {
     const detail = await getPayoutBatchDetail(mockSupabase([ACCOUNTS[0]]), "batch-1");
     expect(detail?.transfers.find((t) => t.venueId === "v-b")?.payable).toBe(false);
+  });
+
+  it("reports no transfer state before step 1 has run", async () => {
+    const detail = await getPayoutBatchDetail(mockSupabase(), "batch-1");
+    const a = detail?.transfers.find((t) => t.venueId === "v-a");
+    expect(a).toMatchObject({ transferId: null, transferStatus: null, providerFee: 0 });
+  });
+
+  // providerFee comes from the transfer row, so it is 0 until one exists.
+  // The page relies on that to avoid printing "less PHP 10 fee" beside an
+  // unreduced figure, which would be a wrong number in a money column.
+  it("attaches each venue's own live transfer once recorded", async () => {
+    const detail = await getPayoutBatchDetail(
+      mockSupabase(ACCOUNTS, ITEMS, [
+        {
+          id: "t-a",
+          venue_id: "v-a",
+          status: "processing",
+          provider_fee: 1000,
+          provider_transfer_id: "PM-1",
+          attested_at: "2026-08-26T00:00:00Z",
+        },
+      ]),
+      "batch-1"
+    );
+    expect(detail?.transfers.find((t) => t.venueId === "v-a")).toMatchObject({
+      transferId: "t-a",
+      transferStatus: "processing",
+      providerFee: 1000,
+      providerTransferId: "PM-1",
+    });
+    // Venue B has no transfer row — it must not inherit Venue A's.
+    expect(detail?.transfers.find((t) => t.venueId === "v-b")).toMatchObject({
+      transferId: null,
+      providerFee: 0,
+    });
   });
 
   it("returns no transfers for an empty batch rather than throwing", async () => {

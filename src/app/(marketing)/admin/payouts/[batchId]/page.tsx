@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
 import { getPayoutBatchDetail } from "@/lib/services/payouts";
 import { PayoutBatchActions } from "@/components/admin/PayoutBatchActions";
+import { PayoutTransferSteps } from "@/components/admin/PayoutTransferSteps";
+import { localDateIn, payoutPeriodFor } from "@/lib/services/venueLocalPeriods";
 import { formatSettlementMoney } from "@/lib/settlementFormat";
 import type { PayoutBatchStatus } from "@/lib/supabase/types";
 import { BackLink } from "@/components/shared/BackLink";
@@ -42,6 +44,41 @@ export default async function PayoutBatchDetailPage({
   if (!detail) notFound();
 
   const { batch, items, venueCount, transfers } = detail;
+
+  // The Sunday–Saturday window this batch covers, from the same helper the
+  // payslip email uses — the confirmation dialog must promise the venue the
+  // period the payslip will actually state, not a different one.
+  const bookingIds = items.map((i) => i.bookingId).filter(Boolean);
+  const { data: bookingRows } = bookingIds.length
+    ? await supabase
+        .from("bookings")
+        .select("start_time, courts(venues(timezone))")
+        .in("id", bookingIds)
+    : { data: [] };
+  type BookingTzRow = {
+    start_time: string;
+    courts: { venues: { timezone: string } | null } | null;
+  };
+  const localDates = ((bookingRows ?? []) as unknown as BookingTzRow[]).map(
+    (b) =>
+      localDateIn(
+        new Date(b.start_time),
+        b.courts?.venues?.timezone ?? "Asia/Manila",
+      ),
+  );
+  const period = payoutPeriodFor(localDates);
+  const prettyDate = (ymd: string) => {
+    const [y, m, d] = ymd.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-PH", {
+      timeZone: "UTC",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  };
+  const weekLabel = period
+    ? `${prettyDate(period.from)} – ${prettyDate(period.to)}`
+    : "this period";
   const currency = items[0]?.currency ?? "PHP";
   const unpayable = transfers.filter((t) => !t.payable);
 
@@ -89,6 +126,25 @@ export default async function PayoutBatchDetailPage({
       </dl>
 
       <PayoutBatchActions batchId={batch.id} status={batch.status} />
+
+      <PayoutTransferSteps
+        batchId={batch.id}
+        batchApproved={batch.status === "approved"}
+        weekLabel={weekLabel}
+        transfers={transfers.map((t) => ({
+          transferId: t.transferId,
+          venueId: t.venueId,
+          venueName: t.venueName,
+          amount: t.amount,
+          providerFee: t.providerFee,
+          currency: t.currency,
+          settlementCount: t.settlementCount,
+          status: t.transferStatus,
+          providerTransferId: t.providerTransferId,
+          attestedAt: t.attestedAt,
+          payable: t.payable,
+        }))}
+      />
 
       {/* The transfers themselves, above the settlement breakdown: an admin
           opens this page to send money, and this is the only surface in the

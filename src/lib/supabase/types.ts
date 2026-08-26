@@ -7,7 +7,8 @@
  */
 
 export type UserRole = "player" | "venue_owner" | "admin";
-export type VenueStatus = "draft" | "pending_review" | "active" | "suspended" | "archived";
+export type VenueStatus =
+  "draft" | "pending_review" | "active" | "suspended" | "archived";
 export type CourtStatus = "active" | "inactive" | "maintenance";
 export type IndoorOutdoor = "indoor" | "outdoor" | "both";
 export type CourtIndoorOutdoor = "indoor" | "outdoor";
@@ -17,7 +18,8 @@ export type CourtIndoorOutdoor = "indoor" | "outdoor";
  * `activation_status` values, confirmed via a real `POST /v2/accounts`
  * response. See ARCHITECTURE.md's PayMongo Platforms section.
  */
-export type VenuePaymongoActivationStatus = "unlinked" | "pending" | "under_review" | "activated" | "declined";
+export type VenuePaymongoActivationStatus =
+  "unlinked" | "pending" | "under_review" | "activated" | "declined";
 
 /**
  * Account-level owner approval state (Phase 6), independent of `role`.
@@ -237,7 +239,8 @@ export type RankedPips = 1 | 2 | 3 | 4 | 5;
 export type RankedMatchType = "singles" | "doubles";
 /** `player_ranks.mode` reuses this — a player's rating is tracked once per mode, independently. */
 export type RankedMode = RankedMatchType;
-export type RankedMatchWeightType = "self_reported_rec" | "club" | "league" | "tournament" | "air_rally_ranked";
+export type RankedMatchWeightType =
+  "self_reported_rec" | "club" | "league" | "tournament" | "air_rally_ranked";
 export type RankedTeam = "a" | "b";
 export type RankedMatchStatus =
   | "lobby"
@@ -567,7 +570,8 @@ export type SettlementSource = "paymongo" | "credit" | "mixed";
  * `settled` is reserved for a future payout step and currently has no
  * writer anywhere in the codebase — see SETTLEMENT-LEDGER.md.
  */
-export type SettlementStatus = "pending" | "payable" | "settled" | "reversed" | "on_hold";
+export type SettlementStatus =
+  "pending" | "payable" | "settled" | "reversed" | "on_hold";
 
 /**
  * What a venue is owed for one booking, recorded independently of how the
@@ -610,7 +614,12 @@ export type SettlementIssue = {
 };
 
 /** Whether AIR/Rally will pay a venue — distinct from PayMongo's own activation status. */
-export type VenuePaymentAccountStatus = "not_connected" | "pending_verification" | "verified" | "restricted" | "disabled";
+export type VenuePaymentAccountStatus =
+  | "not_connected"
+  | "pending_verification"
+  | "verified"
+  | "restricted"
+  | "disabled";
 
 /**
  * Venue payout readiness. PayMongo facts are mirrored from venues.paymongo_*
@@ -640,7 +649,8 @@ export type VenuePaymentAccount = {
 };
 
 /** An attempt to actually send money. Nothing can execute transfers yet. */
-export type PayoutTransferStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
+export type PayoutTransferStatus =
+  "pending" | "processing" | "completed" | "failed" | "cancelled";
 
 /**
  * Record of a transfer attempt. Created BEFORE any provider call, so a
@@ -666,10 +676,38 @@ export type PayoutTransfer = {
   updated_at: string;
   completed_at: string | null;
   failed_at: string | null;
+  /**
+   * The provider's per-transfer fee, in CENTAVOS (migration
+   * 20260810000092). 1000 = PHP 10.00. Net sent = amount - provider_fee;
+   * the net is deliberately not stored, since a stored net can drift out of
+   * agreement with its own inputs.
+   */
+  provider_fee: number;
+  /**
+   * Who asserted this transfer was sent, and when. NOT a provider
+   * confirmation — nothing on this path verifies the money moved, which is
+   * why these are named attested_ rather than confirmed_.
+   */
+  attested_by: string | null;
+  attested_at: string | null;
+  /**
+   * The status a cancelled transfer was cancelled FROM (migration
+   * 20260810000094). 'processing' means a file may already be at PayMongo
+   * carrying this reference — the first thing to check if a venue is ever
+   * double-paid.
+   */
+  cancelled_from_status: string | null;
 };
 
 /** Lifecycle of an internal payout preparation record. */
-export type PayoutBatchStatus = "draft" | "reviewing" | "approved" | "processing" | "completed" | "failed" | "cancelled";
+export type PayoutBatchStatus =
+  | "draft"
+  | "reviewing"
+  | "approved"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 /**
  * A group of payable settlements assembled ahead of a payout. Purely
@@ -790,7 +828,8 @@ export type Report = {
   updated_at: string;
 };
 
-export type SupportCategory = "booking" | "payment" | "account" | "venue" | "safety" | "bug" | "other";
+export type SupportCategory =
+  "booking" | "payment" | "account" | "venue" | "safety" | "bug" | "other";
 export type SupportStatus = "open" | "in_progress" | "resolved" | "closed";
 
 export type SupportRequest = {
@@ -810,7 +849,8 @@ export type SupportRequest = {
 
 export type EventType = "open_play" | "club_meetup" | "training" | "tournament";
 export type EventStatus = "draft" | "published" | "cancelled" | "completed";
-export type EventAttendeeStatus = "pending_approval" | "joined" | "waitlisted" | "cancelled";
+export type EventAttendeeStatus =
+  "pending_approval" | "joined" | "waitlisted" | "cancelled";
 
 export type CommunityEvent = {
   id: string;
@@ -966,7 +1006,8 @@ export type Booking = {
   updated_at: string;
 };
 
-export type RefundStatus = "pending" | "provider_unavailable" | "succeeded" | "failed";
+export type RefundStatus =
+  "pending" | "provider_unavailable" | "succeeded" | "failed";
 
 /**
  * Which total a refund was computed against — a snapshot of the business
@@ -1015,7 +1056,12 @@ export type BookingRefund = {
   updated_at: string;
 };
 
-export type RescheduleStatus = "pending_payment" | "pending_refund" | "completed" | "failed" | "provider_unavailable";
+export type RescheduleStatus =
+  | "pending_payment"
+  | "pending_refund"
+  | "completed"
+  | "failed"
+  | "provider_unavailable";
 
 /**
  * Row shape of `booking_reschedules` (see supabase/migrations/20260810000015_
@@ -1108,62 +1154,180 @@ export type Database = {
     Tables: {
       profiles: TableDef<
         Profile,
-        Pick<Profile, "id"> & Partial<Omit<Profile, "id" | "created_at" | "updated_at">>
+        Pick<Profile, "id"> &
+          Partial<Omit<Profile, "id" | "created_at" | "updated_at">>
       >;
       venues: TableDef<
         Venue,
         Pick<Venue, "owner_id" | "name"> &
-          Partial<Omit<Venue, "id" | "owner_id" | "name" | "created_at" | "updated_at" | "average_rating" | "review_count">>
+          Partial<
+            Omit<
+              Venue,
+              | "id"
+              | "owner_id"
+              | "name"
+              | "created_at"
+              | "updated_at"
+              | "average_rating"
+              | "review_count"
+            >
+          >
       >;
       courts: TableDef<
         Court,
         Pick<Court, "venue_id" | "name"> &
-          Partial<Omit<Court, "id" | "venue_id" | "name" | "created_at" | "updated_at">>
+          Partial<
+            Omit<
+              Court,
+              "id" | "venue_id" | "name" | "created_at" | "updated_at"
+            >
+          >
       >;
-      amenities: TableDef<Amenity, Pick<Amenity, "name"> & Partial<Omit<Amenity, "id" | "name" | "created_at">>>;
-      venue_amenities: TableDef<VenueAmenity, Pick<VenueAmenity, "venue_id" | "amenity_id">>;
+      amenities: TableDef<
+        Amenity,
+        Pick<Amenity, "name"> &
+          Partial<Omit<Amenity, "id" | "name" | "created_at">>
+      >;
+      venue_amenities: TableDef<
+        VenueAmenity,
+        Pick<VenueAmenity, "venue_id" | "amenity_id">
+      >;
       court_images: TableDef<
         CourtImage,
         Pick<CourtImage, "venue_id" | "storage_path"> &
-          Partial<Omit<CourtImage, "id" | "venue_id" | "storage_path" | "created_at">>
+          Partial<
+            Omit<CourtImage, "id" | "venue_id" | "storage_path" | "created_at">
+          >
       >;
       favorites: TableDef<Favorite, Pick<Favorite, "user_id" | "venue_id">>;
       reviews: TableDef<
         Review,
         Pick<Review, "venue_id" | "user_id" | "rating"> &
-          Partial<Omit<Review, "id" | "venue_id" | "user_id" | "rating" | "created_at" | "updated_at">>
+          Partial<
+            Omit<
+              Review,
+              | "id"
+              | "venue_id"
+              | "user_id"
+              | "rating"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
       public_profiles: TableDef<PublicProfile, never, never>;
       venue_marketplace: TableDef<VenueMarketplaceRow, never, never>;
       venue_operating_hours: TableDef<
         VenueOperatingHours,
-        Pick<VenueOperatingHours, "venue_id" | "day_of_week" | "start_time" | "end_time"> &
-          Partial<Omit<VenueOperatingHours, "id" | "venue_id" | "day_of_week" | "start_time" | "end_time" | "created_at" | "updated_at">>
+        Pick<
+          VenueOperatingHours,
+          "venue_id" | "day_of_week" | "start_time" | "end_time"
+        > &
+          Partial<
+            Omit<
+              VenueOperatingHours,
+              | "id"
+              | "venue_id"
+              | "day_of_week"
+              | "start_time"
+              | "end_time"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
       court_blocked_periods: TableDef<
         CourtBlockedPeriod,
         Pick<CourtBlockedPeriod, "court_id" | "start_time" | "end_time"> &
-          Partial<Omit<CourtBlockedPeriod, "id" | "court_id" | "start_time" | "end_time" | "created_at" | "updated_at">>
+          Partial<
+            Omit<
+              CourtBlockedPeriod,
+              | "id"
+              | "court_id"
+              | "start_time"
+              | "end_time"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
       bookings: TableDef<
         Booking,
-        Pick<Booking, "court_id" | "user_id" | "start_time" | "end_time" | "price_amount"> &
-          Partial<Omit<Booking, "id" | "court_id" | "user_id" | "start_time" | "end_time" | "price_amount" | "confirmation_code" | "created_at" | "updated_at">>
+        Pick<
+          Booking,
+          "court_id" | "user_id" | "start_time" | "end_time" | "price_amount"
+        > &
+          Partial<
+            Omit<
+              Booking,
+              | "id"
+              | "court_id"
+              | "user_id"
+              | "start_time"
+              | "end_time"
+              | "price_amount"
+              | "confirmation_code"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
       agreement_acceptances: TableDef<AgreementAcceptance, never, never>;
       booking_refunds: TableDef<
         BookingRefund,
-        Pick<BookingRefund, "booking_id" | "payment_provider" | "provider_payment_id" | "amount" | "currency" | "initiated_by"> &
-          Partial<Omit<BookingRefund, "id" | "booking_id" | "payment_provider" | "provider_payment_id" | "amount" | "currency" | "initiated_by" | "created_at" | "updated_at">>
+        Pick<
+          BookingRefund,
+          | "booking_id"
+          | "payment_provider"
+          | "provider_payment_id"
+          | "amount"
+          | "currency"
+          | "initiated_by"
+        > &
+          Partial<
+            Omit<
+              BookingRefund,
+              | "id"
+              | "booking_id"
+              | "payment_provider"
+              | "provider_payment_id"
+              | "amount"
+              | "currency"
+              | "initiated_by"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
       booking_reschedules: TableDef<
         BookingReschedule,
-        Pick<BookingReschedule, "original_booking_id" | "new_booking_id" | "price_difference" | "initiated_by"> &
-          Partial<Omit<BookingReschedule, "id" | "original_booking_id" | "new_booking_id" | "price_difference" | "initiated_by" | "created_at" | "updated_at">>
+        Pick<
+          BookingReschedule,
+          | "original_booking_id"
+          | "new_booking_id"
+          | "price_difference"
+          | "initiated_by"
+        > &
+          Partial<
+            Omit<
+              BookingReschedule,
+              | "id"
+              | "original_booking_id"
+              | "new_booking_id"
+              | "price_difference"
+              | "initiated_by"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
       // never for Insert — no client role has an insert policy; every row
       // comes from a security-definer trigger. Only read_at is updatable.
-      notifications: TableDef<Notification, never, Partial<Pick<Notification, "read_at">>>;
+      notifications: TableDef<
+        Notification,
+        never,
+        Partial<Pick<Notification, "read_at">>
+      >;
       // never for Insert/Update — writes go through register_push_token();
       // clients can only select and delete their own rows.
       device_push_tokens: TableDef<DevicePushToken, never, never>;
@@ -1217,30 +1381,79 @@ export type Database = {
       >;
       referrals: TableDef<
         Referral,
-        Pick<Referral, "referral_code" | "referrer_user_id" | "referred_user_id"> &
-          Partial<Omit<Referral, "id" | "referral_code" | "referrer_user_id" | "referred_user_id" | "created_at" | "updated_at">>
+        Pick<
+          Referral,
+          "referral_code" | "referrer_user_id" | "referred_user_id"
+        > &
+          Partial<
+            Omit<
+              Referral,
+              | "id"
+              | "referral_code"
+              | "referrer_user_id"
+              | "referred_user_id"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
       posts: TableDef<
         Post,
         Pick<Post, "user_id" | "content"> &
-          Partial<Omit<Post, "id" | "user_id" | "content" | "like_count" | "comment_count" | "reshare_count" | "created_at" | "updated_at">>
+          Partial<
+            Omit<
+              Post,
+              | "id"
+              | "user_id"
+              | "content"
+              | "like_count"
+              | "comment_count"
+              | "reshare_count"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
-      post_reshares: TableDef<PostReshare, Pick<PostReshare, "post_id" | "user_id">>;
-      post_mentions: TableDef<PostMention, Pick<PostMention, "post_id" | "user_id">>;
+      post_reshares: TableDef<
+        PostReshare,
+        Pick<PostReshare, "post_id" | "user_id">
+      >;
+      post_mentions: TableDef<
+        PostMention,
+        Pick<PostMention, "post_id" | "user_id">
+      >;
       post_likes: TableDef<PostLike, Pick<PostLike, "post_id" | "user_id">>;
       post_comments: TableDef<
         PostComment,
-        Pick<PostComment, "post_id" | "user_id" | "content"> & Partial<Omit<PostComment, "id" | "post_id" | "user_id" | "content" | "created_at">>
+        Pick<PostComment, "post_id" | "user_id" | "content"> &
+          Partial<
+            Omit<
+              PostComment,
+              "id" | "post_id" | "user_id" | "content" | "created_at"
+            >
+          >
       >;
       follows: TableDef<Follow, Pick<Follow, "follower_id" | "following_id">>;
       events: TableDef<
         CommunityEvent,
         Pick<CommunityEvent, "creator_id" | "title" | "start_time"> &
-          Partial<Omit<CommunityEvent, "id" | "creator_id" | "title" | "start_time" | "participant_count" | "created_at" | "updated_at">>
+          Partial<
+            Omit<
+              CommunityEvent,
+              | "id"
+              | "creator_id"
+              | "title"
+              | "start_time"
+              | "participant_count"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
       event_attendees: TableDef<
         EventAttendee,
-        Pick<EventAttendee, "event_id" | "user_id"> & Partial<Pick<EventAttendee, "status">>
+        Pick<EventAttendee, "event_id" | "user_id"> &
+          Partial<Pick<EventAttendee, "status">>
       >;
       user_credit_wallets: TableDef<UserCreditWallet, never, never>;
       credit_transactions: TableDef<CreditTransaction, never, never>;
@@ -1258,38 +1471,76 @@ export type Database = {
       venue_payment_accounts: TableDef<
         VenuePaymentAccount,
         never,
-        Partial<Pick<VenuePaymentAccount, "bank_name" | "bank_account_name" | "bank_account_number" | "bank_details_updated_at">>
+        Partial<
+          Pick<
+            VenuePaymentAccount,
+            | "bank_name"
+            | "bank_account_name"
+            | "bank_account_number"
+            | "bank_details_updated_at"
+          >
+        >
       >;
       /** Read-only to clients — written by backend service code only. */
       payout_transfers: TableDef<PayoutTransfer, never, never>;
       /** Created through create_payout_batch(); status moves via the admin RPCs. */
-      payout_batches: TableDef<PayoutBatch, never, Partial<Pick<PayoutBatch, "status" | "notes">>>;
+      payout_batches: TableDef<
+        PayoutBatch,
+        never,
+        Partial<Pick<PayoutBatch, "status" | "notes">>
+      >;
       payout_batch_items: TableDef<
         PayoutBatchItem,
-        Pick<PayoutBatchItem, "payout_batch_id" | "settlement_id" | "venue_id" | "amount">,
+        Pick<
+          PayoutBatchItem,
+          "payout_batch_id" | "settlement_id" | "venue_id" | "amount"
+        >,
         never
       >;
       clubs: TableDef<
         Club,
         Pick<Club, "owner_id" | "name"> &
-          Partial<Omit<Club, "id" | "owner_id" | "name" | "member_count" | "mention_handle" | "created_at" | "updated_at">>
+          Partial<
+            Omit<
+              Club,
+              | "id"
+              | "owner_id"
+              | "name"
+              | "member_count"
+              | "mention_handle"
+              | "created_at"
+              | "updated_at"
+            >
+          >
       >;
       club_members: TableDef<
         ClubMember,
-        Pick<ClubMember, "club_id" | "user_id"> & Partial<Pick<ClubMember, "role" | "status">>
+        Pick<ClubMember, "club_id" | "user_id"> &
+          Partial<Pick<ClubMember, "role" | "status">>
       >;
       reports: TableDef<
         Report,
-        Pick<Report, "reporter_id" | "target_type" | "target_id" | "reason"> & Partial<Pick<Report, "details">>,
+        Pick<Report, "reporter_id" | "target_type" | "target_id" | "reason"> &
+          Partial<Pick<Report, "details">>,
         // Only the resolution fields are updatable, and only by an admin
         // (the reports UPDATE policy requires is_admin()). Nothing else
         // about a filed report should ever change.
-        Partial<Pick<Report, "status" | "resolved_by" | "resolved_at" | "resolution_note">>
+        Partial<
+          Pick<
+            Report,
+            "status" | "resolved_by" | "resolved_at" | "resolution_note"
+          >
+        >
       >;
       support_requests: TableDef<
         SupportRequest,
         Pick<SupportRequest, "user_id" | "category" | "subject" | "message">,
-        Partial<Pick<SupportRequest, "status" | "resolved_by" | "resolved_at" | "resolution_note">>
+        Partial<
+          Pick<
+            SupportRequest,
+            "status" | "resolved_by" | "resolved_at" | "resolution_note"
+          >
+        >
       >;
       // Ranked: read-only to every client role. See the block comment above
       // RankedTier for why, and the RPCs below for the write surface.
@@ -1312,7 +1563,10 @@ export type Database = {
       };
       court_side_feed: {
         Args: { p_limit?: number; p_cursor?: string };
-        Returns: (Post & { effective_at: string; resharer_id: string | null })[];
+        Returns: (Post & {
+          effective_at: string;
+          resharer_id: string | null;
+        })[];
       };
       get_available_slots: {
         Args: {
@@ -1500,6 +1754,34 @@ export type Database = {
         Args: { p_event_id: string; p_user_ids: string[] };
         Returns: number;
       };
+      /**
+       * The manual payout flow (migrations 20260810000092-095). Every one
+       * is admin-only and re-checks is_admin() itself. These record
+       * ATTESTATIONS — a named admin saying they did something — never a
+       * provider confirmation; nothing on this path verifies money moved.
+       */
+      record_payout_transfers: {
+        Args: { p_batch_id: string };
+        Returns: PayoutTransfer[];
+      };
+      attest_payout_sent: {
+        Args: { p_transfer_id: string; p_provider_reference?: string | null };
+        Returns: PayoutTransfer;
+      };
+      /** Irreversible: also settles the venue's earnings and notifies them, in one transaction. */
+      attest_payout_settled: {
+        Args: { p_transfer_id: string; p_provider_reference: string };
+        Returns: PayoutTransfer;
+      };
+      attest_payout_failed: {
+        Args: { p_transfer_id: string; p_reason: string };
+        Returns: PayoutTransfer;
+      };
+      /** "I marked it uploaded by mistake" — NOT an undo of a real upload. */
+      cancel_payout_transfer: {
+        Args: { p_transfer_id: string; p_reason: string };
+        Returns: PayoutTransfer;
+      };
       /** Venue payout readiness counts plus settlements blocked by missing setup. Admin-only. */
       venue_payout_readiness: {
         Args: Record<string, never>;
@@ -1513,7 +1795,11 @@ export type Database = {
       };
       /** Admin-only. Accepts verified | restricted | disabled; the mirror owns the rest. */
       set_venue_payment_account_status: {
-        Args: { p_venue_id: string; p_status: string; p_reason?: string | null };
+        Args: {
+          p_venue_id: string;
+          p_status: string;
+          p_reason?: string | null;
+        };
         Returns: boolean;
       };
       /**
@@ -1679,7 +1965,11 @@ export type Database = {
       };
       /** Proposing resets every vote, including the proposer's. */
       propose_ranked_officiating: {
-        Args: { p_match_id: string; p_mode: RankedOfficiatingMode; p_scorekeeper_id: string };
+        Args: {
+          p_match_id: string;
+          p_mode: RankedOfficiatingMode;
+          p_scorekeeper_id: string;
+        };
         Returns: undefined;
       };
       /** Unanimity starts the match; one abstention or objection holds it. */
@@ -1704,7 +1994,11 @@ export type Database = {
       };
       /** A dispute is absorbing: nothing is applied, and no later acceptance reverses it. */
       respond_ranked_result: {
-        Args: { p_match_id: string; p_accept: boolean; p_reason?: string | null };
+        Args: {
+          p_match_id: string;
+          p_accept: boolean;
+          p_reason?: string | null;
+        };
         Returns: undefined;
       };
       cancel_ranked_match: {

@@ -3,6 +3,7 @@ import type {
   Database,
   PayoutBatch,
   PayoutBatchStatus,
+  PayoutTransferStatus,
 } from "@/lib/supabase/types";
 import { assertRowShape } from "@/lib/postgrestShape";
 
@@ -141,6 +142,19 @@ export type PayoutBatchDetail = {
     bankAccountNumber: string | null;
     /** False when this venue has no payout destination on file — it cannot be paid. */
     payable: boolean;
+    /**
+     * The live payout_transfers row for this venue and batch, if one has
+     * been recorded. Null before step 1 of the payout routine has run.
+     *
+     * "Live" excludes cancelled and failed rows deliberately: those are
+     * history, and a venue whose earlier attempt was cancelled should read
+     * as ready to record again rather than as permanently failed.
+     */
+    transferId: string | null;
+    transferStatus: PayoutTransferStatus | null;
+    providerFee: number;
+    providerTransferId: string | null;
+    attestedAt: string | null;
   }[];
 };
 
@@ -216,9 +230,24 @@ export async function getPayoutBatchDetail(
       accountByVenue.set(account.venue_id, account);
   }
 
+  const { data: transferRows, error: transfersError } = venueIds.length
+    ? await supabase
+        .from("payout_transfers")
+        .select(
+          "id, venue_id, status, provider_fee, provider_transfer_id, attested_at",
+        )
+        .eq("payout_batch_id", batchId)
+        .in("status", ["pending", "processing", "completed"])
+    : { data: [], error: null };
+  if (transfersError) throw transfersError;
+  const transferByVenue = new Map(
+    (transferRows ?? []).map((t) => [t.venue_id, t]),
+  );
+
   const transfers = venueIds.map((venueId) => {
     const venueItems = items.filter((i) => i.venueId === venueId);
     const account = accountByVenue.get(venueId);
+    const transfer = transferByVenue.get(venueId);
     return {
       venueId,
       venueName: venueItems[0]?.venueName ?? "Unknown venue",
@@ -232,6 +261,12 @@ export async function getPayoutBatchDetail(
       bankAccountName: account?.bank_account_name ?? null,
       bankAccountNumber: account?.bank_account_number ?? null,
       payable: Boolean(account?.bank_name),
+      transferId: transfer?.id ?? null,
+      transferStatus:
+        (transfer?.status as PayoutTransferStatus | undefined) ?? null,
+      providerFee: transfer?.provider_fee ?? 0,
+      providerTransferId: transfer?.provider_transfer_id ?? null,
+      attestedAt: transfer?.attested_at ?? null,
     };
   });
 
