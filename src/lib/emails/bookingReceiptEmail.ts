@@ -64,7 +64,7 @@ export function renderBookingReceiptEmail(input: BookingReceiptEmailInput): stri
             <td align="left" style="font-family:Arial,Helvetica,sans-serif; font-size:26px; line-height:30px; mso-line-height-rule:exactly; font-weight:bold; letter-spacing:-0.5px; color:#ffffff;">
               AIR<span style="color:#f3700f;">/Rally</span>
             </td>
-            <td align="right" style="font-family:'Courier New',Courier,monospace; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1.5px; color:#e6dac6; text-transform:uppercase;">
+            <td align="right" style="font-family:'Courier New',Courier,Arial,sans-serif; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1.5px; color:#e6dac6; text-transform:uppercase;">
               Receipt
             </td>
           </tr>
@@ -75,7 +75,7 @@ export function renderBookingReceiptEmail(input: BookingReceiptEmailInput): stri
 
     <tr>
       <td class="pad" style="padding:36px 32px 8px 32px;">
-        <p style="margin:0 0 14px 0; font-family:'Courier New',Courier,monospace; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1.5px; color:#f3700f; text-transform:uppercase;">Payment confirmed</p>
+        <p style="margin:0 0 14px 0; font-family:'Courier New',Courier,Arial,sans-serif; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1.5px; color:#f3700f; text-transform:uppercase;">Payment confirmed</p>
         <h1 class="h1" style="margin:0; font-family:Arial,Helvetica,sans-serif; font-size:32px; line-height:38px; mso-line-height-rule:exactly; font-weight:bold; letter-spacing:-0.8px; color:#0f2747;">You're on court.</h1>
       </td>
     </tr>
@@ -90,8 +90,8 @@ export function renderBookingReceiptEmail(input: BookingReceiptEmailInput): stri
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#0f2747;">
           <tbody><tr>
             <td align="center" style="padding:22px 18px;">
-              <p style="margin:0 0 8px 0; font-family:'Courier New',Courier,monospace; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1.5px; color:#f3700f; text-transform:uppercase;">Confirmation code</p>
-              <p style="margin:0; font-family:'Courier New',Courier,monospace; font-size:28px; line-height:32px; mso-line-height-rule:exactly; letter-spacing:2px; font-weight:bold; color:#ffffff;">${confirmationCode}</p>
+              <p style="margin:0 0 8px 0; font-family:'Courier New',Courier,Arial,sans-serif; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1.5px; color:#f3700f; text-transform:uppercase;">Confirmation code</p>
+              <p style="margin:0; font-family:'Courier New',Courier,Arial,sans-serif; font-size:28px; line-height:32px; mso-line-height-rule:exactly; letter-spacing:2px; font-weight:bold; color:#ffffff;">${confirmationCode}</p>
             </td>
           </tr>
         </tbody></table>
@@ -117,11 +117,11 @@ export function renderBookingReceiptEmail(input: BookingReceiptEmailInput): stri
                 </tr>
                 <tr>
                   <td style="padding:9px 0; border-bottom:1px solid #e6dac6; font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:20px; mso-line-height-rule:exactly; color:#2b3a4f;">Date &amp; time</td>
-                  <td align="right" style="padding:9px 0; border-bottom:1px solid #e6dac6; font-family:'Courier New',Courier,monospace; font-size:15px; line-height:20px; mso-line-height-rule:exactly; color:#0f2747;">${when}</td>
+                  <td align="right" style="padding:9px 0; border-bottom:1px solid #e6dac6; font-family:'Courier New',Courier,Arial,sans-serif; font-size:15px; line-height:20px; mso-line-height-rule:exactly; color:#0f2747;">${when}</td>
                 </tr>
                 <tr>
                   <td style="padding:12px 0 0 0; font-family:Arial,Helvetica,sans-serif; font-size:16px; line-height:22px; mso-line-height-rule:exactly; font-weight:bold; color:#0f2747;">Amount paid</td>
-                  <td align="right" style="padding:12px 0 0 0; font-family:'Courier New',Courier,monospace; font-size:20px; line-height:22px; mso-line-height-rule:exactly; font-weight:bold; color:#1f9d55;">${amountPaid}</td>
+                  <td align="right" style="padding:12px 0 0 0; font-family:'Courier New',Courier,Arial,sans-serif; font-size:20px; line-height:22px; mso-line-height-rule:exactly; font-weight:bold; color:#1f9d55;">${amountPaid}</td>
                 </tr>
                 </tbody>
               </table>
