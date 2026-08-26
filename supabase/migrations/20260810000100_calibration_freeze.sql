@@ -186,10 +186,27 @@ grant execute on function public.create_ranked_match(text, uuid[], uuid[], uuid,
 -- — a standing built entirely from games where two people agreed on a score
 -- with nothing behind it.
 --
--- This exists so the leaderboard CAN require some booked play later. It does
--- not gate anything today; deciding that is the founder's call and hiding
--- players from a ladder they earned a place on is not a side effect to ship
--- quietly.
+-- DECIDED, NOT UNFINISHED. The founder was asked whether provisional ratings
+-- should be hidden or gated from the ladder and said no: "they will still show
+-- from the ladder but since they're not earning any rank they will stay
+-- consistent with their rating." So a player who calibrated entirely on
+-- unbooked matches appears at their frozen rating and stays there until they
+-- book. They stay visible because they earned a place; the freeze keeps them
+-- honest by holding the rating still rather than by removing them.
+--
+-- THIS COUNTER THEREFORE GATES NOTHING, ON PURPOSE. It is kept because it is
+-- derivable rather than maintained, costs nothing, and is the only way anyone
+-- could later answer "which ratings were built without a single booked match".
+-- An ungated counter here is a decision, not a loose end.
+--
+-- KNOWN AND ACCEPTED PROPERTY, with an expiry. Two people can agree ten scores
+-- and produce a rating. The freeze BOUNDS that — it cannot grow — but it does
+-- not undo it, so a fabricated rating can sit on the ladder indefinitely at
+-- whatever it calibrated to. Acceptable at launch: there is no credible ladder
+-- to corrupt yet, making rank feel like it matters is the entire strategy, and
+-- a frozen rating loses standing naturally as real players climb past it. It
+-- STOPS being acceptable once the ladder is something people trust, and
+-- booked_rated_matches is already here to address it with.
 -- ---------------------------------------------------------------------------
 alter table public.player_ranks
   add column if not exists booked_rated_matches integer not null default 0
