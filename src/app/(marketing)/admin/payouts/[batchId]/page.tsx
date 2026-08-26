@@ -95,6 +95,23 @@ export default async function PayoutBatchDetailPage({
     ? `${prettyDate(period.from)} – ${prettyDate(period.to)}`
     : "this period";
   const currency = items[0]?.currency ?? "PHP";
+
+  // Asia/Manila explicitly rather than the server's locale: this is a
+  // Philippine payout and the reader is in Manila. Naming the zone stops
+  // "10:56" being read as a time it was not.
+  const stamp = (iso: string | null) =>
+    iso
+      ? `${new Date(iso).toLocaleString("en-PH", {
+          timeZone: "Asia/Manila",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })} (Manila)`
+      : null;
+  const completedLabel = stamp(batch.completed_at);
+  const approvedLabel = stamp(batch.approved_at);
   const unpayable = transfers.filter((t) => !t.payable);
 
   return (
@@ -117,6 +134,24 @@ export default async function PayoutBatchDetailPage({
             {batch.status}
           </span>
         </div>
+        {/* WHEN, not just WHAT. completed_at is max(attested_at) across the
+            batch's transfers -- when the money was actually attested as sent,
+            deliberately not when a migration or a script happened to run. That
+            distinction was worth building and is worth nothing if the date only
+            exists in the database. A financial record nobody can check from the
+            page that shows it is not a record.
+            Rendered in the venue-facing timezone with the timezone named, so
+            "completed 26 Aug, 10:56" cannot be read as some other 10:56. */}
+        {completedLabel && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Completed {completedLabel}
+          </p>
+        )}
+        {!completedLabel && approvedLabel && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Approved {approvedLabel}
+          </p>
+        )}
       </div>
 
       <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
