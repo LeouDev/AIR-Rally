@@ -14,7 +14,16 @@ const ORIGINAL_ENV = process.env;
 
 beforeEach(() => {
   jest.clearAllMocks();
-  process.env = { ...ORIGINAL_ENV, RESEND_API_KEY: "re_test_key", RESEND_FROM_EMAIL: "AIR/Rally <notifications@air-rally.com>" };
+  // These cases exercise the PRODUCTION send path -- a real recipient, no
+  // redirect. sendEmail() now refuses to send from any deployment it cannot
+  // identify as production (see emailRedirect.test.ts for why it fails closed),
+  // so the production Supabase URL has to be present for them to mean anything.
+  process.env = {
+    ...ORIGINAL_ENV,
+    RESEND_API_KEY: "re_test_key",
+    RESEND_FROM_EMAIL: "AIR/Rally <notifications@air-rally.com>",
+    NEXT_PUBLIC_SUPABASE_URL: "https://hrpbjudsrqcgyrkkodop.supabase.co",
+  };
 });
 
 afterAll(() => {
