@@ -185,6 +185,19 @@ discipline the booking flow already applies to payments.
    answer this; only a test can.
 4. **Model processing fees.** PayMongo deducts fees before funds land, so cash received is
    below the recorded `paymongo_amount`. Minimum payout to a bank account is **PHP 80.00**.
+
+   > ⚠️ **UNVERIFIED — August 2026 re-check.** The PHP 80.00 minimum could not be
+   > confirmed against any PayMongo public source: not the pricing page, not the
+   > wallet page, not the Money Movement API docs. It may have come from a support
+   > conversation or a dashboard message, but it is not published, so **do not enforce
+   > a payout floor on this figure** until PayMongo confirms it.
+   >
+   > The same re-check found PayMongo's own pages **contradicting each other on the
+   > transfer fee**: the pricing page says "PHP 10 per transaction (via InstaPay or
+   > PesoNET)", while the wallet page says "Standard bank transfers via PESONet are
+   > free, while InstaPay transfers have a small fee per transaction", and the API
+   > docs show a worked example with a PHP 8.00 fee. AIR/Rally sends via **PESONet** —
+   > the rail the wallet page calls free. See `src/lib/payouts/transferFee.ts`.
 5. **Build the stale-transfer sweep** for transfers stuck `pending`.
 6. **Verify webhook signatures** for `payout.deposited` / `payout.returned` — the existing
    checkout webhook route's discipline applies unchanged.

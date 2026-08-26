@@ -4,7 +4,10 @@ import type { Metadata } from "next";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
-import { getPayoutBatchDetail } from "@/lib/services/payouts";
+import {
+  getPayoutBatchDetail,
+  listPayoutCandidates,
+} from "@/lib/services/payouts";
 import { PayoutBatchActions } from "@/components/admin/PayoutBatchActions";
 import { PayoutTransferSteps } from "@/components/admin/PayoutTransferSteps";
 import { localDateIn, payoutPeriodFor } from "@/lib/services/venueLocalPeriods";
@@ -42,6 +45,18 @@ export default async function PayoutBatchDetailPage({
 
   const detail = await getPayoutBatchDetail(supabase, batchId);
   if (!detail) notFound();
+
+  // Payable settlements NOT committed to any live batch. Reusing
+  // listPayoutCandidates rather than writing a second count: two
+  // implementations of "what is still owed" is how a page ends up
+  // disagreeing with the one next to it.
+  //
+  // Worth showing because mark-settlements-payable runs every minute, so a
+  // batch stops covering everything payable as soon as another booking's
+  // court time passes. Without this line an admin compares the batch total
+  // to their Available figure, finds a gap, and concludes the totals are
+  // broken.
+  const uncommitted = await listPayoutCandidates(supabase);
 
   const { batch, items, venueCount, transfers } = detail;
 
@@ -126,6 +141,23 @@ export default async function PayoutBatchDetailPage({
       </dl>
 
       <PayoutBatchActions batchId={batch.id} status={batch.status} />
+
+      {uncommitted.length > 0 && (
+        <p className="rounded-xl border border-dashed border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          This batch covers {batch.settlement_count} settlement
+          {batch.settlement_count === 1 ? "" : "s"}.{" "}
+          <span className="font-medium text-foreground">
+            {uncommitted.length} more {uncommitted.length === 1 ? "is" : "are"}{" "}
+            payable but not in any batch
+          </span>{" "}
+          — earnings become payable as each booking&apos;s court time passes, so
+          this is normal.{" "}
+          <Link href="/admin/payouts" className="text-primary hover:underline">
+            Create another batch
+          </Link>
+          .
+        </p>
+      )}
 
       <PayoutTransferSteps
         batchId={batch.id}
