@@ -1,0 +1,7 @@
+{
+  "_comment": "SHA-256 of every User Agreement version, normalised for whitespace. DO NOT edit an existing entry to make a test pass — a changed hash means the text of a document users have already accepted was altered, which is the failure this file exists to prevent. To change the Terms, add a NEW version to CURRENT_AGREEMENT_VERSION, freeze the old text in legal/frozen.ts, and add its hash here.",
+  "terms": {
+    "2026-08-17": "eadbd8d438628f00f17e7aef492c8d7d6ee39e854cd3333df36b332c157dbaa0",
+    "2026-08-23": "e69ae7275e7f33dd60d5d25372a08503706874cf2e8a284e38591b3f676e2d14"
+  }
+}

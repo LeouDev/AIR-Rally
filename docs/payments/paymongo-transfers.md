@@ -192,12 +192,14 @@ discipline the booking flow already applies to payments.
    > conversation or a dashboard message, but it is not published, so **do not enforce
    > a payout floor on this figure** until PayMongo confirms it.
    >
-   > The same re-check found PayMongo's own pages **contradicting each other on the
-   > transfer fee**: the pricing page says "PHP 10 per transaction (via InstaPay or
-   > PesoNET)", while the wallet page says "Standard bank transfers via PESONet are
-   > free, while InstaPay transfers have a small fee per transaction", and the API
-   > docs show a worked example with a PHP 8.00 fee. AIR/Rally sends via **PESONet** —
-   > the rail the wallet page calls free. See `src/lib/payouts/transferFee.ts`.
+   > **The transfer fee is SETTLED: PHP 10, verified by observation 2026-08-26.** The
+   > founder made real transfers on their own PayMongo account and PHP 10 was charged
+   > on **both PESONet and InstaPay**. PayMongo's own pages had contradicted each
+   > other — the pricing page says "PHP 10 per transaction (via InstaPay or PesoNET)"
+   > (correct), while the wallet page says "Standard bank transfers via PESONet are
+   > free" and calls batch disbursements "free" (**wrong — do not trust that page on
+   > fees**), and the API docs show a PHP 8.00 worked example (an example, not a
+   > rate). Recorded so nobody re-opens it. See `src/lib/payouts/transferFee.ts`.
 5. **Build the stale-transfer sweep** for transfers stuck `pending`.
 6. **Verify webhook signatures** for `payout.deposited` / `payout.returned` — the existing
    checkout webhook route's discipline applies unchanged.

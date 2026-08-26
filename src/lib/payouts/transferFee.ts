@@ -1,26 +1,25 @@
 /**
  * The provider's per-transfer fee, in CENTAVOS. 1000 = ₱10.00.
  *
- * ⚠️ THIS VALUE IS UNVERIFIED AND DISPUTED BY PAYMONGO'S OWN DOCUMENTATION.
- * DO NOT TREAT ₱10 AS SETTLED, AND DO NOT DEDUCT IT FROM A VENUE UNTIL IT IS.
+ * VERIFIED BY OBSERVATION, 2026-08-26: the founder made real transfers on
+ * their own PayMongo account and ₱10 was charged on BOTH PESONet and
+ * InstaPay. That is the rail we actually use, on the actual account, so it
+ * settles the question.
  *
- * Three PayMongo sources disagree (checked August 2026):
- *   - paymongo.com/pricing:  "₱10 per transaction (via InstaPay or PesoNET)"
- *   - paymongo.com/financial-services/wallet:  "Standard bank transfers via
- *     PESONet are free, while InstaPay transfers have a small fee per
- *     transaction" — and, of batch disbursements, "for free"
- *   - Money Movement API docs: a worked example showing an ₱8.00 fee
+ * ⚠️ PAYMONGO'S OWN WALLET PAGE CONTRADICTS THIS AND IS WRONG. Recorded so
+ * that a future reader who finds it does not re-open a closed question:
+ *   - paymongo.com/pricing — "₱10 per transaction (via InstaPay or PesoNET)"
+ *     ✅ matches observed behaviour
+ *   - paymongo.com/financial-services/wallet — "Standard bank transfers via
+ *     PESONet are free", and of batch disbursements "for free"
+ *     ❌ contradicted by a live transfer; do not trust this page on fees
+ *   - Money Movement API docs — a worked example showing ₱8.00
+ *     ❌ an example figure, not a rate
  *
- * AIR/Rally sends via PESONet (see pesonetBanks.ts), which is the rail the
- * wallet page calls free. If that is right, deducting ₱10 from a venue
- * charges them for a cost we never incur — and the draft Owner Agreement
- * clause 3.10 would be a false statement in a signed document.
- *
- * Awaiting PayMongo support and, more usefully, the first real transfer:
- * whatever their statement shows deducted is the answer for the rail we
- * actually use. Until then this stays at 1000 because changing it would be
- * a different guess, not a correction. Nothing has been deducted from
- * anyone — zero payout_transfers rows exist.
+ * The disagreement was worth chasing even though it confirmed the number
+ * rather than changing it: had PESONet been free, deducting ₱10 would have
+ * charged a venue for a cost never incurred, and Owner Agreement clause
+ * 3.10 would have been a false statement in a signed document.
  *
  * MIRRORS `public.payout_transfer_fee_centavos()` (migration
  * 20260810000092). The database is the source of truth — every real
