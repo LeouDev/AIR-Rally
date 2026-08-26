@@ -230,8 +230,13 @@ function expectedObjects(files: string[]): { kind: string; name: string; file: s
   // Strip a schema qualifier and surrounding double quotes ONLY. Apostrophes
   // are part of real policy names ("Venue owners manage their own venue's
   // amenities") and stripping them silently breaks every match.
+  // [\s\S] rather than the /s flag: tsconfig targets ES2017, and /s needs
+  // ES2018. NOTE: keep this comment ABOVE the expression. Putting it inline
+  // after the first .replace() once swallowed the rest of the chain into the
+  // comment, so names kept their "public." prefix, matched nothing, and the
+  // forward audit reported every applied migration as missing.
   const clean = (raw: string) =>
-    raw.trim().replace(/;+$/, "").replace(/^"([\s\S]*)"$/, "$1")  // [\s\S] rather than the /s flag: tsconfig targets ES2017.replace(/^public\./i, "").trim().toLowerCase();
+    raw.trim().replace(/;+$/, "").replace(/^"([\s\S]*)"$/, "$1").replace(/^public\./i, "").trim().toLowerCase();
   const patterns: { kind: string; re: RegExp }[] = [
     { kind: "function", re: /create\s+(?:or\s+replace\s+)?function\s+([a-z0-9_."]+)\s*\(/gi },
     { kind: "table", re: /create\s+table\s+(?:if\s+not\s+exists\s+)?([a-z0-9_."]+)/gi },
