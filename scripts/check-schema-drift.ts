@@ -231,7 +231,7 @@ function expectedObjects(files: string[]): { kind: string; name: string; file: s
   // are part of real policy names ("Venue owners manage their own venue's
   // amenities") and stripping them silently breaks every match.
   const clean = (raw: string) =>
-    raw.trim().replace(/;+$/, "").replace(/^"(.*)"$/s, "$1").replace(/^public\./i, "").trim().toLowerCase();
+    raw.trim().replace(/;+$/, "").replace(/^"([\s\S]*)"$/, "$1")  // [\s\S] rather than the /s flag: tsconfig targets ES2017.replace(/^public\./i, "").trim().toLowerCase();
   const patterns: { kind: string; re: RegExp }[] = [
     { kind: "function", re: /create\s+(?:or\s+replace\s+)?function\s+([a-z0-9_."]+)\s*\(/gi },
     { kind: "table", re: /create\s+table\s+(?:if\s+not\s+exists\s+)?([a-z0-9_."]+)/gi },

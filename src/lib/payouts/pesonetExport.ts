@@ -16,15 +16,20 @@ import { payoutPeriodFor } from "@/lib/services/venueLocalPeriods";
 /**
  * THE COLUMN HEADER PAYMONGO EXPECTS.
  *
- * ⚠️ UNVERIFIED BY THIS CODEBASE. The template workbook (pesonet_template.xlsx)
- * is NOT in this repo — only the bank list generated from its Banks tab. These
- * five strings come from the founder reading the template's transfer sheet, not
- * from anything here that can be re-checked. If an upload is rejected for a
- * header reason, THIS IS THE FIRST THING TO DOUBT: re-read a fresh template and
- * correct it here.
+ * VERIFIED AGAINST THE ARTIFACT, not against someone's reading of it. The
+ * workbook is checked in at docs/paymongo/pesonet_template.xlsx and
+ * __tests__/pesonetTemplate.test.ts asserts these five strings against its
+ * Details sheet on every run, alongside all 124 bank names. A wrong header now
+ * fails a test rather than an upload.
  *
- * "Remarks" carries no parenthetical. An earlier draft had "Remarks (optional)"
- * and that is wrong — the header is matched literally.
+ * "Remarks" carries NO parenthetical, and the trap is worth naming: the
+ * template's own REMINDERS sheet lists the fields to fill in and writes
+ * "Remarks (Optional)" — but the Details header cell says just "Remarks".
+ * Reading the instructions instead of the header is how "Remarks (optional)"
+ * got into an earlier draft, and the header is matched literally.
+ *
+ * If PayMongo publishes a new template, replace the checked-in workbook and
+ * the tests will say what changed.
  */
 export const PESONET_CSV_HEADER = [
   "Bank Name",

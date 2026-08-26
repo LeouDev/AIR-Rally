@@ -30,14 +30,21 @@ const schema = z.object({ batchId: z.uuid() });
 export async function exportPesonetCsvAction(input: {
   batchId: string;
 }): Promise<ActionResult<{ filename: string; csv: string; rowCount: number; totalCentavos: number }>> {
-  try {
-    const { batchId } = schema.parse(input);
-    await requireAdmin();
+  const parsed = schema.safeParse(input);
+  if (!parsed.success)
+    return { success: false, error: "Something went wrong. Please try again." };
 
-    const supabase = await getServerClient();
-    const detail = await getPayoutBatchDetail(supabase, batchId);
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  const adminCheck = await requireAdmin(supabase);
+  if (!adminCheck.ok) return { success: false, error: adminCheck.error };
+
+  try {
+    const detail = await getPayoutBatchDetail(supabase, parsed.data.batchId);
     if (!detail) {
-      return { ok: false, error: "That payout batch no longer exists." };
+      return { success: false, error: "That payout batch no longer exists." };
     }
 
     // Only venues still awaiting money. A venue already confirmed sent must
@@ -47,7 +54,7 @@ export async function exportPesonetCsvAction(input: {
 
     if (outstanding.length === 0) {
       return {
-        ok: false,
+        success: false,
         error: "Every venue in this batch has already been confirmed as sent. There is nothing left to upload.",
       };
     }
@@ -76,14 +83,14 @@ export async function exportPesonetCsvAction(input: {
       })),
     });
 
-    return { ok: true, data: result };
+    return { success: true, data: result };
   } catch (error) {
     if (error instanceof PesonetExportError) {
       // The problem list IS the message. Swallowing it into a generic
       // failure would leave the admin with nothing to act on.
-      return { ok: false, error: error.message };
+      return { success: false, error: error.message };
     }
     logServerError("exportPesonetCsvAction", error);
-    return { ok: false, error: getFriendlyErrorMessage(error) };
+    return { success: false, error: getFriendlyErrorMessage(error) };
   }
 }

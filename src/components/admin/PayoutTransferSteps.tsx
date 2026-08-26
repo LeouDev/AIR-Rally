@@ -128,7 +128,7 @@ export function PayoutTransferSteps({
     setExportError(null);
     startTransition(async () => {
       const result = await exportPesonetCsvAction({ batchId });
-      if (!result.ok) {
+      if (!result.success) {
         setExportError(result.error);
         return;
       }
