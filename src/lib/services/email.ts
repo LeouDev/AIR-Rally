@@ -40,6 +40,12 @@ export type SendEmailInput = {
  * new environment and that environment starts emailing real users. This fails
  * CLOSED. A deployment that is not production and has not been told where to
  * redirect sends nothing at all.
+ *
+ * ⚠️ DO NOT "CLEAN THIS UP" INTO AN ENVIRONMENT VARIABLE. The ugliness IS the
+ * feature: a constant cannot be forgotten on a new deployment, and a missing
+ * env var reads as "not production", which is the safe answer. Replacing it
+ * with `process.env.IS_PRODUCTION` reverses the failure direction and puts
+ * real users one config omission away from a staging email.
  */
 const PRODUCTION_SUPABASE_REF = "hrpbjudsrqcgyrkkodop";
 
