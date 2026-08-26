@@ -11,6 +11,7 @@ import {
   attestPayoutSettledAction,
   cancelPayoutTransferAction,
 } from "@/lib/actions/payoutAttestation";
+import { sendPayslipPreviewAction } from "@/lib/actions/payslipPreview";
 import type { PayoutTransferStatus } from "@/lib/supabase/types";
 
 /**
@@ -233,6 +234,43 @@ export function PayoutTransferSteps({
           </p>
         )}
       </Step>
+
+      {/* Seeing the payslip without performing the payout.
+          The only other way to see this email is to confirm a payment as
+          sent — which settles the venue's earnings and asserts PayMongo
+          reported a transfer that may not exist. Looking at an email is not
+          worth a false row in the ledger, so this renders the same template
+          and mails it to the admin, writing nothing. */}
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-dashed border-border bg-muted/30 px-5 py-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-foreground">
+            See the payslip first
+          </p>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Emails a preview to you, exactly as the venue would receive it.
+            Nothing is settled, nobody is notified, and no record is written.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isPending}
+          onClick={() =>
+            startTransition(async () => {
+              const result = await sendPayslipPreviewAction({ batchId });
+              if (!result.success) {
+                toast.error(result.error);
+                return;
+              }
+              toast.success(
+                `Preview sent to ${result.data.to}. Open it on your phone.`,
+              );
+            })
+          }
+        >
+          Email me a preview
+        </Button>
+      </div>
 
       {recorded && (
         <div className="overflow-x-auto rounded-2xl border border-border bg-card">
