@@ -57,7 +57,7 @@ export default async function ExplorePage({ searchParams }: ExplorePageProps) {
         ))}
       </div>
     ) : (
-      <NoResultsState amenities={amenities} />
+      <NoResultsState amenities={amenities} isSignedIn={Boolean(user)} />
     );
 
   return (

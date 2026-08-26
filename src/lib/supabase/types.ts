@@ -137,7 +137,24 @@ export type CourtImage = {
   created_at: string;
 };
 
+export type VenueRequest = {
+  id: string;
+  user_id: string;
+  venue_id: string | null;
+  place_name: string | null;
+  place_city: string | null;
+  place_address: string | null;
+  google_place_id: string | null;
+  note: string | null;
+  status: "open" | "contacted" | "listed" | "declined" | "duplicate";
+  merged_into_id: string | null;
+  listed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Favorite = {
+
   user_id: string;
   venue_id: string;
   created_at: string;
@@ -1550,6 +1567,13 @@ export type Database = {
       ranked_match_players: TableDef<RankedMatchPlayer, never, never>;
       ranked_match_points: TableDef<RankedMatchPoint, never, never>;
       ranked_leaderboard: TableDef<RankedLeaderboardRow, never, never>;
+      // "Request my venue" (20260810000099 + 20260810000106). user_id is
+      // forced to auth.uid() by RLS on insert, never client-supplied for real.
+      venue_requests: TableDef<
+        VenueRequest,
+        Pick<VenueRequest, "user_id"> &
+          Partial<Omit<VenueRequest, "id" | "user_id" | "created_at" | "updated_at">>
+      >;
     };
     Views: Record<string, never>;
     Functions: {
@@ -2014,6 +2038,59 @@ export type Database = {
           p_score_b?: number | null;
         };
         Returns: undefined;
+      };
+      // "Request my venue" — see the migrations named above the table entry.
+      venue_request_place_suggestions: {
+        Args: { p_query: string };
+        Returns: { place_name: string; place_city: string }[];
+      };
+      venue_request_demand_for_me: {
+        Args: { p_request_id: string };
+        Returns: { requesters: number; show_count: boolean }[];
+      };
+      admin_venue_demand: {
+        Args: Record<string, never>;
+        Returns: {
+          venue_id: string | null;
+          venue_name: string | null;
+          venue_status: string | null;
+          place_name: string | null;
+          place_city: string | null;
+          requesters: number;
+          first_requested_at: string;
+          last_requested_at: string;
+          sample_request_id: string;
+          fully_contacted: boolean;
+        }[];
+      };
+      admin_set_venue_request_cluster_status: {
+        Args: { p_request_id: string; p_status: "contacted" | "declined" };
+        Returns: number;
+      };
+      admin_unlinked_venue_requests: {
+        Args: Record<string, never>;
+        Returns: {
+          place_name: string | null;
+          place_city: string | null;
+          requesters: number;
+          oldest: string;
+          request_ids: string[];
+        }[];
+      };
+      admin_link_venue_requests: {
+        Args: { p_request_ids: string[]; p_venue_id: string };
+        Returns: number;
+      };
+      // Genuinely anonymous — callable with no session. See the migration for
+      // why neither of the two functions above can serve this caller.
+      public_venue_request_summary: {
+        Args: { p_request_id: string };
+        Returns: {
+          display_name: string;
+          city: string;
+          requesters: number;
+          show_count: boolean;
+        }[];
       };
     };
   };
