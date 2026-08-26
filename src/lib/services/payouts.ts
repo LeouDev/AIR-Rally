@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, PayoutBatch, PayoutBatchStatus } from "@/lib/supabase/types";
+import type {
+  Database,
+  PayoutBatch,
+  PayoutBatchStatus,
+} from "@/lib/supabase/types";
 import { assertRowShape } from "@/lib/postgrestShape";
 
 type Client = SupabaseClient<Database>;
@@ -31,11 +35,22 @@ export type PayoutCandidate = {
 };
 
 /** Payable settlements not already committed to a live batch. Admin-only. */
-export async function listPayoutCandidates(supabase: Client): Promise<PayoutCandidate[]> {
-  const { data, error } = await supabase.rpc("available_settlements_for_payout");
+export async function listPayoutCandidates(
+  supabase: Client,
+): Promise<PayoutCandidate[]> {
+  const { data, error } = await supabase.rpc(
+    "available_settlements_for_payout",
+  );
   if (error) throw error;
 
-  const settlements = (data ?? []) as { id: string; venue_id: string; booking_id: string; venue_amount: number; currency: string; settlement_source: string }[];
+  const settlements = (data ?? []) as {
+    id: string;
+    venue_id: string;
+    booking_id: string;
+    venue_amount: number;
+    currency: string;
+    settlement_source: string;
+  }[];
   if (settlements.length === 0) return [];
 
   // The RPC returns the settlement rows themselves; names come from a
@@ -45,11 +60,16 @@ export async function listPayoutCandidates(supabase: Client): Promise<PayoutCand
 
   const [{ data: venues }, { data: bookings }] = await Promise.all([
     supabase.from("venues").select("id, name").in("id", venueIds),
-    supabase.from("bookings").select("id, confirmation_code").in("id", bookingIds),
+    supabase
+      .from("bookings")
+      .select("id, confirmation_code")
+      .in("id", bookingIds),
   ]);
 
   const venueName = new Map((venues ?? []).map((v) => [v.id, v.name]));
-  const code = new Map((bookings ?? []).map((b) => [b.id, b.confirmation_code]));
+  const code = new Map(
+    (bookings ?? []).map((b) => [b.id, b.confirmation_code]),
+  );
 
   return settlements.map((s) => ({
     settlementId: s.id,
@@ -63,8 +83,14 @@ export async function listPayoutCandidates(supabase: Client): Promise<PayoutCand
   }));
 }
 
-export async function listPayoutBatches(supabase: Client, status?: PayoutBatchStatus): Promise<PayoutBatch[]> {
-  let query = supabase.from("payout_batches").select("*").order("created_at", { ascending: false });
+export async function listPayoutBatches(
+  supabase: Client,
+  status?: PayoutBatchStatus,
+): Promise<PayoutBatch[]> {
+  let query = supabase
+    .from("payout_batches")
+    .select("*")
+    .order("created_at", { ascending: false });
   if (status) query = query.eq("status", status);
 
   const { data, error } = await query.limit(100);
@@ -86,16 +112,55 @@ export type PayoutBatchDetail = {
   }[];
   /** Distinct venues in this batch — what a payout run would actually transfer to. */
   venueCount: number;
+  /**
+   * One row per venue: the actual transfers an admin has to make, with the
+   * destination account to make them to.
+   *
+   * A batch's settlements are per-BOOKING, but a bank transfer is
+   * per-VENUE — an admin paying a venue with eight settlements sends one
+   * payment, not eight. Grouping here rather than in the page keeps the
+   * money arithmetic in one place, and means the total shown beside an
+   * account number is always the sum of exactly the items above it.
+   *
+   * Bank details are included deliberately, and this is the one surface
+   * that shows them. Nothing else in the admin UI renders an account
+   * number: the payment-accounts list says only whether details are on
+   * file, and owner_applications' admin list carries a presence boolean
+   * instead of the values (migration 20260810000090). This is the detail
+   * view where a reviewer genuinely needs the number, because without it
+   * the transfer cannot be made at all.
+   */
+  transfers: {
+    venueId: string;
+    venueName: string;
+    amount: number;
+    currency: string;
+    settlementCount: number;
+    bankName: string | null;
+    bankAccountName: string | null;
+    bankAccountNumber: string | null;
+    /** False when this venue has no payout destination on file — it cannot be paid. */
+    payable: boolean;
+  }[];
 };
 
-export async function getPayoutBatchDetail(supabase: Client, batchId: string): Promise<PayoutBatchDetail | null> {
-  const { data: batch, error } = await supabase.from("payout_batches").select("*").eq("id", batchId).maybeSingle();
+export async function getPayoutBatchDetail(
+  supabase: Client,
+  batchId: string,
+): Promise<PayoutBatchDetail | null> {
+  const { data: batch, error } = await supabase
+    .from("payout_batches")
+    .select("*")
+    .eq("id", batchId)
+    .maybeSingle();
   if (error) throw error;
   if (!batch) return null;
 
   const { data: rawItems, error: itemsError } = await supabase
     .from("payout_batch_items")
-    .select("id, settlement_id, venue_id, amount, venues(name), booking_settlements(booking_id, currency, bookings(confirmation_code))")
+    .select(
+      "id, settlement_id, venue_id, amount, venues(name), booking_settlements(booking_id, currency, bookings(confirmation_code))",
+    )
     .eq("payout_batch_id", batchId);
   if (itemsError) throw itemsError;
 
@@ -105,24 +170,72 @@ export async function getPayoutBatchDetail(supabase: Client, batchId: string): P
     venue_id: string;
     amount: number;
     venues: { name: string } | null;
-    booking_settlements: { booking_id: string; currency: string; bookings: { confirmation_code: string } | null } | null;
+    booking_settlements: {
+      booking_id: string;
+      currency: string;
+      bookings: { confirmation_code: string } | null;
+    } | null;
   };
   const items = assertRowShape<PayoutBatchItemRow>(
     rawItems ?? [],
     ["id", "settlement_id", "venue_id", "amount"],
-    "payout batch items query"
+    "payout batch items query",
   ).map((i) => ({
     itemId: i.id,
     settlementId: i.settlement_id,
     venueId: i.venue_id,
     venueName: i.venues?.name ?? "Unknown venue",
     bookingId: i.booking_settlements?.booking_id ?? "",
-    confirmationCode: i.booking_settlements?.bookings?.confirmation_code ?? null,
+    confirmationCode:
+      i.booking_settlements?.bookings?.confirmation_code ?? null,
     amount: i.amount,
     currency: i.booking_settlements?.currency ?? "PHP",
   }));
 
-  return { batch, items, venueCount: new Set(items.map((i) => i.venueId)).size };
+  // Destinations are read per-venue in one query rather than embedded in
+  // the items select above: venue_payment_accounts has no foreign key from
+  // payout_batch_items, and an embed would apply that table's own RLS
+  // separately (the failure venueEarnings.ts documents).
+  const venueIds = [...new Set(items.map((i) => i.venueId))];
+  const accountByVenue = new Map<
+    string,
+    {
+      bank_name: string | null;
+      bank_account_name: string | null;
+      bank_account_number: string | null;
+    }
+  >();
+  if (venueIds.length > 0) {
+    const { data: accounts, error: accountsError } = await supabase
+      .from("venue_payment_accounts")
+      .select("venue_id, bank_name, bank_account_name, bank_account_number")
+      .eq("provider", "paymongo")
+      .in("venue_id", venueIds);
+    if (accountsError) throw accountsError;
+    for (const account of accounts ?? [])
+      accountByVenue.set(account.venue_id, account);
+  }
+
+  const transfers = venueIds.map((venueId) => {
+    const venueItems = items.filter((i) => i.venueId === venueId);
+    const account = accountByVenue.get(venueId);
+    return {
+      venueId,
+      venueName: venueItems[0]?.venueName ?? "Unknown venue",
+      // Summed from the batch's own items, never from payout_batches.total_amount:
+      // that column is the whole batch across every venue, and using it here
+      // would overstate a single venue's transfer the moment a batch covers two.
+      amount: venueItems.reduce((sum, i) => sum + i.amount, 0),
+      currency: venueItems[0]?.currency ?? "PHP",
+      settlementCount: venueItems.length,
+      bankName: account?.bank_name ?? null,
+      bankAccountName: account?.bank_account_name ?? null,
+      bankAccountNumber: account?.bank_account_number ?? null,
+      payable: Boolean(account?.bank_name),
+    };
+  });
+
+  return { batch, items, venueCount: venueIds.length, transfers };
 }
 
 /**
@@ -130,7 +243,11 @@ export async function getPayoutBatchDetail(supabase: Client, batchId: string): P
  * succeeds or nothing does — a batch missing settlements the admin thought
  * they'd included is worse than no batch.
  */
-export async function createPayoutBatch(supabase: Client, settlementIds: string[], notes?: string): Promise<string> {
+export async function createPayoutBatch(
+  supabase: Client,
+  settlementIds: string[],
+  notes?: string,
+): Promise<string> {
   const { data, error } = await supabase.rpc("create_payout_batch", {
     p_settlement_ids: settlementIds,
     p_notes: notes ?? null,
@@ -146,15 +263,27 @@ export async function createPayoutBatch(supabase: Client, settlementIds: string[
  * Every settlement in the batch stays 'payable' until a real transfer
  * succeeds, which nothing in this codebase can currently do.
  */
-export async function approvePayoutBatch(supabase: Client, batchId: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc("approve_payout_batch", { p_batch_id: batchId });
+export async function approvePayoutBatch(
+  supabase: Client,
+  batchId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("approve_payout_batch", {
+    p_batch_id: batchId,
+  });
   if (error) throw error;
   return data ?? false;
 }
 
 /** Cancels a batch, releasing its settlements back into the candidate pool. */
-export async function cancelPayoutBatch(supabase: Client, batchId: string, reason?: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc("cancel_payout_batch", { p_batch_id: batchId, p_reason: reason ?? null });
+export async function cancelPayoutBatch(
+  supabase: Client,
+  batchId: string,
+  reason?: string,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("cancel_payout_batch", {
+    p_batch_id: batchId,
+    p_reason: reason ?? null,
+  });
   if (error) throw error;
   return data ?? false;
 }
@@ -164,7 +293,9 @@ export async function cancelPayoutBatch(supabase: Client, batchId: string, reaso
  * settlement id. RLS restricts this to the caller's own venues, so an owner
  * learns about their own payouts and nobody else's.
  */
-export async function getOwnerBatchStatusBySettlement(supabase: Client): Promise<Map<string, { reference: string; status: PayoutBatchStatus }>> {
+export async function getOwnerBatchStatusBySettlement(
+  supabase: Client,
+): Promise<Map<string, { reference: string; status: PayoutBatchStatus }>> {
   const { data, error } = await supabase
     .from("payout_batch_items")
     .select("settlement_id, payout_batches(batch_reference, status)");
@@ -172,13 +303,26 @@ export async function getOwnerBatchStatusBySettlement(supabase: Client): Promise
 
   type BatchStatusRow = {
     settlement_id: string;
-    payout_batches: { batch_reference: string; status: PayoutBatchStatus } | null;
+    payout_batches: {
+      batch_reference: string;
+      status: PayoutBatchStatus;
+    } | null;
   };
-  const result = new Map<string, { reference: string; status: PayoutBatchStatus }>();
-  for (const item of assertRowShape<BatchStatusRow>(data ?? [], ["settlement_id"], "owner batch status query")) {
+  const result = new Map<
+    string,
+    { reference: string; status: PayoutBatchStatus }
+  >();
+  for (const item of assertRowShape<BatchStatusRow>(
+    data ?? [],
+    ["settlement_id"],
+    "owner batch status query",
+  )) {
     const batch = item.payout_batches;
     if (batch && batch.status !== "cancelled" && batch.status !== "failed") {
-      result.set(item.settlement_id, { reference: batch.batch_reference, status: batch.status });
+      result.set(item.settlement_id, {
+        reference: batch.batch_reference,
+        status: batch.status,
+      });
     }
   }
   return result;
