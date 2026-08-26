@@ -61,6 +61,41 @@ export function weekRange(today: string, weeksAgo: number): LocalDateRange {
   return { from, to: shiftDate(from, 6) };
 }
 
+/**
+ * The payout period a set of court-time dates falls in — the SUNDAY-TO-
+ * SATURDAY WEEK CONTAINING THEM, never the span of the dates themselves.
+ *
+ * That distinction is the whole point. Owner Agreement §3.9 promises a
+ * Wednesday payout covers "court time played in the week before it — Sunday
+ * through Saturday", so the period named on a payslip or a transfer remark
+ * has to be that week. Deriving it from the earliest and latest bookings
+ * instead produces a window that:
+ *
+ *   - contradicts the clause — bookings on Tue and Fri render "Tue – Fri"
+ *     while the agreement says the period is Sun – Sat, leaving an owner to
+ *     reconcile two different windows
+ *   - varies arbitrarily — a week with a single booking renders
+ *     "21 Aug – 21 Aug", from which an owner cannot tell which week was
+ *     paid, or whether a session they expected was left out
+ *
+ * Nothing is lost by widening it: a payslip's line items carry each
+ * session's own date. The header names the week; the rows name the days.
+ *
+ * A batch spanning more than one week is not a weekly payout, so rather
+ * than misreport it as one, the range widens to cover every week touched —
+ * the first week's Sunday through the last week's Saturday. That only
+ * arises from a manually assembled batch, and naming it honestly beats
+ * naming it neatly.
+ */
+export function payoutPeriodFor(localDates: readonly string[]): LocalDateRange | null {
+  if (localDates.length === 0) return null;
+  const sorted = [...localDates].sort();
+  return {
+    from: weekRange(sorted[0], 0).from,
+    to: weekRange(sorted[sorted.length - 1], 0).to,
+  };
+}
+
 /** January 1 to December 31, matching monthRange/weekRange's own shape — a full calendar period, not "to date". */
 export function yearRange(today: string, yearsAgo: number): LocalDateRange {
   const [y] = today.split("-").map(Number);
