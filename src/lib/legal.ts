@@ -28,7 +28,7 @@ export const CURRENT_AGREEMENT_VERSION = "2026-08-23";
  * owner_applications.agreement_version at submission time. A distinct
  * constant because the two documents change on independent schedules.
  */
-export const CURRENT_OWNER_AGREEMENT_VERSION = "1.0";
+export const CURRENT_OWNER_AGREEMENT_VERSION = "1.1";
 
 /**
  * Shown on both /terms and /privacy, and carried into the PDF handed to

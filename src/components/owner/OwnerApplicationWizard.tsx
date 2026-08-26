@@ -337,7 +337,7 @@ export function OwnerApplicationWizard({ onSubmitted }: OwnerApplicationWizardPr
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Payouts</dt>
-                    <dd className="text-right text-foreground">Bank transfer, within 15 banking days after play</dd>
+                    <dd className="text-right text-foreground">Bank transfer, weekly on Wednesdays</dd>
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt className="text-muted-foreground">Bookings</dt>

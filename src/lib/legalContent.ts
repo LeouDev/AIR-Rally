@@ -197,7 +197,7 @@ export const OWNER_AGREEMENT: LegalDocument = {
   title: "Venue Owner Agreement",
   intro: [
     "This agreement is between AIR/Rally and you, the venue owner or authorised operator, and covers every venue and court you list with us.",
-    "The five things that matter most: AIR/Rally keeps 5% of the court price, you receive 95%. The processing fee is paid by the customer, on top, and never reduces your share. Payouts are arranged by bank transfer within 15 banking days after the court time has been played. A confirmed booking is a commitment — the player has already paid. If a player cancels 48+ hours ahead, AIR/Rally compensates them, not you.",
+    "The five things that matter most: AIR/Rally keeps 5% of the court price, you receive 95%. The processing fee is paid by the customer, on top, and never reduces your share. Payouts are sent by bank transfer every Wednesday, covering the week of court time before it. A confirmed booking is a commitment — the player has already paid. If a player cancels 48+ hours ahead, AIR/Rally compensates them, not you.",
   ],
   sections: [
     {
@@ -226,9 +226,14 @@ export const OWNER_AGREEMENT: LegalDocument = {
         "3.3 The processing fee is the customer's. It is added on top of your price and does not reduce what you receive.",
         "3.4 \"Paid\" does not mean \"paid to you.\" When a booking shows as Paid, it means the customer's payment succeeded. It does not mean money has reached your account yet.",
         "3.5 When you get paid. Earnings become payable once the booked court time has been played — not when it is booked, and not when the customer pays.",
-        "3.6 How you get paid. By bank transfer to the account on file, within 15 banking days of the court time being played. Automated payouts are not live yet, so transfers are arranged manually. If that ever changes, you will keep getting paid at least as fast.",
+        "3.6 How you get paid. By bank transfer to the account on file, weekly — see 3.9 for which week a payout covers and when it is sent. Automated payouts are not live yet, so transfers are arranged manually. If that ever changes, you will keep getting paid at least as fast.",
         "3.7 Your bank details. You are responsible for keeping them correct. We cannot recover funds sent to an account you gave us in error, though we will help you try.",
         "3.8 Changing the commission. We may change it with 30 days' written notice. Bookings already confirmed keep the rate that applied when they were made.",
+        "3.9 When we send your payouts. We send payouts weekly, on Wednesdays. A Wednesday payout covers court time played in the week before it — Sunday through Saturday, in your venue's local time. Court time played from Sunday 23 August to Saturday 29 August is sent on Wednesday 2 September.",
+        "When you booked and paid does not decide which payout you are in — the court date does. A booking made and paid on 21 August for a court on 23 August falls in the 23-29 August week, and is sent on 2 September.",
+        "3.10 Bank transfer fee. Our payment provider charges \u20b110.00 to send each transfer, and that \u20b110.00 is deducted from the payout. It is charged once per payout, not once per booking \u2014 a payout covering thirty bookings is charged \u20b110.00 in total. This does not change what your bookings earned you: your earnings figures show the full amount, and the \u20b110.00 appears as a deduction on the transfer itself.",
+        "3.11 Small balances roll forward. Our payment provider will not send a bank transfer below \u20b180.00. If your earnings for a week come to less than that, they stay with your account and are added to the next Wednesday's payout.",
+        "3.12 What we control. We send the transfer on Wednesday. Banks settle it on their own schedule, usually the same or the next banking day. If a Wednesday is not a banking day, we send on the next one. We commit to sending on time, not to when your bank credits your account.",
       ],
     },
     {

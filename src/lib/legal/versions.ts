@@ -5,7 +5,7 @@ import {
   CURRENT_AGREEMENT_VERSION,
   CURRENT_OWNER_AGREEMENT_VERSION,
 } from "@/lib/legal";
-import { TERMS_2026_08_17 } from "./frozen";
+import { TERMS_2026_08_17, OWNER_AGREEMENT_1_0 } from "./frozen";
 
 /**
  * Every version of the User Agreement that has ever been accepted, keyed by
@@ -51,6 +51,7 @@ export const TERMS_VERSIONS: Record<string, LegalDocument> = {
  * its first real use rather than being bypassed by it.
  */
 export const OWNER_AGREEMENT_VERSIONS: Record<string, LegalDocument> = {
+  "1.0": OWNER_AGREEMENT_1_0,
   [CURRENT_OWNER_AGREEMENT_VERSION]: OWNER_AGREEMENT,
 };
 
