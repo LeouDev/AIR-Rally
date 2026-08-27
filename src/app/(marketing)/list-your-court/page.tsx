@@ -39,7 +39,7 @@ const OWNER_FAQ = [
     icon: CalendarClock,
     title: "When do I get paid?",
     description:
-      "Payouts go out every Wednesday, straight to your bank account, for whatever's been booked and played since your last payout. A ₱10 bank transfer fee is deducted once per payout — not per booking. If your total is under ₱80 that week, it rolls into the next one. You get an emailed payslip every payout showing exactly what it covers.",
+      "Payouts go out every Wednesday, straight to your bank account, for whatever's been booked and played since your last payout. A ₱10 bank transfer fee is deducted once per payout — not per booking. If your total is under ₱80 that week, it rolls into the next one. You get an email the moment each payout is sent, with the amount, and every booking behind it is itemized in your earnings dashboard.",
   },
   {
     icon: Settings2,
