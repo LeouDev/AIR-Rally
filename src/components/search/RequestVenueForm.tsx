@@ -97,18 +97,18 @@ export function RequestVenueForm() {
   if (submitted) {
     return (
       <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-4">
-        <p className="text-sm font-medium text-foreground">
-          We&apos;ll email you the moment {placeName} lists.
-        </p>
+        <p className="text-sm font-medium text-foreground">{placeName} is on our list.</p>
         {/* The player's own feedback uses venue_request_demand_for_me() — the
-            authenticated, ownership-checked function. This is DIFFERENT from
-            the public page's copy: "you're the 1st" would demoralise the
-            submitter here, same threshold-of-5 rule as everywhere else. */}
+            authenticated, ownership-checked function. showCount can only be
+            true at the function's threshold of 5 or more
+            (v_threshold constant integer := 5; returns v_count >= v_threshold),
+            so the count is never 1 and "players" is never pluralized down. */}
         {demand?.showCount && (
-          <p className="text-sm text-muted-foreground">
-            {demand.requesters} player{demand.requesters === 1 ? "" : "s"} have asked for this venue.
-          </p>
+          <p className="text-sm text-muted-foreground">{demand.requesters} players have asked for this venue.</p>
         )}
+        <p className="text-sm font-medium text-foreground">
+          The fastest way to get them on AIR/Rally: send them this.
+        </p>
         <Button onClick={handleShare} variant="outline" size="sm" className="gap-2">
           <Share2 className="size-4" aria-hidden="true" />
           Share with your venue
