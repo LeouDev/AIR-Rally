@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { CalendarClock, LineChart, Users2, ArrowRight } from "lucide-react";
+import { Wallet, CalendarClock, Settings2, ShieldCheck, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/shared/SectionHeader";
 import { OwnerVenueGrid } from "@/components/owner/OwnerVenueGrid";
@@ -15,24 +15,43 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "List Your Court",
-  description: "Bring your pickleball venue onto Air/Rally and reach players actively booking courts.",
+  description: "List your pickleball venue on Air/Rally — free to join, 95% of every booking, paid out weekly.",
 };
 
-const BENEFITS = [
+/**
+ * The four questions a venue owner actually decides on, answered in the
+ * order they'd ask them — money first. This is the page a cold-outreach
+ * email links to instead of a PDF, so every figure here has to be one an
+ * owner can hold the founder to: 5%/95% split verified against migration
+ * 20260810000092's worked example (gross 40000 / platform_fee 2000 /
+ * venue_amount 38000), the Wednesday cadence against the
+ * create_weekly_payout_batch() cron, the ₱10/₱80 figures against
+ * 20260810000101's floor constant and the payslip email's own copy.
+ */
+const OWNER_FAQ = [
   {
-    icon: Users2,
-    title: "Reach active players",
-    description: "Get discovered by players already searching for courts to book in your area.",
+    icon: Wallet,
+    title: "What does it cost?",
+    description:
+      "Free to list. No signup fee, no monthly fee, no contract, and nothing exclusive. You keep 95% of every booking — AIR/Rally takes a 5% commission, and that's the only cost.",
   },
   {
     icon: CalendarClock,
-    title: "Manage your schedule",
-    description: "Set your own hours, pricing, and court availability — you stay in control.",
+    title: "When do I get paid?",
+    description:
+      "Payouts go out every Wednesday, straight to your bank account, for whatever's been booked and played since your last payout. A ₱10 bank transfer fee is deducted once per payout — not per booking. If your total is under ₱80 that week, it rolls into the next one. You get an emailed payslip every payout showing exactly what it covers.",
   },
   {
-    icon: LineChart,
-    title: "Track your performance",
-    description: "See bookings and occupancy at a glance once your venue is live.",
+    icon: Settings2,
+    title: "How much work is it?",
+    description:
+      "Players pay through the app when they book — you never chase a payment or handle cash. You set your own courts, hours, and prices. Applying is one form; we ask for your bank details up front so a payout has somewhere to go.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "What if it doesn't work out?",
+    description:
+      "Nothing lost. Keep every booking channel you already have — this adds to what you're doing, it doesn't replace it.",
   },
 ];
 
@@ -71,18 +90,17 @@ export default async function ListYourCourtPage() {
             venue) is the button at the top. */}
         <section className="bg-secondary text-secondary-foreground">
           <div className="mx-auto flex max-w-5xl flex-col items-center gap-4 px-4 py-14 text-center sm:px-6 lg:px-8">
-            <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Growing with AIR/Rally</h2>
+            <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Listing another court</h2>
             <p className="max-w-xl text-secondary-foreground/80">
-              The marketplace built specifically for pickleball venues — reach more players and simplify how you manage
-              bookings.
+              Free to list, 95% of every booking, paid out every Wednesday — same terms as your first venue.
             </p>
           </div>
         </section>
 
         <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:px-8">
-          <SectionHeader eyebrow="For venue owners" title="Everything you need to grow your venue" align="center" />
-          <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
-            {BENEFITS.map(({ icon: Icon, title, description }) => (
+          <SectionHeader eyebrow="For venue owners" title="What you need to know" align="center" />
+          <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2">
+            {OWNER_FAQ.map(({ icon: Icon, title, description }) => (
               <div key={title} className="flex flex-col items-start gap-3 rounded-2xl border border-border bg-card p-6">
                 <div className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
                   <Icon className="size-5" aria-hidden="true" />
@@ -105,43 +123,15 @@ export default async function ListYourCourtPage() {
             List your court on Air/Rally
           </h1>
           <p className="max-w-xl text-lg text-secondary-foreground/80">
-            Join the marketplace built specifically for pickleball venues — reach more players and
-            simplify how you manage bookings.
+            Free to list. You keep 95% of every booking, paid out to your bank every week.
           </p>
-          {user ? (
-            <Button asChild size="lg" className="h-12 gap-2 rounded-full px-7 text-base">
-              <a href="#your-venues">
-                Get Started
-                <ArrowRight className="size-4" />
-              </a>
-            </Button>
-          ) : (
-            <div className="flex flex-col items-center gap-2">
-              <Button asChild size="lg" className="h-12 gap-2 rounded-full px-7 text-base">
-                <Link href="/signup">
-                  Get Started
-                  <ArrowRight className="size-4" />
-                </Link>
-              </Button>
-              <p className="text-sm text-secondary-foreground/70">
-                Already have an account?{" "}
-                <Link href="/login?redirect=/list-your-court" className="font-medium underline underline-offset-2">
-                  Sign in
-                </Link>
-              </p>
-            </div>
-          )}
         </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
-        <SectionHeader
-          eyebrow="For venue owners"
-          title="Everything you need to grow your venue"
-          align="center"
-        />
-        <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
-          {BENEFITS.map(({ icon: Icon, title, description }) => (
+        <SectionHeader eyebrow="For venue owners" title="What you need to know" align="center" />
+        <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2">
+          {OWNER_FAQ.map(({ icon: Icon, title, description }) => (
             <div
               key={title}
               className="flex flex-col items-start gap-3 rounded-2xl border border-border bg-card p-6"
@@ -153,6 +143,41 @@ export default async function ListYourCourtPage() {
               <p className="text-sm text-muted-foreground">{description}</p>
             </div>
           ))}
+        </div>
+
+        {/* Stated honestly rather than left implied: the founder's own
+            call, after the money answers and before the ask. Reads as a
+            reason to act now on an already-attractive offer, not a
+            confession — and never implies scale that isn't there
+            (no "join the venues already on AIR/Rally", no player counts). */}
+        <p className="mx-auto mt-10 max-w-2xl text-center text-sm font-medium text-foreground">
+          We launched this week. Early venues get listed before anyone else in their city.
+        </p>
+
+        <div className="mx-auto mt-6 flex max-w-4xl flex-col items-center gap-2">
+          {user ? (
+            <Button asChild size="lg" className="h-12 gap-2 rounded-full px-7 text-base">
+              <a href="#your-venues">
+                Get Started
+                <ArrowRight className="size-4" />
+              </a>
+            </Button>
+          ) : (
+            <>
+              <Button asChild size="lg" className="h-12 gap-2 rounded-full px-7 text-base">
+                <Link href="/signup">
+                  Get Started
+                  <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+              <p className="text-sm text-muted-foreground">
+                Already have an account?{" "}
+                <Link href="/login?redirect=/list-your-court" className="font-medium underline underline-offset-2">
+                  Sign in
+                </Link>
+              </p>
+            </>
+          )}
         </div>
 
         {user ? (
