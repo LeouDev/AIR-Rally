@@ -2081,6 +2081,18 @@ export type Database = {
         Args: { p_request_ids: string[]; p_venue_id: string };
         Returns: number;
       };
+      // Fuzzy (pg_trgm) — suggestions only, never links anything itself.
+      admin_venue_request_candidates: {
+        Args: { p_venue_id: string };
+        Returns: {
+          place_name: string | null;
+          place_city: string | null;
+          requesters: number;
+          oldest: string;
+          request_ids: string[];
+          similarity: number;
+        }[];
+      };
       // Genuinely anonymous — callable with no session. See the migration for
       // why neither of the two functions above can serve this caller.
       public_venue_request_summary: {
@@ -2090,6 +2102,21 @@ export type Database = {
           city: string;
           requesters: number;
           show_count: boolean;
+        }[];
+      };
+      // Genuinely anonymous — callable with no session. Confirmed matches
+      // only; carries no rating_delta/tier_before/tier_after for anyone.
+      public_ranked_match_summary: {
+        Args: { p_match_id: string };
+        Returns: {
+          match_type: string;
+          score_a: number;
+          score_b: number;
+          winning_team: string | null;
+          rated: boolean;
+          confirmed_at: string | null;
+          venue_name: string | null;
+          players: { displayName: string; team: string }[] | null;
         }[];
       };
     };

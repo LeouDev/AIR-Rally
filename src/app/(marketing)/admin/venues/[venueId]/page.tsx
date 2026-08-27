@@ -7,10 +7,12 @@ import { Rating } from "@/components/court/Rating";
 import { ReviewPreview } from "@/components/court/ReviewPreview";
 import { AdminVenueStatusActions } from "@/components/admin/AdminVenueStatusActions";
 import { AdminDeleteReviewButton } from "@/components/admin/AdminDeleteReviewButton";
+import { VenueRequestCandidatesPanel } from "@/components/admin/VenueRequestCandidatesPanel";
 import { getCurrentUser } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/services/admin";
 import { getVenueForAdmin } from "@/lib/services/venues";
+import { listVenueRequestCandidates } from "@/lib/services/adminVenueRequests";
 import type { VenueStatus } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +53,7 @@ export default async function AdminVenueDetailPage({ params }: AdminVenueDetailP
   const { venueId } = await params;
   const venue = await getVenueForAdmin(supabase, venueId);
   if (!venue) notFound();
+  const requestCandidates = await listVenueRequestCandidates(supabase, venueId);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 lg:px-8">
@@ -77,8 +80,15 @@ export default async function AdminVenueDetailPage({ params }: AdminVenueDetailP
             </div>
           )}
         </div>
-        <AdminVenueStatusActions venueId={venue.id} venueName={venue.name} status={venue.status} />
+        <AdminVenueStatusActions
+          venueId={venue.id}
+          venueName={venue.name}
+          status={venue.status}
+          pendingRequestCount={requestCandidates.reduce((sum, c) => sum + c.requesters, 0)}
+        />
       </div>
+
+      <VenueRequestCandidatesPanel venueId={venue.id} venueIsActive={venue.status === "active"} candidates={requestCandidates} />
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-foreground">Courts ({venue.courts.length})</h2>

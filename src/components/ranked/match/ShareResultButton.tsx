@@ -8,12 +8,18 @@ import { toast } from "sonner";
  * mobile web target (and the Expo app's in-app browser, where this route
  * is what /payment-return-style deep links reuse); the clipboard fallback
  * covers desktop, where there's rarely a share sheet to hand off to.
+ *
+ * `url` points at the public, no-session result page
+ * (/ranked/results/[matchId] — migration 20260810000107) rather than
+ * /ranked/match/[matchId], which is gated to participants. Without it, a
+ * "shared result" was text with nothing behind it — nobody the player
+ * sent it to could actually see the match, only read a claim about it.
  */
-export function ShareResultButton({ text }: { text: string }) {
+export function ShareResultButton({ text, url }: { text: string; url?: string }) {
   async function share() {
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
-        await navigator.share({ text });
+        await navigator.share(url ? { text, url } : { text });
         return;
       } catch {
         // User cancelled the share sheet, or the platform rejected it —
@@ -21,7 +27,7 @@ export function ShareResultButton({ text }: { text: string }) {
       }
     }
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(url ? `${text} ${url}` : text);
       toast.success("Copied — paste it anywhere.");
     } catch {
       toast.error("Couldn't share this result.");

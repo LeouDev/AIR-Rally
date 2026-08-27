@@ -26,6 +26,15 @@ export type UnlinkedRequestRow = {
 
 export type MergeTargetVenue = { id: string; name: string; city: string | null; status: string };
 
+export type VenueRequestCandidate = {
+  placeName: string | null;
+  placeCity: string | null;
+  requesters: number;
+  oldest: string;
+  requestIds: string[];
+  similarity: number;
+};
+
 /** count(distinct user_id) on the server side — see the migration's own
  * comment for why: count(*) would double-count anyone whose duplicate
  * request was merged into this cluster. */
@@ -77,4 +86,29 @@ export async function listMergeTargetVenues(supabase: Client): Promise<MergeTarg
     .order("name");
   if (error) throw error;
   return data;
+}
+
+/**
+ * Free-text requests that plausibly mean THIS venue, ranked by pg_trgm
+ * name similarity — a suggestion, never a link. Surfaced on the venue's
+ * own admin page so the ordering constraint (link before 'active', or
+ * nothing notifies, ever) is visible at the moment an admin is about to
+ * approve it, not on a separate page they'd have to remember to check.
+ * Works regardless of the venue's current status: still-onboarding shows
+ * "link these before approving"; already-active shows the honest warning
+ * that linking now won't notify anyone (see
+ * admin_venue_request_candidates()'s own comment — the trigger that
+ * would notify only fires on the transition into 'active', not on link).
+ */
+export async function listVenueRequestCandidates(supabase: Client, venueId: string): Promise<VenueRequestCandidate[]> {
+  const { data, error } = await supabase.rpc("admin_venue_request_candidates", { p_venue_id: venueId });
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    placeName: r.place_name,
+    placeCity: r.place_city,
+    requesters: r.requesters,
+    oldest: r.oldest,
+    requestIds: r.request_ids,
+    similarity: r.similarity,
+  }));
 }

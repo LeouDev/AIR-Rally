@@ -180,6 +180,9 @@ function ConfirmedView({ match, currentUserId }: { match: RankedMatchDetail; cur
         me.tier_after ? ` — now ${rankLabel(me.tier_after, me.pips_after ?? 1)}` : ""
       }.`
     : "AIR/Rally Ranked match result.";
+  // Public, no-session page — see ShareResultButton's own comment on why
+  // this isn't the participant-gated /ranked/match/[matchId] route.
+  const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/ranked/results/${match.id}` : undefined;
 
   return (
     <div className="flex flex-col gap-5">
@@ -256,7 +259,7 @@ function ConfirmedView({ match, currentUserId }: { match: RankedMatchDetail; cur
       )}
 
       <div className="flex flex-col gap-2.5">
-        <ShareResultButton text={shareText} />
+        <ShareResultButton text={shareText} url={shareUrl} />
         <Link
           href="/profile/rank"
           className="w-full border-2 border-navy py-4 text-center text-[0.8125rem] font-bold tracking-[0.08em] text-navy uppercase"

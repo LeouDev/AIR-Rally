@@ -141,6 +141,46 @@ async function attachParticipants(
   }));
 }
 
+export type PublicRankedMatchSummary = {
+  matchType: RankedMatchType;
+  scoreA: number;
+  scoreB: number;
+  winningTeam: RankedTeam | null;
+  rated: boolean;
+  confirmedAt: string | null;
+  venueName: string | null;
+  players: { displayName: string; team: RankedTeam }[];
+};
+
+/**
+ * No-session read of a single CONFIRMED match — public_ranked_match_summary()
+ * (migration 20260810000107) returns no row at all for anything else
+ * (live/lobby/disputed/nonexistent), same 404-not-error shape as
+ * getPublicVenueRequestSummary(). Carries no rating_delta/tier_before/
+ * tier_after for anyone — a visitor sees the result, not what it did to
+ * anyone's standing. `rated` is the one exception: a match-level flag set
+ * once at creation, never a per-player figure, so the page can label a
+ * casual result as casual without implying rating movement that never
+ * happened.
+ */
+export async function getPublicMatchSummary(supabase: Client, matchId: string): Promise<PublicRankedMatchSummary | null> {
+  const { data, error } = await supabase.rpc("public_ranked_match_summary", { p_match_id: matchId }).single();
+  if (error) {
+    if (error.code === "PGRST116") return null;
+    throw error;
+  }
+  return {
+    matchType: data.match_type as RankedMatchType,
+    scoreA: data.score_a,
+    scoreB: data.score_b,
+    winningTeam: data.winning_team as RankedTeam | null,
+    rated: data.rated,
+    confirmedAt: data.confirmed_at,
+    venueName: data.venue_name,
+    players: (data.players ?? []) as { displayName: string; team: RankedTeam }[],
+  };
+}
+
 export async function getMatch(supabase: Client, matchId: string): Promise<RankedMatchDetail | null> {
   const { data: match, error } = await supabase.from("ranked_matches").select("*").eq("id", matchId).maybeSingle();
   if (error) throw error;

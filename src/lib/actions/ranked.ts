@@ -12,8 +12,10 @@ import {
   submitResult,
   respondToResult,
   cancelMatch,
+  getPublicMatchSummary,
   RankedError,
   type CreateRankedMatchInput,
+  type PublicRankedMatchSummary,
 } from "@/lib/services/ranked";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import { getServerClient, type ActionResult } from "@/lib/actions/auth";
@@ -200,5 +202,27 @@ export async function cancelRankedMatchAction(matchId: string): Promise<ActionRe
   } catch (error) {
     logServerError("ranked.cancelMatch", error);
     return { success: false, error: friendlyRankedError(error, "Couldn't cancel that match.") };
+  }
+}
+
+/**
+ * NO-SESSION READ. The public match-result page's only data source —
+ * see getPublicMatchSummary()'s own comment for exactly what it withholds
+ * (anything not 'confirmed', every rating field except the match-level
+ * `rated` flag). getServerClient() works unauthenticated the same way it
+ * does for getPublicVenueRequestSummaryAction(); grants on the RPC itself
+ * are what actually gate this, not this action.
+ */
+export async function getPublicRankedMatchSummaryAction(matchId: string): Promise<ActionResult<PublicRankedMatchSummary | null>> {
+  const clientResult = await getServerClient();
+  if (!clientResult.ok) return { success: false, error: clientResult.error };
+  const supabase = clientResult.client;
+
+  try {
+    const summary = await getPublicMatchSummary(supabase, matchId);
+    return { success: true, data: summary };
+  } catch (error) {
+    logServerError("ranked.publicMatchSummary", error);
+    return { success: false, error: getFriendlyErrorMessage(error) };
   }
 }
