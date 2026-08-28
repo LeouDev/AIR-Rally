@@ -6,6 +6,8 @@ import type {
   PayoutTransferStatus,
 } from "@/lib/supabase/types";
 import { assertRowShape } from "@/lib/postgrestShape";
+import { localDateIn, payoutPeriodFor } from "@/lib/services/venueLocalPeriods";
+import type { PayoutPayslipEmailInput } from "@/lib/emails/payoutPayslipEmail";
 
 type Client = SupabaseClient<Database>;
 
@@ -361,4 +363,144 @@ export async function getOwnerBatchStatusBySettlement(
     }
   }
   return result;
+}
+
+function prettyDate(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-PH", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+/**
+ * Everything renderPayoutPayslipEmail() needs, for one venue's one
+ * transfer — the single source both sendPayslipPreviewAction() (admin
+ * preview) and the real send (payout_sent's branch in
+ * /api/webhooks/notification-created) call, so the two can never diverge.
+ * See payoutPayslipEmail.ts's own header comment for why that matters.
+ *
+ * Returns null on anything missing (transfer, batch, venue, or zero
+ * settlements) rather than throwing — the real-send caller must be able
+ * to fall back to the generic notification email without an exception
+ * taking down the whole webhook request; a payslip that fails to build
+ * must never swallow the "your money was sent" notification itself.
+ *
+ * PERIOD IS STATED HONESTLY, NEVER FORCED TO ONE WEEK. payoutPeriodFor()
+ * takes the earliest booking's own Sunday–Saturday week as `from` and the
+ * latest booking's own week as `to` — identical to one week in the
+ * ordinary case, but a batch containing a resurfaced older settlement
+ * (available_settlements_for_payout() only excludes settlements already
+ * in a non-cancelled/failed batch, which is exactly what lets an old one
+ * reappear) produces a true multi-week range instead of a label that
+ * quietly wouldn't match the batch's own contents.
+ */
+export async function getPayoutSummaryForTransfer(
+  supabase: Client,
+  transferId: string,
+  /**
+   * Defense in depth, not the actual boundary — RLS has no INSERT policy
+   * for anon/authenticated on `notifications` at all (every row comes from
+   * a SECURITY DEFINER trigger function), and the one function that ever
+   * writes a payout_sent row (attest_payout_settled(), migrations 092→093→
+   * 095→098→109) always looks up the recipient FROM the same transfer it's
+   * describing, in the same statement — there is no parameter or code path
+   * that lets user_id and the transfer diverge today. Checked anyway
+   * because this specific payload (a venue's revenue, bank reference, and
+   * masked account number) is worth a second gate against a future
+   * careless second writer, at the cost of one extra query. Omit this
+   * parameter for the admin preview path, where the recipient (the
+   * requesting admin) is never expected to be the venue's owner.
+   */
+  expectedOwnerId?: string,
+): Promise<PayoutPayslipEmailInput | null> {
+  const { data: transfer, error: transferError } = await supabase
+    .from("payout_transfers")
+    .select("id, payout_batch_id, venue_id, amount, provider_fee")
+    .eq("id", transferId)
+    .maybeSingle();
+  if (transferError) throw transferError;
+  if (!transfer) return null;
+
+  const { data: batch, error: batchError } = await supabase
+    .from("payout_batches")
+    .select("batch_reference")
+    .eq("id", transfer.payout_batch_id)
+    .maybeSingle();
+  if (batchError) throw batchError;
+  if (!batch) return null;
+
+  const { data: venue, error: venueError } = await supabase
+    .from("venues")
+    .select("name, timezone, owner_id")
+    .eq("id", transfer.venue_id)
+    .maybeSingle();
+  if (venueError) throw venueError;
+  if (!venue) return null;
+  if (expectedOwnerId && venue.owner_id !== expectedOwnerId) return null;
+
+  const { data: account, error: accountError } = await supabase
+    .from("venue_payment_accounts")
+    .select("bank_name, bank_account_number")
+    .eq("venue_id", transfer.venue_id)
+    .eq("provider", "paymongo")
+    .maybeSingle();
+  if (accountError) throw accountError;
+  if (!account?.bank_name || !account.bank_account_number) return null;
+
+  const { data: items, error: itemsError } = await supabase
+    .from("payout_batch_items")
+    .select("settlement_id")
+    .eq("payout_batch_id", transfer.payout_batch_id)
+    .eq("venue_id", transfer.venue_id);
+  if (itemsError) throw itemsError;
+  const settlementIds = (items ?? []).map((i) => i.settlement_id);
+  if (settlementIds.length === 0) return null;
+
+  const { data: settlements, error: settlementsError } = await supabase
+    .from("booking_settlements")
+    .select("gross_booking_amount, platform_fee, booking_id")
+    .in("id", settlementIds);
+  if (settlementsError) throw settlementsError;
+  if (!settlements || settlements.length === 0) return null;
+
+  const bookingIds = settlements.map((s) => s.booking_id).filter(Boolean);
+  const { data: bookingRows, error: bookingsError } = bookingIds.length
+    ? await supabase.from("bookings").select("id, start_time").in("id", bookingIds)
+    : { data: [], error: null };
+  if (bookingsError) throw bookingsError;
+  const startTimeById = new Map((bookingRows ?? []).map((b) => [b.id, b.start_time]));
+
+  const localDates = settlements
+    .map((s) => startTimeById.get(s.booking_id))
+    .filter((t): t is string => Boolean(t))
+    .map((t) => localDateIn(new Date(t), venue.timezone));
+  const period = payoutPeriodFor(localDates);
+  const periodLabel = period ? `${prettyDate(period.from)} – ${prettyDate(period.to)}` : "this period";
+
+  const courtEarningsTotal = settlements.reduce((sum, s) => sum + s.gross_booking_amount, 0);
+  const commissionTotal = settlements.reduce((sum, s) => sum + s.platform_fee, 0);
+  // Derived from the same settlement rows as the two lines above, NOT from
+  // transfer.amount — a second source for a figure the email displays
+  // right next to numbers computed from the first would only coincidentally
+  // reconcile. transfer.provider_fee is a genuine separate fact (what the
+  // provider actually charged) and is the only field pulled from the
+  // transfer row.
+  const amountTransferred = courtEarningsTotal - commissionTotal - transfer.provider_fee;
+
+  return {
+    venueName: venue.name,
+    periodLabel,
+    bookingCount: settlements.length,
+    courtEarningsTotal,
+    commissionTotal,
+    transferFee: transfer.provider_fee,
+    amountTransferred,
+    bankName: account.bank_name,
+    bankAccountLast4: account.bank_account_number.slice(-4),
+    reference: batch.batch_reference,
+    link: "https://air-rally.com/list-your-court/earnings",
+  };
 }

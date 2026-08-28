@@ -2,10 +2,8 @@
 
 import { z } from "zod";
 import { requireAdmin } from "@/lib/services/admin";
-import { getPayoutBatchDetail } from "@/lib/services/payouts";
-import { localDateIn, payoutPeriodFor } from "@/lib/services/venueLocalPeriods";
+import { getPayoutBatchDetail, getPayoutSummaryForTransfer } from "@/lib/services/payouts";
 import { renderPayoutPayslipEmail } from "@/lib/emails/payoutPayslipEmail";
-import { payoutTransferFeeCentavos } from "@/lib/payouts/transferFee";
 import { sendEmail } from "@/lib/services/email";
 import { getFriendlyErrorMessage, logServerError } from "@/lib/errors";
 import { getServerClient, type ActionResult } from "@/lib/actions/auth";
@@ -23,11 +21,24 @@ import { getServerClient, type ActionResult } from "@/lib/actions/auth";
  * on `completed` meaning something; spending the first one on a fiction is
  * the wrong way to open that ledger.
  *
- * WHAT THIS WRITES: nothing. No notification row, no transfer row, no
- * settlement change. It reads a batch, renders the same template the real
- * path renders, and calls sendEmail directly — deliberately bypassing the
- * notification-row mechanism, because writing a row is exactly the side
- * effect being avoided.
+ * ONE TEMPLATE, ONE DATA SOURCE, TWO CALLERS. This calls exactly the same
+ * getPayoutSummaryForTransfer() and renderPayoutPayslipEmail() the real
+ * send does (the `payout_sent` branch of
+ * /api/webhooks/notification-created) — see payoutPayslipEmail.ts's own
+ * comment for why that's a rule, not a preference: the prior version of
+ * this action rendered a template no real owner ever received, which is
+ * exactly the defect this rewrite closes.
+ *
+ * REQUIRES A RECORDED TRANSFER. getPayoutSummaryForTransfer() reads from
+ * payout_transfers, so there is nothing to preview until step 1 of the
+ * payout routine (recording the transfer) has run for this venue — before
+ * that, `getPayoutBatchDetail()`'s `transferId` is null and this returns a
+ * clear error rather than fabricating figures from batch items alone.
+ *
+ * WHAT THIS WRITES: nothing. No notification row, no settlement change —
+ * it reads existing rows and calls sendEmail directly, deliberately
+ * bypassing the notification-row mechanism, because writing a row is
+ * exactly the side effect being avoided.
  *
  * WHO IT REACHES: the requesting admin's own address, taken from their
  * session and never from a parameter. A preview that could be addressed
@@ -72,110 +83,24 @@ export async function sendPayslipPreviewAction(input: {
     const transfer = detail.transfers[0];
     if (!transfer)
       return { success: false, error: "This batch has no venues to preview." };
-
-    const venueItems = detail.items.filter(
-      (i) => i.venueId === transfer.venueId,
-    );
-    const bookingIds = venueItems.map((i) => i.bookingId).filter(Boolean);
-
-    const { data: bookingRows } = bookingIds.length
-      ? await supabase
-          .from("bookings")
-          .select("id, start_time, courts(name, venues(timezone))")
-          .in("id", bookingIds)
-      : { data: [] };
-
-    type Row = {
-      id: string;
-      start_time: string;
-      courts: { name: string; venues: { timezone: string } | null } | null;
-    };
-    const rows = (bookingRows ?? []) as unknown as Row[];
-    const tz = rows[0]?.courts?.venues?.timezone ?? "Asia/Manila";
-    const period = payoutPeriodFor(
-      rows.map((r) => localDateIn(new Date(r.start_time), tz)),
-    );
-
-    const prettyDate = (ymd: string) => {
-      const [y, m, d] = ymd.split("-").map(Number);
-      return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-PH", {
-        timeZone: "UTC",
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      });
-    };
-    const weekLabel = period
-      ? `${prettyDate(period.from)} – ${prettyDate(period.to)}`
-      : "this period";
-
-    const byBooking = new Map(rows.map((r) => [r.id, r]));
-    // The settlement carries the commission, so line items come from the
-    // batch's own settlements rather than being recomputed — the same
-    // reason the real path fetches by batch: figures that reconcile with
-    // the ledger by construction, not by two calculations agreeing.
-    const { data: settlementRows } = await supabase
-      .from("booking_settlements")
-      .select("booking_id, gross_booking_amount, platform_fee, venue_amount")
-      .in(
-        "id",
-        venueItems.map((i) => i.settlementId),
-      );
-    type SRow = {
-      booking_id: string;
-      gross_booking_amount: number;
-      platform_fee: number;
-      venue_amount: number;
-    };
-    const settlements = (settlementRows ?? []) as SRow[];
-
-    const items = settlements.map((s) => {
-      const booking = byBooking.get(s.booking_id);
+    if (!transfer.transferId)
       return {
-        date: booking
-          ? new Date(booking.start_time).toLocaleDateString("en-PH", {
-              timeZone: tz,
-              weekday: "short",
-              day: "numeric",
-              month: "short",
-            })
-          : "—",
-        courtName: booking?.courts?.name ?? "Court",
-        confirmationCode:
-          venueItems.find((i) => i.bookingId === s.booking_id)
-            ?.confirmationCode ?? "—",
-        courtPrice: s.gross_booking_amount,
-        earned: s.venue_amount,
+        success: false,
+        error: "Record this venue's transfer first, then preview.",
       };
-    });
 
-    const totalCourtPrice = settlements.reduce(
-      (sum, s) => sum + s.gross_booking_amount,
-      0,
-    );
-    const totalCommission = settlements.reduce(
-      (sum, s) => sum + s.platform_fee,
-      0,
-    );
-    const totalEarned = settlements.reduce((sum, s) => sum + s.venue_amount, 0);
-    const transferFee = payoutTransferFeeCentavos();
+    const summary = await getPayoutSummaryForTransfer(supabase, transfer.transferId);
+    if (!summary)
+      return {
+        success: false,
+        error: "Couldn't build a preview for this transfer — check its bank details and settlements.",
+      };
 
-    const html = renderPayoutPayslipEmail({
-      venueName: transfer.venueName,
-      weekLabel,
-      batchReference: detail.batch.batch_reference,
-      items,
-      totalCourtPrice,
-      totalCommission,
-      totalEarned,
-      transferFee,
-      amountTransferred: totalEarned - transferFee,
-      link: "https://air-rally.com/list-your-court/earnings",
-    });
+    const html = renderPayoutPayslipEmail(summary);
 
     const sent = await sendEmail({
       to: user.email,
-      subject: `[PREVIEW] Your AIR/Rally payout for ${weekLabel}`,
+      subject: `[PREVIEW] Your AIR/Rally payout for ${summary.periodLabel}`,
       html,
     });
     if (!sent)

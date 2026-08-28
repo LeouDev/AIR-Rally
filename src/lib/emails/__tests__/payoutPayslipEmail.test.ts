@@ -7,29 +7,26 @@ import { renderPayoutPayslipEmail, type PayoutPayslipEmailInput } from "../payou
  * single production send prove different things — how it looks, and that
  * the wiring works — and neither of those would catch an arithmetic error,
  * because a wrong number renders exactly as neatly as a right one.
- */
-
-/**
- * A realistic week: three bookings, PHP 400 / 600 / 400 court prices at 5%
- * commission. Chosen so the maths is hand-checkable against the Venue Owner
- * Agreement's own §3.2 worked example (a PHP 400.00 court price yields a
- * PHP 20.00 commission and PHP 380.00 to the venue).
+ *
+ * SUMMARY SHAPE, NOT ITEMIZED — see payoutPayslipEmail.ts's own header
+ * comment for why: the itemized version could be clipped by Gmail past
+ * ~79 bookings, silently hiding the totals below the fold for exactly the
+ * busiest venues. This fixture uses the same underlying figures as the
+ * version it replaces, so both are hand-checkable against the same
+ * Venue Owner Agreement §3.2 worked example.
  */
 function input(overrides: Partial<PayoutPayslipEmailInput> = {}): PayoutPayslipEmailInput {
   return {
     venueName: "Banilad Pickle Club",
-    weekLabel: "23–29 August 2026",
-    batchReference: "PB-000002",
-    items: [
-      { date: "Sun 23 Aug", courtName: "Court 1", confirmationCode: "AR7K2M", courtPrice: 40000, earned: 38000 },
-      { date: "Wed 26 Aug", courtName: "Court 2", confirmationCode: "AR9QX4", courtPrice: 60000, earned: 57000 },
-      { date: "Sat 29 Aug", courtName: "Court 1", confirmationCode: "ARB31P", courtPrice: 40000, earned: 38000 },
-    ],
-    totalCourtPrice: 140000,
-    totalCommission: 7000,
-    totalEarned: 133000,
+    periodLabel: "23–29 August 2026",
+    bookingCount: 3,
+    courtEarningsTotal: 140000,
+    commissionTotal: 7000,
     transferFee: 1000,
     amountTransferred: 132000,
+    bankName: "BPI",
+    bankAccountLast4: "1234",
+    reference: "PB-000002",
     link: "https://air-rally.com/list-your-court/earnings",
     ...overrides,
   };
@@ -43,22 +40,14 @@ describe("renderPayoutPayslipEmail — the money", () => {
    * most damaging thing that can appear on a document telling someone what
    * they earned — and it is invisible to per-line assertions.
    */
-  it("reconciles: court prices − commission − transfer fee = transferred", () => {
+  it("reconciles: court earnings − commission − transfer fee = transferred", () => {
     const i = input();
-    expect(i.totalCourtPrice - i.totalCommission).toBe(i.totalEarned);
-    expect(i.totalEarned - i.transferFee).toBe(i.amountTransferred);
-    expect(i.totalCourtPrice - i.totalCommission - i.transferFee).toBe(i.amountTransferred);
+    expect(i.courtEarningsTotal - i.commissionTotal - i.transferFee).toBe(i.amountTransferred);
   });
 
-  it("line items sum to the stated totals, so the breakdown explains the total", () => {
+  it("the commission is 5% of court earnings, matching the agreement", () => {
     const i = input();
-    expect(i.items.reduce((s, x) => s + x.courtPrice, 0)).toBe(i.totalCourtPrice);
-    expect(i.items.reduce((s, x) => s + x.earned, 0)).toBe(i.totalEarned);
-  });
-
-  it("the commission is 5% of court prices, matching the agreement", () => {
-    const i = input();
-    expect(i.totalCommission).toBe(Math.round(i.totalCourtPrice * 0.05));
+    expect(i.commissionTotal).toBe(Math.round(i.courtEarningsTotal * 0.05));
   });
 
   it("renders centavos as pesos, never the raw integer", () => {
@@ -68,27 +57,47 @@ describe("renderPayoutPayslipEmail — the money", () => {
     expect(html).not.toContain("₱132,000.00");
   });
 
-  it("shows all four money lines, each separately labelled", () => {
+  /**
+   * The CTO's own first draft dropped this line — omitting AIR/Rally's own
+   * cut from a summary reads as hiding it, and the itemized version this
+   * replaces always showed it. Kept deliberately, checked deliberately.
+   */
+  it("shows all four money lines, each separately labelled, including our own commission", () => {
     const html = renderPayoutPayslipEmail(input());
-    expect(html).toContain("Court prices");
+    expect(html).toContain("Court earnings");
     expect(html).toContain("AIR/Rally commission (5%)");
     expect(html).toContain("Bank transfer fee");
-    expect(html).toContain("Transferred to your bank");
-    expect(html).toContain("₱1,400.00"); // court prices
+    expect(html).toContain("Sent to your bank");
+    expect(html).toContain("₱1,400.00"); // court earnings
     expect(html).toContain("₱70.00"); // commission
-    expect(html).toContain("₱1,330.00"); // earnings
     expect(html).toContain("₱10.00"); // fee
   });
 
-  it("renders every booking as its own line, not a summary", () => {
+  it("names the venue and the true booking count in the summary heading", () => {
     const html = renderPayoutPayslipEmail(input());
-    for (const code of ["AR7K2M", "AR9QX4", "ARB31P"]) expect(html).toContain(code);
+    // The heading is uppercased by CSS (text-transform), not in the markup
+    // itself — asserting the raw text keeps this independent of styling.
+    expect(html).toContain("Banilad Pickle Club");
     expect(html).toContain("3 bookings");
   });
 
-  it("says 1 booking, not 1 bookings", () => {
-    const html = renderPayoutPayslipEmail(input({ items: [input().items[0]] }));
+  it("says 1 booking, not 1 bookings, in both the heading and the CTA", () => {
+    const html = renderPayoutPayslipEmail(input({ bookingCount: 1 }));
     expect(html).toContain("1 booking<");
+    expect(html).toContain("See all 1 booking<");
+  });
+
+  it("the CTA names the true booking count, pointing at the itemized dashboard", () => {
+    const html = renderPayoutPayslipEmail(input());
+    expect(html).toContain("See all 3 bookings");
+    expect(html).toContain("https://air-rally.com/list-your-court/earnings");
+  });
+
+  it("shows the destination bank, masked account, and AIR/Rally's own reference", () => {
+    const html = renderPayoutPayslipEmail(input());
+    expect(html).toContain("to BPI");
+    expect(html).toContain("&bull;&bull;&bull;&bull;1234");
+    expect(html).toContain("ref PB-000002");
   });
 });
 
@@ -114,22 +123,31 @@ describe("renderPayoutPayslipEmail — what it may claim", () => {
     expect(renderPayoutPayslipEmail(input())).toContain("once per payout");
   });
 
-  it("names the week it covers, matching the clause's window", () => {
+  /**
+   * Never forced to a Sunday–Saturday shape — whatever periodLabel the
+   * caller computed (getPayoutSummaryForTransfer) is rendered verbatim,
+   * including a true multi-week range when a batch spans more than one
+   * week. See payoutPayslipEmail.ts's own comment on why.
+   */
+  it("states whatever period it's given, verbatim, without reshaping it", () => {
     expect(renderPayoutPayslipEmail(input())).toContain("23–29 August 2026");
+    expect(renderPayoutPayslipEmail(input({ periodLabel: "9 August 2026 – 29 August 2026" }))).toContain(
+      "9 August 2026 – 29 August 2026"
+    );
   });
 });
 
 describe("renderPayoutPayslipEmail — safety", () => {
-  it("escapes owner-entered venue and court names", () => {
+  it("escapes owner-entered venue and bank names", () => {
     const html = renderPayoutPayslipEmail(
       input({
         venueName: '<script>alert("x")</script>',
-        items: [{ ...input().items[0], courtName: "<b>Court</b>" }],
+        bankName: "<b>Sketchy Bank</b>",
       })
     );
     expect(html).not.toContain("<script>");
     expect(html).toContain("&lt;script&gt;");
-    expect(html).toContain("&lt;b&gt;Court&lt;/b&gt;");
+    expect(html).toContain("&lt;b&gt;Sketchy Bank&lt;/b&gt;");
   });
 
   it("declares dark-mode support so clients do not invert it blindly", () => {
@@ -148,10 +166,8 @@ describe("renderPayoutPayslipEmail — safety", () => {
     expect(html).toContain('bgcolor="#e6dac6"');
   });
 
-  it("handles an empty week without rendering a broken table", () => {
-    const html = renderPayoutPayslipEmail(
-      input({ items: [], totalCourtPrice: 0, totalCommission: 0, totalEarned: 0, amountTransferred: -1000 })
-    );
+  it("stays a well-formed document at the edges — zero bookings, a negative transfer", () => {
+    const html = renderPayoutPayslipEmail(input({ bookingCount: 0, amountTransferred: -1000 }));
     expect(html).toContain("0 bookings");
     expect(html).toContain("<!doctype html>");
   });

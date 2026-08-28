@@ -6,18 +6,21 @@ import { createServiceRoleClient } from "../../../../../lib/supabase/serviceRole
 import { sendEmail } from "../../../../../lib/services/email";
 import { getBookingById } from "../../../../../lib/services/bookings";
 import { getCourtDisplayInfo } from "../../../../../lib/services/courts";
+import { getPayoutSummaryForTransfer } from "../../../../../lib/services/payouts";
 
 // Relative paths for jest.mock — see MEMORY.md (air-rally-jest-mock-colon-path-bug).
 jest.mock("../../../../../lib/supabase/serviceRole", () => ({ createServiceRoleClient: jest.fn() }));
 jest.mock("../../../../../lib/services/email", () => ({ sendEmail: jest.fn() }));
 jest.mock("../../../../../lib/services/bookings", () => ({ getBookingById: jest.fn() }));
 jest.mock("../../../../../lib/services/courts", () => ({ getCourtDisplayInfo: jest.fn() }));
+jest.mock("../../../../../lib/services/payouts", () => ({ getPayoutSummaryForTransfer: jest.fn() }));
 // calculateAmountPaid, formatVenueRange, isCreditOnly are pure — left real.
 
 const mockCreateServiceRoleClient = createServiceRoleClient as jest.MockedFunction<typeof createServiceRoleClient>;
 const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
 const mockGetBookingById = getBookingById as jest.MockedFunction<typeof getBookingById>;
 const mockGetCourtDisplayInfo = getCourtDisplayInfo as jest.MockedFunction<typeof getCourtDisplayInfo>;
+const mockGetPayoutSummaryForTransfer = getPayoutSummaryForTransfer as jest.MockedFunction<typeof getPayoutSummaryForTransfer>;
 
 const SECRET = "test-webhook-secret";
 const ORIGINAL_ENV = process.env;
@@ -96,6 +99,31 @@ const RECEIPT_DISPLAY = {
   venueTimezone: "Asia/Manila",
   venuePaymongoAccountId: null,
   venuePaymongoActivationStatus: null,
+};
+
+const PAYOUT_SENT_PAYLOAD = {
+  ...INSERT_PAYLOAD,
+  record: {
+    ...INSERT_PAYLOAD.record,
+    type: "payout_sent",
+    title: "Payout sent",
+    message: "₱1,320.00 has been sent to your bank for Banilad Pickle Club.",
+    link_url: "/list-your-court/earnings?transfer=22222222-2222-4222-8222-222222222222",
+  },
+};
+
+const PAYOUT_SUMMARY = {
+  venueName: "Banilad Pickle Club",
+  periodLabel: "23–29 August 2026",
+  bookingCount: 3,
+  courtEarningsTotal: 140000,
+  commissionTotal: 7000,
+  transferFee: 1000,
+  amountTransferred: 132000,
+  bankName: "BPI",
+  bankAccountLast4: "1234",
+  reference: "PB-000002",
+  link: "https://air-rally.com/list-your-court/earnings",
 };
 
 beforeEach(() => {
@@ -289,6 +317,73 @@ describe("POST /api/webhooks/notification-created", () => {
       );
 
       expect(mockGetBookingById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("payout_sent payslip", () => {
+    it("builds the real summary payslip — not the generic template", async () => {
+      mockGetUserById({ email: "owner@example.test" });
+      mockGetPayoutSummaryForTransfer.mockResolvedValue(PAYOUT_SUMMARY as never);
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(fakeRequest(PAYOUT_SENT_PAYLOAD));
+
+      expect(mockGetPayoutSummaryForTransfer).toHaveBeenCalledWith(
+        expect.anything(),
+        "22222222-2222-4222-8222-222222222222",
+        "user-1"
+      );
+      const html = mockSendEmail.mock.calls[0][0].html;
+      expect(html).toContain("Banilad Pickle Club");
+      expect(html).toContain("Sent to your bank");
+      expect(html).toContain("AIR/Rally commission (5%)");
+      // Not the generic template's copy.
+      expect(html).not.toContain("Open in AIR/Rally");
+    });
+
+    it("falls back to the generic template when the transfer/summary can't be built", async () => {
+      mockGetUserById({ email: "owner@example.test" });
+      mockGetPayoutSummaryForTransfer.mockResolvedValue(null);
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(fakeRequest(PAYOUT_SENT_PAYLOAD));
+
+      expect(mockSendEmail.mock.calls[0][0].html).toContain("Open in AIR/Rally");
+    });
+
+    it("falls back to the generic template when the summary lookup throws — a payslip failure must never swallow the notification", async () => {
+      mockGetUserById({ email: "owner@example.test" });
+      mockGetPayoutSummaryForTransfer.mockRejectedValue(new Error("db exploded"));
+      mockSendEmail.mockResolvedValue(true);
+
+      const response = await POST(fakeRequest(PAYOUT_SENT_PAYLOAD));
+
+      expect(response.status).toBe(200);
+      expect(mockSendEmail.mock.calls[0][0].html).toContain("Open in AIR/Rally");
+    });
+
+    it("falls back to the generic template when link_url has no transfer id", async () => {
+      mockGetUserById({ email: "owner@example.test" });
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(fakeRequest({ ...PAYOUT_SENT_PAYLOAD, record: { ...PAYOUT_SENT_PAYLOAD.record, link_url: "/list-your-court/earnings" } }));
+
+      expect(mockGetPayoutSummaryForTransfer).not.toHaveBeenCalled();
+      expect(mockSendEmail.mock.calls[0][0].html).toContain("Open in AIR/Rally");
+    });
+
+    it("never attempts a payslip for a non-payout_sent type, even with a matching-shaped link_url", async () => {
+      mockGetUserById({ email: "owner@example.test" });
+      mockSendEmail.mockResolvedValue(true);
+
+      await POST(
+        fakeRequest({
+          ...INSERT_PAYLOAD,
+          record: { ...INSERT_PAYLOAD.record, link_url: "/list-your-court/earnings?transfer=22222222-2222-4222-8222-222222222222" },
+        })
+      );
+
+      expect(mockGetPayoutSummaryForTransfer).not.toHaveBeenCalled();
     });
   });
 });

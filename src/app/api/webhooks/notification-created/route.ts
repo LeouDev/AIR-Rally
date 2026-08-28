@@ -3,9 +3,11 @@ import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { sendEmail } from "@/lib/services/email";
 import { renderBookingReceiptEmail } from "@/lib/emails/bookingReceiptEmail";
 import { renderSignupWelcomeEmail } from "@/lib/emails/signupWelcomeEmail";
+import { renderPayoutPayslipEmail } from "@/lib/emails/payoutPayslipEmail";
 import { notificationHref, displayMessage } from "@/lib/notificationRoutes";
 import { getBookingById } from "@/lib/services/bookings";
 import { getCourtDisplayInfo } from "@/lib/services/courts";
+import { getPayoutSummaryForTransfer } from "@/lib/services/payouts";
 import { calculateAmountPaid } from "@/lib/services/bookingFee";
 import { formatVenueRange } from "@/lib/bookingTime";
 import { isCreditOnly } from "@/lib/paymentState";
@@ -114,7 +116,9 @@ export async function POST(request: Request): Promise<Response> {
         ? await tryBuildBookingReceiptEmail(supabase, notification.link_url, link)
         : notification.type === "email_confirmed"
           ? renderSignupWelcomeEmail(siteUrl)
-          : null;
+          : notification.type === "payout_sent"
+            ? await tryBuildPayoutPayslipEmail(supabase, notification.link_url, notification.user_id)
+            : null;
     const subject = notification.type === "email_confirmed" ? "You're ready to play on AIR/Rally" : notification.title;
 
     const sent = await sendEmail({
@@ -191,6 +195,48 @@ async function tryBuildBookingReceiptEmail(
     });
   } catch (error) {
     logServerError("notificationWebhook.buildReceipt", error);
+    return null;
+  }
+}
+
+/**
+ * The itemized-summary payslip for a payout_sent notification — see
+ * payoutPayslipEmail.ts's own header comment for what it shows and why
+ * it's a summary rather than a per-booking list. Same shape as
+ * tryBuildBookingReceiptEmail() above: parse an id out of link_url
+ * (attest_payout_settled() stamps '/list-your-court/earnings?transfer=
+ * <uuid>' — migration 20260810000109), look it up, return null on ANY
+ * failure so the caller falls back to the generic template. A payslip
+ * that fails to build must never swallow the "your money was sent"
+ * notification itself — the plain notification row already exists by
+ * the time this route runs regardless of what happens here.
+ *
+ * getPayoutSummaryForTransfer() is the SAME function
+ * sendPayslipPreviewAction() calls for the admin preview — one data
+ * source, one render function, both callers. See that function's own
+ * comment for why that's a rule, not a preference.
+ *
+ * Passes recipientUserId through as getPayoutSummaryForTransfer()'s
+ * defense-in-depth entitlement check — see that function's own comment.
+ * Not the actual boundary (there's no client-reachable way to write a
+ * mismatched payout_sent row today), but this is the one path that emails
+ * a venue's revenue, bank reference, and masked account number, and the
+ * check costs one query.
+ */
+async function tryBuildPayoutPayslipEmail(
+  supabase: SupabaseClient<Database>,
+  linkUrl: string | null,
+  recipientUserId: string
+): Promise<string | null> {
+  const transferId = linkUrl?.match(/[?&]transfer=([0-9a-f-]{36})/i)?.[1];
+  if (!transferId) return null;
+
+  try {
+    const summary = await getPayoutSummaryForTransfer(supabase, transferId, recipientUserId);
+    if (!summary) return null;
+    return renderPayoutPayslipEmail(summary);
+  } catch (error) {
+    logServerError("notificationWebhook.buildPayslip", error);
     return null;
   }
 }

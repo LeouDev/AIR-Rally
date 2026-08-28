@@ -1,67 +1,79 @@
 /**
  * Payout payslip — what a venue owner receives when a transfer for their
- * week's earnings is attested as sent.
+ * earnings is attested as sent.
  *
- * A RE-SKIN OF THE BOOKING RECEIPT, NOT A REUSE OF IT.
+ * SUMMARY, NOT ITEMIZED — MEASURED, NOT ASSUMED. The prior version listed
+ * every booking as its own row. Rendered from real code and measured: an
+ * 11KB fixed shell plus ~1,153 bytes per booking. Gmail clips around
+ * 102KB, which is 79 bookings — reachable by exactly the venue this
+ * feature most needs to work for (multiple courts, most of the day,
+ * seven days). Past the clip point, everything below the fold disappears,
+ * including the totals. This version is fixed height at any booking
+ * count: 23 or 230, it never gets clipped. The itemized detail still
+ * exists — see `link`, which points at the owner's earnings dashboard,
+ * where every booking behind the total is listed individually
+ * (`listOwnerSettlements` / `SettlementPanel`).
  *
- * renderBookingReceiptEmail() takes seven scalars describing ONE booking.
- * A payslip needs a date range, an arbitrary number of line items, and four
- * separate money lines. None of that fits that input shape, so this shares
- * the design language — palette, structure, typography, the navy header
- * with the orange rule — while being its own template.
+ * ONE TEMPLATE, ONE CALLER SHAPE, TWO CALLERS. `sendPayslipPreviewAction()`
+ * (admin preview) and the real send wired through
+ * `/api/webhooks/notification-created` (see that route's `payout_sent`
+ * branch) both call `getPayoutSummaryForTransfer()` for the data and this
+ * function for the render. If the preview and the live email could
+ * diverge, the preview would be theatre rather than evidence of what an
+ * owner actually receives — which is exactly what happened with the
+ * itemized version this replaces (see [[payslip-never-actually-sent]]).
  *
- * The live booking receipt is deliberately NOT refactored to extract a
- * shared shell. It works and it goes to real customers; a de-duplication
- * that risks a working email to save some markup is the wrong trade to make
- * in the same change that introduces a new one. If the duplication becomes
- * a maintenance problem, extracting the shell later is a small, isolated
- * change that can be verified on its own.
+ * A RE-SKIN OF THE BOOKING RECEIPT, NOT A REUSE OF IT — same reasoning as
+ * before: the design language (palette, structure, typography, the navy
+ * header with the orange rule) is shared; the markup is not, because a
+ * payslip's shape (multiple money lines, a bank/reference line) doesn't
+ * fit a single booking's seven scalars. Not extracting a shared shell for
+ * the same reason as always: the live receipt already works and reaches
+ * real customers, and a de-duplication that risks it to save markup is
+ * the wrong trade to make in the same change that reworks a second email.
  *
- * DARK MODE: inherits the existing approach rather than inventing a second.
- * The `color-scheme` / `supported-color-schemes` meta tags declare that this
- * email handles both, which stops clients like Apple Mail from aggressively
- * inverting it, and every surface carries an explicit background colour
- * (both `bgcolor` and inline `background-color`) with an explicit text
- * colour on top. A client that inverts anyway then flips a known pair
- * rather than leaving text on a background it never set.
+ * DARK MODE: same approach as every other transactional email here — the
+ * `color-scheme` / `supported-color-schemes` meta tags declare both, and
+ * every surface carries an explicit background AND text colour, so a
+ * client that inverts anyway flips a known pair rather than leaving text
+ * on a background it never set.
  *
- * WHAT THIS EMAIL MAY AND MAY NOT CLAIM
+ * WHAT THIS EMAIL MAY AND MAY NOT CLAIM. It is sent when an admin attests
+ * that PayMongo's report shows the transfer went out — NOT when the
+ * venue's bank has credited it. Owner Agreement §3.12 commits AIR/Rally
+ * to sending on time, not to when a bank settles. So the wording says
+ * "sent"/"on its way", never "delivered", "received", or "in your
+ * account".
  *
- * It is sent when an admin attests that PayMongo's report shows the
- * transfer went out — NOT when the venue's bank has credited it. Owner
- * Agreement §3.12 commits AIR/Rally to sending on time, not to when a bank
- * settles. So the wording says "sent"/"on its way", never "delivered",
- * "received", or "in your account". A payslip that overclaims is a support
- * message the day a bank takes an extra day.
+ * THE PERIOD IS STATED HONESTLY, WHATEVER IT ACTUALLY IS. `periodLabel` is
+ * not forced into a Sunday–Saturday shape — it's whatever range the
+ * batch's own bookings actually span (see `getPayoutSummaryForTransfer`).
+ * A batch built entirely from the usual week reads as one week, same as
+ * always. A batch containing a resurfaced older settlement reads as the
+ * true multi-week range rather than a label that quietly doesn't match
+ * its own contents. An honest range never contradicts itself; a fixed
+ * label eventually does.
  */
-
-export type PayslipLineItem = {
-  /** Court-time date, venue-local — the basis a venue reconciles against. */
-  date: string;
-  courtName: string;
-  confirmationCode: string;
-  /** What the customer paid for the court, in centavos. */
-  courtPrice: number;
-  /** What the venue earned from it after commission, in centavos. */
-  earned: number;
-};
 
 export type PayoutPayslipEmailInput = {
   venueName: string;
-  /** Sunday–Saturday, venue-local — the same window as the clause and the transfer remark. */
-  weekLabel: string;
-  batchReference: string;
-  items: PayslipLineItem[];
-  /** Sum of court prices, in centavos. */
-  totalCourtPrice: number;
-  /** AIR/Rally's 5% commission across the week, in centavos. */
-  totalCommission: number;
-  /** Sum of what the venue earned — totalCourtPrice minus totalCommission. */
-  totalEarned: number;
-  /** The provider's per-transfer fee, in centavos. */
+  /** The batch's own true date range, venue-local — see this file's header comment on why it is never forced to one week. */
+  periodLabel: string;
+  bookingCount: number;
+  /** Sum of what customers paid, in centavos. */
+  courtEarningsTotal: number;
+  /** AIR/Rally's 5% commission across the batch, in centavos. Never omitted — dropping our own cut from a summary reads as hiding it. */
+  commissionTotal: number;
+  /** The provider's per-transfer fee, in centavos — charged once per payout, not per booking. */
   transferFee: number;
-  /** What was actually sent — totalEarned minus transferFee. */
+  /** courtEarningsTotal minus commissionTotal minus transferFee — what was actually sent. */
   amountTransferred: number;
+  bankName: string;
+  /** Last 4 digits only — never the full account number in an email. */
+  bankAccountLast4: string;
+  /** AIR/Rally's own reference_number (payout_transfers), not PayMongo's provider id — the one a venue can quote back to support. */
+  reference: string;
+  /** The owner's earnings dashboard — where every booking behind this total is listed individually. */
   link: string;
 };
 
@@ -81,28 +93,11 @@ function peso(centavos: number): string {
 
 export function renderPayoutPayslipEmail(input: PayoutPayslipEmailInput): string {
   const venueName = escapeHtml(input.venueName);
-  const weekLabel = escapeHtml(input.weekLabel);
-  const batchReference = escapeHtml(input.batchReference);
-
-  // Venue and court names are owner-entered text, so every interpolated
-  // value is escaped — the same discipline bookingReceiptEmail documents,
-  // applied here including to fields that happen to be server-formatted.
-  const rows = input.items
-    .map(
-      (item) => `
-                <tr>
-                  <td class="rowcell" style="padding:10px 0; border-bottom:1px solid #e6dac6; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f;">
-                    <span style="color:#0f2747; font-weight:bold; white-space:nowrap;">${escapeHtml(item.date)}</span><br>
-                    ${escapeHtml(item.courtName)}
-                    <span style="font-family:'Courier New',Courier,Arial,sans-serif; font-size:11px; color:#6b7a8f;">&nbsp;${escapeHtml(item.confirmationCode)}</span>
-                  </td>
-                  <td align="right" width="1%" class="money" style="padding:10px 0; border-bottom:1px solid #e6dac6; font-family:'Courier New',Courier,Arial,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#6b7a8f; white-space:nowrap;">${peso(item.courtPrice)}</td>
-                  <td align="right" width="1%" class="money" style="padding:10px 0 10px 12px; border-bottom:1px solid #e6dac6; font-family:'Courier New',Courier,Arial,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; font-weight:bold; color:#0f2747; white-space:nowrap;">${peso(item.earned)}</td>
-                </tr>`
-    )
-    .join("");
-
-  const bookingCount = input.items.length;
+  const periodLabel = escapeHtml(input.periodLabel);
+  const bankName = escapeHtml(input.bankName);
+  const bankAccountLast4 = escapeHtml(input.bankAccountLast4);
+  const reference = escapeHtml(input.reference);
+  const bookingCount = input.bookingCount;
 
   return `<!doctype html>
 <html lang="en"><head>
@@ -110,7 +105,7 @@ export function renderPayoutPayslipEmail(input: PayoutPayslipEmailInput): string
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
-<title>Your AIR/Rally payout for ${weekLabel}</title>
+<title>Your AIR/Rally payout for ${periodLabel}</title>
 <!--[if mso]>
 <xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml>
 <![endif]-->
@@ -131,7 +126,7 @@ export function renderPayoutPayslipEmail(input: PayoutPayslipEmailInput): string
 </style>
 </head>
 <body style="margin:0; padding:0; background-color:#e6dac6; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;">
-<span style="display:none !important; visibility:hidden; opacity:0; color:transparent; height:0; width:0; overflow:hidden; mso-hide:all; font-size:1px; line-height:1px;">${peso(input.amountTransferred)} sent to ${venueName} for ${weekLabel}.</span>
+<span style="display:none !important; visibility:hidden; opacity:0; color:transparent; height:0; width:0; overflow:hidden; mso-hide:all; font-size:1px; line-height:1px;">${peso(input.amountTransferred)} sent to ${venueName} for ${periodLabel}.</span>
 
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#e6dac6" style="background-color:#e6dac6;">
 <tbody><tr><td align="center" style="padding:24px 12px;">
@@ -162,7 +157,7 @@ export function renderPayoutPayslipEmail(input: PayoutPayslipEmailInput): string
     </tr>
     <tr>
       <td class="pad" style="padding:16px 32px 28px 32px; font-family:Arial,Helvetica,sans-serif; font-size:16px; line-height:26px; mso-line-height-rule:exactly; color:#2b3a4f;">
-        <p style="margin:0;">Your earnings for <strong style="color:#0f2747;">${weekLabel}</strong> have been sent to your bank. Banks usually credit transfers the same or next banking day.</p>
+        <p style="margin:0;">Your earnings for <strong style="color:#0f2747;">${periodLabel}</strong> have been sent to your bank. Banks usually credit transfers the same or next banking day.</p>
       </td>
     </tr>
 
@@ -170,10 +165,10 @@ export function renderPayoutPayslipEmail(input: PayoutPayslipEmailInput): string
       <td class="pad" style="padding:0 32px 28px 32px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#0f2747" style="background-color:#0f2747;">
           <tbody><tr>
-            <td align="center" style="padding:22px 18px;">
+            <td style="padding:20px 24px;">
               <p style="margin:0 0 8px 0; font-family:'Courier New',Courier,Arial,sans-serif; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1.5px; color:#f3700f; text-transform:uppercase;">Transferred</p>
-              <p style="margin:0; font-family:Arial,Helvetica,sans-serif; font-size:30px; line-height:34px; mso-line-height-rule:exactly; font-weight:bold; letter-spacing:-0.5px; color:#ffffff;">${peso(input.amountTransferred)}</p>
-              <p style="margin:8px 0 0 0; font-family:'Courier New',Courier,Arial,sans-serif; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1px; color:#a9b6c7;">${batchReference}</p>
+              <p style="margin:0; font-family:'Courier New',Courier,Arial,sans-serif; font-size:28px; line-height:32px; mso-line-height-rule:exactly; font-weight:bold; color:#ffffff;">${peso(input.amountTransferred)}</p>
+              <p style="margin:8px 0 0 0; font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:18px; mso-line-height-rule:exactly; color:#a9b6c7;">to ${bankName} &bull;&bull;&bull;&bull;${bankAccountLast4} &middot; ref ${reference}</p>
             </td>
           </tr>
         </tbody></table>
@@ -182,41 +177,26 @@ export function renderPayoutPayslipEmail(input: PayoutPayslipEmailInput): string
 
     <tr>
       <td class="pad" style="padding:0 32px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#f6f1e8" style="background-color:#f6f1e8; border:1px solid #d8c9ab;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#ffffff" style="background-color:#ffffff; border:1px solid #e6dac6;">
           <tbody>
-          <tr><td colspan="3" style="padding:18px 20px 6px 20px; font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:1px; font-weight:bold; color:#0f2747; text-transform:uppercase;">${venueName} &mdash; ${bookingCount} booking${bookingCount === 1 ? "" : "s"}</td></tr>
           <tr>
-            <td colspan="3" class="card" style="padding:0 20px 18px 20px;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
-                <tbody>
-                <tr>
-                  <td style="padding:0 0 6px 0; font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1px; color:#6b7a8f; text-transform:uppercase; white-space:nowrap;" class="colhead">Court time</td>
-                  <td align="right" style="padding:0 0 6px 0; font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1px; color:#6b7a8f; text-transform:uppercase; white-space:nowrap;" class="colhead">Price</td>
-                  <td align="right" style="padding:0 0 6px 12px; font-family:Arial,Helvetica,sans-serif; font-size:11px; line-height:14px; mso-line-height-rule:exactly; letter-spacing:1px; color:#6b7a8f; text-transform:uppercase; white-space:nowrap;" class="colhead">You earned</td>
-                </tr>${rows}
-                <tr>
-                  <td colspan="2" style="padding:14px 0 0 0; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f;">Court prices</td>
-                  <td align="right" style="padding:14px 0 0 12px; font-family:'Courier New',Courier,Arial,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#0f2747; white-space:nowrap;">${peso(input.totalCourtPrice)}</td>
-                </tr>
-                <tr>
-                  <td colspan="2" style="padding:6px 0 0 0; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f;">AIR/Rally commission (5%)</td>
-                  <td align="right" style="padding:6px 0 0 12px; font-family:'Courier New',Courier,Arial,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#0f2747;">&minus;${peso(input.totalCommission)}</td>
-                </tr>
-                <tr>
-                  <td colspan="2" style="padding:6px 0 8px 0; border-bottom:1px solid #e6dac6; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; font-weight:bold; color:#0f2747;">Your earnings</td>
-                  <td align="right" style="padding:6px 0 8px 12px; border-bottom:1px solid #e6dac6; font-family:'Courier New',Courier,Arial,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; font-weight:bold; color:#0f2747; white-space:nowrap;">${peso(input.totalEarned)}</td>
-                </tr>
-                <tr>
-                  <td colspan="2" style="padding:10px 0 0 0; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f;">Bank transfer fee</td>
-                  <td align="right" style="padding:10px 0 0 12px; font-family:'Courier New',Courier,Arial,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#0f2747;">&minus;${peso(input.transferFee)}</td>
-                </tr>
-                <tr>
-                  <td colspan="2" style="padding:12px 0 0 0; font-family:Arial,Helvetica,sans-serif; font-size:16px; line-height:22px; mso-line-height-rule:exactly; font-weight:bold; color:#0f2747;">Transferred to your bank</td>
-                  <td align="right" style="padding:12px 0 0 12px; font-family:'Courier New',Courier,Arial,sans-serif; font-size:20px; line-height:22px; mso-line-height-rule:exactly; font-weight:bold; color:#1f9d55; white-space:nowrap;">${peso(input.amountTransferred)}</td>
-                </tr>
-                </tbody>
-              </table>
-            </td>
+            <td colspan="2" style="padding:18px 20px 6px 20px; font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:1px; font-weight:bold; color:#0f2747; text-transform:uppercase;">${venueName} &mdash; ${bookingCount} booking${bookingCount === 1 ? "" : "s"}</td>
+          </tr>
+          <tr>
+            <td style="padding:14px 0 0 20px; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f;">Court earnings</td>
+            <td align="right" style="padding:14px 20px 0 12px; font-family:'Courier New',Courier,Arial,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#0f2747; white-space:nowrap;">${peso(input.courtEarningsTotal)}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0 0 20px; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f;">AIR/Rally commission (5%)</td>
+            <td align="right" style="padding:8px 20px 0 12px; font-family:'Courier New',Courier,Arial,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f; white-space:nowrap;">&minus;${peso(input.commissionTotal)}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0 14px 20px; font-family:Arial,Helvetica,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f;">Bank transfer fee</td>
+            <td align="right" style="padding:8px 20px 14px 12px; font-family:'Courier New',Courier,Arial,sans-serif; font-size:14px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f; white-space:nowrap;">&minus;${peso(input.transferFee)}</td>
+          </tr>
+          <tr>
+            <td style="padding:12px 0 18px 20px; border-top:2px solid #d8c9ab; font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:20px; mso-line-height-rule:exactly; font-weight:bold; color:#0f2747;">Sent to your bank</td>
+            <td align="right" style="padding:12px 20px 18px 12px; border-top:2px solid #d8c9ab; font-family:'Courier New',Courier,Arial,sans-serif; font-size:15px; line-height:20px; mso-line-height-rule:exactly; font-weight:bold; color:#0f2747; white-space:nowrap;">${peso(input.amountTransferred)}</td>
           </tr>
           </tbody>
         </table>
@@ -224,17 +204,11 @@ export function renderPayoutPayslipEmail(input: PayoutPayslipEmailInput): string
     </tr>
 
     <tr>
-      <td class="pad" style="padding:20px 32px 0 32px; font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#6b7a8f;">
-        <p style="margin:0;">The ₱10.00 bank transfer fee is charged once per payout by our payment provider &mdash; not per booking.</p>
-      </td>
-    </tr>
-
-    <tr>
-      <td class="pad" style="padding:26px 32px 30px 32px;">
+      <td class="pad" style="padding:24px 32px 0 32px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0">
           <tbody><tr>
-            <td bgcolor="#f3700f" style="background-color:#f3700f; border-radius:0; padding:14px 26px;">
-              <a href="${input.link}" style="display:block; font-family:Arial,Helvetica,sans-serif; font-size:16px; line-height:20px; mso-line-height-rule:exactly; font-weight:bold; color:#ffffff; text-decoration:none;">View your earnings</a>
+            <td bgcolor="#f3700f" style="background-color:#f3700f; padding:14px 28px;">
+              <a href="${input.link}" style="display:inline-block; font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:19px; mso-line-height-rule:exactly; font-weight:bold; color:#ffffff; text-decoration:none;">See all ${bookingCount} booking${bookingCount === 1 ? "" : "s"}</a>
             </td>
           </tr>
         </tbody></table>
@@ -242,7 +216,13 @@ export function renderPayoutPayslipEmail(input: PayoutPayslipEmailInput): string
     </tr>
 
     <tr>
-      <td class="pad" bgcolor="#0f2747" style="background-color:#0f2747; padding:26px 32px;">
+      <td class="pad" style="padding:20px 32px 0 32px; font-family:Arial,Helvetica,sans-serif; font-size:13px; line-height:19px; mso-line-height-rule:exactly; color:#2b3a4f;">
+        <p style="margin:0;">The ${peso(input.transferFee)} bank transfer fee is charged once per payout by our payment provider &mdash; not per booking.</p>
+      </td>
+    </tr>
+
+    <tr>
+      <td class="pad" bgcolor="#0f2747" style="background-color:#0f2747; padding:26px 32px; margin-top:20px;">
         <p style="margin:0 0 10px 0; font-family:Arial,Helvetica,sans-serif; font-size:16px; line-height:20px; mso-line-height-rule:exactly; font-weight:bold; color:#ffffff;">AIR<span style="color:#f3700f;">/Rally</span></p>
         <p style="margin:0 0 12px 0; font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:19px; mso-line-height-rule:exactly; color:#a9b6c7;">Book courts. Play more.<br>Pilit Cabancalan, Mandaue City, Cebu 6014, Philippines</p>
         <p style="margin:0; font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:19px; mso-line-height-rule:exactly; color:#a9b6c7;">You are receiving this because you list a venue on air-rally.com.</p>
