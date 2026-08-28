@@ -55,12 +55,18 @@ function throwRanked(error: PostgrestError): never {
  * `ensureMyPlayerRank` first so a first-time visitor sees a real (empty)
  * standing rather than a "not playing" dead end.
  */
-export async function getPlayerRank(supabase: Client, userId: string, mode: RankedMode): Promise<PlayerRank | null> {
+/**
+ * `mode` is accepted-but-unused: kept only so every existing caller (mode
+ * tabs, party builders, etc.) keeps compiling. `player_ranks` no longer has
+ * a `mode` column — see 20260810000085_unify_player_rating.sql, which
+ * deliberately collapsed singles/doubles into one AAR per player. Filtering
+ * on it here throws `42703` against live production.
+ */
+export async function getPlayerRank(supabase: Client, userId: string, _mode: RankedMode): Promise<PlayerRank | null> {
   const { data, error } = await supabase
     .from("player_ranks")
     .select("*")
     .eq("user_id", userId)
-    .eq("mode", mode)
     .order("season_id", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -68,21 +74,17 @@ export async function getPlayerRank(supabase: Client, userId: string, mode: Rank
   return data;
 }
 
-/** Batched — one query for a whole lobby, not one per player card. Always for one mode: a doubles lobby needs everyone's doubles rank, never a mix. */
-export async function getPlayerRanks(supabase: Client, userIds: string[], mode: RankedMode): Promise<Map<string, PlayerRank>> {
+/** Batched — one query for a whole lobby, not one per player card. `mode` is accepted-but-unused; see `getPlayerRank`. */
+export async function getPlayerRanks(supabase: Client, userIds: string[], _mode: RankedMode): Promise<Map<string, PlayerRank>> {
   if (userIds.length === 0) return new Map();
-  const { data, error } = await supabase.from("player_ranks").select("*").in("user_id", userIds).eq("mode", mode);
+  const { data, error } = await supabase.from("player_ranks").select("*").in("user_id", userIds);
   if (error) throw error;
   return new Map(data.map((row) => [row.user_id, row]));
 }
 
-export async function listLeaderboard(supabase: Client, mode: RankedMode, limit = 50): Promise<RankedLeaderboardRow[]> {
-  const { data, error } = await supabase
-    .from("ranked_leaderboard")
-    .select("*")
-    .eq("mode", mode)
-    .order("position", { ascending: true })
-    .limit(limit);
+/** `mode` is accepted-but-unused; see `getPlayerRank`. `ranked_leaderboard` is one combined ladder now, not one per mode. */
+export async function listLeaderboard(supabase: Client, _mode: RankedMode, limit = 50): Promise<RankedLeaderboardRow[]> {
+  const { data, error } = await supabase.from("ranked_leaderboard").select("*").order("position", { ascending: true }).limit(limit);
   if (error) throw error;
   return data;
 }
@@ -90,15 +92,10 @@ export async function listLeaderboard(supabase: Client, mode: RankedMode, limit 
 /**
  * One player's row on the leaderboard, wherever it falls. Fetched separately
  * from the top N so the "you are 48th" footer works without pulling the 47
- * rows above it.
+ * rows above it. `mode` is accepted-but-unused; see `getPlayerRank`.
  */
-export async function getLeaderboardEntry(supabase: Client, userId: string, mode: RankedMode): Promise<RankedLeaderboardRow | null> {
-  const { data, error } = await supabase
-    .from("ranked_leaderboard")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("mode", mode)
-    .maybeSingle();
+export async function getLeaderboardEntry(supabase: Client, userId: string, _mode: RankedMode): Promise<RankedLeaderboardRow | null> {
+  const { data, error } = await supabase.from("ranked_leaderboard").select("*").eq("user_id", userId).maybeSingle();
   if (error) throw error;
   return data;
 }
