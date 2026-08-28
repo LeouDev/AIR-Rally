@@ -294,7 +294,7 @@ export function RankedPartyBuilder({
           </p>
           {eligibility.allowedLowestTierName && eligibility.allowedHighestTierName && (
             <p className="border-t border-white/35 pt-2 text-[0.6875rem] font-semibold tracking-[0.05em]">
-              A party this wide needs every player within {eligibility.maxSpread} AAR of each other — roughly{" "}
+              A party this wide needs every player within {eligibility.maxSpread} ARR of each other — roughly{" "}
               {eligibility.allowedLowestTierName} to {eligibility.allowedHighestTierName}.
             </p>
           )}

@@ -248,7 +248,7 @@ function ConfirmedView({ match, currentUserId }: { match: RankedMatchDetail; cur
 
       {me && me.rating_delta !== null && (
         <div className="flex items-center justify-between border-2 border-navy bg-white px-5 py-4">
-          <span className="text-[0.625rem] font-semibold tracking-[0.14em] text-navy/55 uppercase">AAR</span>
+          <span className="text-[0.625rem] font-semibold tracking-[0.14em] text-navy/55 uppercase">ARR</span>
           <div className="flex items-baseline gap-2.5">
             {me.rating_before !== null && <span className="text-base font-medium text-navy/45">{formatRating(me.rating_before)}</span>}
             <span className="text-sm font-bold text-rally">→</span>
@@ -276,7 +276,7 @@ function DisputedView({ match }: { match: RankedMatchDetail }) {
     <div className="flex flex-col gap-4 border-2 border-rally bg-rally px-5 py-6 text-white">
       <p className="text-2xl font-extrabold">RESULT DISPUTED</p>
       <p className="text-[0.8125rem] leading-relaxed">
-        Reason: {match.dispute_reason ?? "Not specified"}. No pips, AAR or win/loss changes are applied until this is resolved.
+        Reason: {match.dispute_reason ?? "Not specified"}. No pips, ARR or win/loss changes are applied until this is resolved.
       </p>
       <p className="border-t border-white/35 pt-3 text-[0.625rem] font-semibold tracking-[0.12em] uppercase">
         All four players have been notified. AIR/Rally support will review this match.

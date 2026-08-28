@@ -59,7 +59,7 @@ export default async function RankedLeaderboardPage({
             <span>#</span>
             <span>Player</span>
             <span>Star</span>
-            <span className="text-right">AAR</span>
+            <span className="text-right">ARR</span>
           </div>
           {leaders.map((entry) => (
             <div

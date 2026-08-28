@@ -86,7 +86,7 @@ export default async function RankedHomePage({ searchParams }: { searchParams: P
           </div>
           <div className="h-0.5 bg-navy-foreground/20" />
           <div className="flex items-baseline justify-between">
-            <span className="text-[0.625rem] font-semibold tracking-[0.14em] text-navy-foreground/50">AAR</span>
+            <span className="text-[0.625rem] font-semibold tracking-[0.14em] text-navy-foreground/50">ARR</span>
             <span className="text-base font-medium text-navy-foreground/85">{formatRating(rank.rating)}</span>
           </div>
           <div className="flex items-baseline justify-between">
