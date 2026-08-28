@@ -67,6 +67,20 @@ async function asUser(client: Client, userId: string, fn: () => Promise<void>) {
   }
 }
 
+/**
+ * This script proves the rating math by replaying record_ranked_point
+ * N times per team to build an exact target score — that only produces
+ * the intended score under rally scoring, where every rally scores.
+ * Pin every fixture match to it explicitly (20260810000110 defaults new
+ * matches to side_out) rather than relying on today's default, which is
+ * one migration away from lying. Run outside asUser: ranked_matches has
+ * no client UPDATE policy, so this deliberately runs with the direct
+ * connection's own privileges, same as the cleanup deletes above.
+ */
+async function pinRallyScoring(client: Client, matchId: string) {
+  await client.query(`update public.ranked_matches set scoring_mode = 'rally' where id = $1`, [matchId]);
+}
+
 async function main() {
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
