@@ -19,8 +19,8 @@ import type { RankedMatchType } from "@/lib/supabase/types";
  * DUPR's actual proprietary formula, which is not public.
  */
 
-/** Everyone starts here on the new scale. Matches `player_ranks.rating`'s default in the migration. */
-export const RATING_STARTING_VALUE = 1000;
+/** Everyone starts here — mid-Driver, not the tier floor. Matches `player_ranks.rating`'s default (20260810000112). */
+export const RATING_STARTING_VALUE = 1100;
 
 /**
  * The seven-rank ladder, low to high. Order is load-bearing — `tier` is
