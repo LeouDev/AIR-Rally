@@ -395,6 +395,15 @@ export type RankedMatchPlayer = {
   match_weight: number | null;
   recency_multiplier: number | null;
   reliability_modifier: number | null;
+  /**
+   * True when this player's `rating_delta` was halved because the match was not at
+   * a booked court and they were already calibrated (20260810000112). Never null —
+   * `false` on every row predating the discount, definitionally, since nothing
+   * could halve a delta before it existed. Per-player, not per-match: a calibrated
+   * player can be discounted while their uncalibrated opponent in the same match is
+   * not, so read it off the player's own row rather than inferring it from the match.
+   */
+  rating_discounted: boolean;
   created_at: string;
 };
 

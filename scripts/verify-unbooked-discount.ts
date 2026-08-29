@@ -99,7 +99,7 @@ async function main() {
 
   const leouAfter = await client.query(`select rating, reliability, wins, losses, current_streak, calibration_matches, booked_rated_matches from public.player_ranks where season_id=$1 and user_id=$2`, [seasonId, LEOU]);
   const leouRow = await client.query(
-    `select rating_before, rating_after, rating_delta, tier_before, tier_after from public.ranked_match_players where match_id=$1 and user_id=$2`,
+    `select rating_before, rating_after, rating_delta, tier_before, tier_after, rating_discounted from public.ranked_match_players where match_id=$1 and user_id=$2`,
     [matchId, LEOU]
   );
   const notif = await client.query(
@@ -152,10 +152,11 @@ async function main() {
     notif.rows[0]?.message.includes("counts at half"),
     true
   );
+  assertEqual("LEOU's discount was PERSISTED, not left to be re-derived", leouRow.rows[0].rating_discounted, true);
 
   // ---- The adjacent claim: MOBILE (uncalibrated) is never discounted ----
   const mobileRow = await client.query(
-    `select rating_delta from public.ranked_match_players where match_id=$1 and user_id=$2`,
+    `select rating_delta, rating_discounted from public.ranked_match_players where match_id=$1 and user_id=$2`,
     [matchId, MOBILE]
   );
   const mobileExpectedRaw = await client.query(
@@ -174,6 +175,10 @@ async function main() {
   const mobileRaw = m.k * mobileGap * Number(m.weight) * Number(m.reliability_mod) * Number(m.recency);
   const mobileExpectedDelta = Math.max(-m.cap, Math.min(m.cap, Math.round(mobileRaw)));
   assertEqual("MOBILE (uncalibrated) got the FULL delta, not discounted, despite being unbooked too", mobileRow.rows[0].rating_delta, mobileExpectedDelta);
+  // The discriminating pair: same match, same (un)booked state, opposite
+  // calibration — so opposite flags. This is what proves the column is
+  // per-player and conditioned on calibration, not just on booking.
+  assertEqual("MOBILE's row records NOT discounted, in the same unbooked match", mobileRow.rows[0].rating_discounted, false);
 
   console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}\n`);
   await client.end();
