@@ -6,7 +6,7 @@ import { RankBadge } from "@/components/ranked/RankBadge";
 import { ModeTabs, parseMode } from "@/components/ranked/ModeTabs";
 import { pipNumeral, formatRating } from "@/lib/ranked";
 
-export const metadata: Metadata = { title: "Leaderboard — Ranked" };
+export const metadata: Metadata = { title: "Ladder — Ranked" };
 export const dynamic = "force-dynamic";
 
 /**
@@ -44,7 +44,7 @@ export default async function RankedLeaderboardPage({
     <div className="flex flex-col gap-6">
       <div>
         <p className="text-[0.625rem] font-semibold tracking-[0.16em] text-rally uppercase">AIR/Rally Ranked</p>
-        <h1 className="mt-2 text-[1.75rem] leading-[0.95] font-extrabold tracking-[-0.02em] text-navy">LEADERBOARD</h1>
+        <h1 className="mt-2 text-[1.75rem] leading-[0.95] font-extrabold tracking-[-0.02em] text-navy">LADDER</h1>
       </div>
 
       <ModeTabs current={mode} basePath="/ranked/leaderboard" />

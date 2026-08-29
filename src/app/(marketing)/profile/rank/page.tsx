@@ -133,7 +133,7 @@ export default async function RankedHomePage({ searchParams }: { searchParams: P
           href={`/ranked/leaderboard?mode=${mode}`}
           className="border-2 border-navy px-5 py-4 text-left text-[0.8125rem] font-bold tracking-[0.08em] text-navy uppercase"
         >
-          Leaderboard
+          Ladder
         </Link>
       </div>
 

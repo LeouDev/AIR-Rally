@@ -37,7 +37,7 @@ export function ProfileActionsMenu({ profile, email }: ProfileActionsMenuProps) 
       href: "/profile/rank",
       icon: Trophy,
       title: "AIR/Rally Ranked",
-      description: "Your tier, pips, and the leaderboard.",
+      description: "Your tier, pips, and the ladder.",
     },
     {
       key: "court-side",
