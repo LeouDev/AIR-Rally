@@ -44,8 +44,6 @@ export default async function RankedHomePage({ searchParams }: { searchParams: P
 
   return (
     <div className="flex flex-col gap-6">
-      <ModeTabs current={mode} basePath="/profile/rank" />
-
       {activeMatch && (
         <Link
           href={`/ranked/match/${activeMatch.id}`}
@@ -138,11 +136,14 @@ export default async function RankedHomePage({ searchParams }: { searchParams: P
       </div>
 
       {recent.length > 0 && (
-        <div className="flex flex-col">
-          <p className="pb-2 text-[0.625rem] font-semibold tracking-[0.14em] text-navy/55 uppercase">Recent ranked</p>
-          {recent.map((summary) => (
-            <MatchSummaryRow key={summary.match.id} summary={summary} />
-          ))}
+        <div className="flex flex-col gap-3">
+          <ModeTabs current={mode} basePath="/profile/rank" />
+          <div className="flex flex-col">
+            <p className="pb-2 text-[0.625rem] font-semibold tracking-[0.14em] text-navy/55 uppercase">Recent ranked</p>
+            {recent.map((summary) => (
+              <MatchSummaryRow key={summary.match.id} summary={summary} />
+            ))}
+          </div>
         </div>
       )}
     </div>
