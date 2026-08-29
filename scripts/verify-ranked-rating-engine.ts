@@ -13,8 +13,17 @@
  *      supposed to produce — spec scenarios 9-10 (calibration placement)
  *      and 23 (anti-sandbagging).
  *
- * Two synthetic accounts play against each other repeatedly; nothing
- * here touches a real player. Run with:
+ * ⚠️ THIS SUITE WRITES TO STAGING AND ITS ACCOUNTS ARE THE FOUNDER'S OWN
+ * EMAIL ADDRESSES. A full run confirms ~30 matches and inserts ~190
+ * notification rows. It clears its accounts' device push tokens during
+ * setup so none of that reaches a real phone — on 2026-08-30, before that
+ * existed, a run pushed ~90 notifications to the founder's device and one
+ * was reported as a production bug. Read the note above the token-clearing
+ * query before changing how it works.
+ *
+ * Two synthetic accounts play against each other repeatedly (four for the
+ * doubles case); nothing here touches a real player's DATA, though the
+ * accounts themselves are real. Run with:
  *
  *   TS_NODE_COMPILER_OPTIONS='{"module":"CommonJS","moduleResolution":"node"}' \
  *     node -r ts-node/register scripts/verify-ranked-rating-engine.ts
@@ -145,10 +154,66 @@ async function main() {
   const LEOU = "86f6cb7c-3051-4db5-89e0-3d5443945304";
   const MOBILE = "3e1c4aa5-2122-4343-a3e2-321c11961a74";
 
+  // Doubles partners. Declared up here rather than at the doubles case so
+  // setup and teardown below can cover every account this suite touches —
+  // see the note on push tokens. The reasoning for these three specific
+  // accounts is at the doubles case itself.
+  const SPARES = [
+    "fbc1b5e4-8fcc-4d61-b937-e45a4b5e53dd",
+    "366d3dcb-bb90-4342-b436-582eec652228",
+    "a3a2d9b8-f169-4165-8a00-3caee5d9dc7b",
+  ];
+  const SUITE_ACCOUNTS = [LEOU, MOBILE, ...SPARES];
+
+  // ⚠️ PUSH TOKENS — DO NOT REMOVE. THIS IS NOT HYGIENE, IT IS THE FIX.
+  //
+  // A full run confirms ~30 matches and inserts ~190 notification rows in
+  // about seven minutes. Every one fires notify_push_on_notification_insert,
+  // which POSTs to the push webhook *if the recipient has a device token*.
+  //
+  // These are not anonymous fixtures: LEOU and MOBILE resolve to
+  // galileouuu@gmail.com and galileouuu+mobiletest@gmail.com — the
+  // founder's real addresses. On 2026-08-30 a run of this suite pushed
+  // roughly ninety notifications to the founder's actual phone, who
+  // reasonably read one ("counts at half") as a production bug and
+  // reported it. It cost two people an investigation.
+  //
+  // Clearing the tokens BEFORE the run is the only thing that prevents
+  // it. Deleting the notification rows in teardown does not: by then the
+  // pushes have already been delivered. The trigger deliberately stays
+  // live — notification-on-confirm is real behaviour worth exercising —
+  // and it no-ops for a recipient with no token, which is exactly the
+  // state this creates.
+  //
+  // It re-clears every run on purpose. `galileouuu+mobiletest@gmail.com`
+  // is an address the founder actually signs in with, so a token WILL
+  // come back; this must be self-correcting rather than a one-time tidy.
+  //
+  // VERIFIED 2026-08-30, not assumed: with tokens cleared, a full run
+  // produced ZERO push-webhook calls. It did fire the EMAIL webhook 95
+  // times — once per notification — and every one returned
+  // `{"received":true,"emailed":false}`, because none of the ranked
+  // notification types is currently email-eligible.
+  //
+  // That last part is luck, not design, and it is the residual hazard
+  // here: the day someone makes `ranked_result_confirmed` (or any ranked
+  // type) send email, this suite starts delivering ~95 real emails to the
+  // founder's address per run, and clearing push tokens will not stop it.
+  // If you add a ranked notification type to the email path, come back
+  // and suppress it for these accounts too.
+  const clearedTokens = await client.query(
+    `delete from public.device_push_tokens where user_id = any($1) returning user_id`,
+    [SUITE_ACCOUNTS]
+  );
+  if (clearedTokens.rowCount) {
+    console.log(`[setup] cleared ${clearedTokens.rowCount} device push token(s) for this suite's accounts — see the note in this file before "fixing" this.`);
+  }
+
   // Clean slate for this run — every account this suite touches.
-  await client.query(`delete from public.ranked_match_players where user_id in ($1, $2)`, [LEOU, MOBILE]);
-  await client.query(`delete from public.ranked_matches where created_by in ($1, $2)`, [LEOU, MOBILE]);
-  await client.query(`delete from public.player_ranks where user_id in ($1, $2)`, [LEOU, MOBILE]);
+  await client.query(`delete from public.notifications where user_id = any($1)`, [SUITE_ACCOUNTS]);
+  await client.query(`delete from public.ranked_match_players where user_id = any($1)`, [SUITE_ACCOUNTS]);
+  await client.query(`delete from public.ranked_matches where created_by = any($1)`, [SUITE_ACCOUNTS]);
+  await client.query(`delete from public.player_ranks where user_id = any($1)`, [SUITE_ACCOUNTS]);
 
   let matchId = "";
   await asUser(client, LEOU, async () => {
@@ -379,14 +444,7 @@ async function main() {
   // Do not "simplify" this by reusing MOBILE, and do not raise or bypass
   // the cap to make it fit: the cap staying a real constraint that this
   // match passes on its own merits is what keeps the doubles case honest.
-  const SPARES = [
-    "fbc1b5e4-8fcc-4d61-b937-e45a4b5e53dd",
-    "366d3dcb-bb90-4342-b436-582eec652228",
-    "a3a2d9b8-f169-4165-8a00-3caee5d9dc7b",
-  ];
-  await client.query(`delete from public.ranked_match_players where user_id = any($1)`, [SPARES]);
-  await client.query(`delete from public.ranked_matches where created_by = any($1)`, [SPARES]);
-  await client.query(`delete from public.player_ranks where user_id = any($1)`, [SPARES]);
+  // SPARES and their clean slate are set up at the top of this function.
 
   // Captured BEFORE, asserted unchanged AFTER — so the ordering lives in
   // the assertion rather than in the order of the lines. Checked before
@@ -451,6 +509,15 @@ async function main() {
     [doublesId]
   );
   assertEqual("ranked_match_players still records the format per match", matchMode.rows.map((r) => r.mode), ["doubles"]);
+
+  // Data hygiene, explicitly NOT the anti-spam measure — the pushes, if
+  // any token slipped through, went out long before this line. Setup
+  // re-clears anyway, so this only keeps staging tidy between runs.
+  const sweptNotifs = await client.query(
+    `delete from public.notifications where user_id = any($1) returning id`,
+    [SUITE_ACCOUNTS]
+  );
+  console.log(`\n[teardown] removed ${sweptNotifs.rowCount} notification row(s) this run created.`);
 
   console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}\n`);
   await client.end();
