@@ -163,9 +163,11 @@ describe("partyEligibilityDisplay", () => {
     ]);
     expect(result.spread).toBe(700);
     expect(result.eligible).toBe(false);
-    // 1700 - 250 = 1450 (Smasher); 1000 + 250 = 1250 (Volleyer) — the
-    // widest party these two ratings could still legally form.
-    expect(result.allowedLowestTierName).toBe("Smasher");
+    // 1700 - 350 = 1350 (Volleyer); 1000 + 350 = 1350 (Volleyer) — the
+    // widest party these two ratings could still legally form. Both
+    // bounds land in the same tier at this cap and these fixture
+    // ratings — that's correct, not a bug in the display logic.
+    expect(result.allowedLowestTierName).toBe("Volleyer");
     expect(result.allowedHighestTierName).toBe("Volleyer");
     expect(result.maxSpread).toBe(RANKED_MAX_PARTY_AAR_SPREAD);
   });

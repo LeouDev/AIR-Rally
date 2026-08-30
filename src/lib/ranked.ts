@@ -161,7 +161,7 @@ export type PartyEligibilityDisplay = {
  * lib/rating.ts — that's what mirrors `create_ranked_match()`'s real
  * spread guard) with tier NAMES derived from its allowed AAR bounds,
  * purely so the UI can still say "Volleyer → Kitchen King" instead of
- * "within 250 AAR" — the party-spread rule itself is entirely AAR-based
+ * "within 350 AAR" — the party-spread rule itself is entirely AAR-based
  * now, per the spec's explicit instruction not to use rank names for the
  * calculation. This function exists only for that one display sentence.
  */

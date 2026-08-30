@@ -1985,7 +1985,7 @@ export type Database = {
         Args: { p_mode: RankedMode };
         Returns: undefined;
       };
-      /** Widest AAR gap among the calibrated players in a proposed party, for the given mode. Ranked parties must stay within 250 AAR of each other. */
+      /** Widest AAR gap among the calibrated players in a proposed party, for the given mode. Ranked parties must stay within 350 AAR of each other. */
       ranked_party_spread: {
         Args: { p_user_ids: string[]; p_mode: RankedMode };
         Returns: number;

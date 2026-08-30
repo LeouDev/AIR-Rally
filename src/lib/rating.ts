@@ -208,8 +208,8 @@ export function ratingDelta(input: {
  */
 export const MATCHMAKING_BANDS = [100, 150, 200] as const;
 
-/** The party-spread cap (§15) — a ranked doubles party's members must all sit within this many AAR points of each other. AAR-based, never the visible rank name, per the spec's explicit instruction. */
-export const RANKED_MAX_PARTY_AAR_SPREAD = 250;
+/** The party-spread cap (§15) — a ranked doubles party's members must all sit within this many AAR points of each other. AAR-based, never the visible rank name, per the spec's explicit instruction. Raised 250 -> 350, founder decision 2026-08-31, applying everywhere (not an Open-Match-only value) — see 20260810000117_raise_party_spread_cap.sql. */
+export const RANKED_MAX_PARTY_AAR_SPREAD = 350;
 
 export type PartyAarEligibility = {
   eligible: boolean;
