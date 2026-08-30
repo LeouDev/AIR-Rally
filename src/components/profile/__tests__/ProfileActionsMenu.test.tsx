@@ -20,6 +20,7 @@ function makeProfile(role: UserRole = "player"): Profile {
     referral_code: "ABCD1234",
     email_notifications_enabled: true,
     deleted_at: null,
+    city_slug: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };

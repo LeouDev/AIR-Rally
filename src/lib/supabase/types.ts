@@ -47,11 +47,27 @@ export type Profile = {
   email_notifications_enabled: boolean;
   /** Set once, by anonymize_account() (20260810000074), and never cleared — a self-deleted account, never re-activated. Null for every other profile. */
   deleted_at: string | null;
+  /** Where this player PLAYS, not where a GPS reading places them right now — see supabase/migrations/20260810000115_cities.sql. References cities.slug; null until they've been through the Find Match flow. */
+  city_slug: string | null;
   created_at: string;
   updated_at: string;
 };
 
 export type PublicProfile = Pick<Profile, "id" | "display_name" | "avatar_url">;
+
+/**
+ * public.cities — supabase/migrations/20260810000115_cities.sql. A
+ * founder-curated, non-client-writable list; `slug` is the canonical key
+ * every producer (picker, reverse-geocode, profiles.city_slug,
+ * open_matches.target_city) must map into rather than storing free text.
+ */
+export type City = {
+  slug: string;
+  display_name: string;
+  region: string;
+  aliases: string[];
+  sort_order: number;
+};
 
 /** Recorded once per signup via record_agreement_acceptance() — see lib/legal.ts. */
 export type AgreementAcceptance = {
@@ -1192,6 +1208,9 @@ export type Database = {
         Pick<Profile, "id"> &
           Partial<Omit<Profile, "id" | "created_at" | "updated_at">>
       >;
+      // Founder-curated, no client insert/update/delete policy — see
+      // supabase/migrations/20260810000115_cities.sql.
+      cities: TableDef<City, never, never>;
       venues: TableDef<
         Venue,
         Pick<Venue, "owner_id" | "name"> &
@@ -2135,6 +2154,26 @@ export type Database = {
           confirmed_at: string | null;
           venue_name: string | null;
           players: { displayName: string; team: string }[] | null;
+        }[];
+      };
+      // Migration 20260810000118 (open_match_public_page) — mirrors
+      // public_ranked_match_summary's shape one row up: genuinely
+      // anonymous, granted to anon+authenticated. NOT on production as
+      // of this writing — Backend is applying it to staging. Returns for
+      // EVERY status (open/converted/expired/cancelled), not just
+      // 'open'; zero rows is the only "no such match" case. Exposes only
+      // the host's display_name/avatar_url, target_city (a cities slug,
+      // not a display name), status verbatim, and the live
+      // accepted_count — nothing from open_match_join_requests, nothing
+      // else from profiles.
+      get_open_match_public: {
+        Args: { p_open_match_id: string };
+        Returns: {
+          host_display_name: string | null;
+          host_avatar_url: string | null;
+          target_city: string;
+          status: string;
+          accepted_count: number;
         }[];
       };
     };
