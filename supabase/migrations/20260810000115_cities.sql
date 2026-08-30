@@ -54,6 +54,11 @@ using (true);
 -- founder-curated and changes via migration, the same way ranked seasons
 -- do, not via the app.
 
+-- Slugs are deliberately de-accented ('Las Piñas' -> 'las-pinas',
+-- 'Parañaque' -> 'paranaque'): a slug is a key a geocoder or a URL has
+-- to reproduce byte-for-byte, and accented/unaccented forms look
+-- identical to a human but are two different keys to a query. Do not
+-- "restore" the ñ into a slug — display_name already carries it.
 insert into public.cities (slug, display_name, region, sort_order) values
   ('caloocan',       'Caloocan',       'NCR', 1),
   ('las-pinas',      'Las Piñas',      'NCR', 2),
