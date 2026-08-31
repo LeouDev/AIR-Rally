@@ -152,6 +152,51 @@ describe("POST /api/paymongo/webhook", () => {
     expect(mockMaybeCompleteReschedule).toHaveBeenCalledWith(expect.anything(), "booking-1", 50000, "PHP", "cs_test_123");
   });
 
+  it("logs a critical alert but still confirms using the first paid Payment when a PaymentIntent has more than one", async () => {
+    // "At most one Payment ever reaches status paid" is an inference
+    // from PayMongo's documented PaymentIntent state machine, not a
+    // documented guarantee — see the comment in route.ts. If it's ever
+    // wrong, a customer who genuinely paid must still get their booking
+    // confirmed; the surprise gets logged loudly instead of blocking them.
+    const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    const twoPaidPaymentsSession = {
+      ...PAID_CHECKOUT_SESSION,
+      attributes: {
+        ...PAID_CHECKOUT_SESSION.attributes,
+        payment_intent: {
+          ...PAID_CHECKOUT_SESSION.attributes.payment_intent,
+          attributes: {
+            ...PAID_CHECKOUT_SESSION.attributes.payment_intent.attributes,
+            payments: [
+              { id: "pay_1", attributes: { amount: 50000, currency: "PHP", status: "paid" } },
+              { id: "pay_2", attributes: { amount: 50000, currency: "PHP", status: "paid" } },
+            ],
+          },
+        },
+      },
+    };
+    const event = {
+      data: { id: "evt_1", type: "event", attributes: { type: "checkout_session.payment.paid", livemode: false, data: twoPaidPaymentsSession } },
+    } as never;
+    mockConstructEvent.mockReturnValue(event);
+    mockConfirmPayment.mockResolvedValue(true);
+
+    const response = await POST(fakeRequest("{}"));
+
+    expect(response.status).toBe(200);
+    // Confirmed using pay_1 — payments[0] among the paid ones — not blocked.
+    expect(mockConfirmPayment).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ bookingId: "booking-1", paymongoPaymentIntentId: "pi_test_456" })
+    );
+    expect(
+      consoleErrorSpy.mock.calls.some(
+        (call) => call[0] === "[paymongo.webhook.multiplePaidPayments]" && String(call[1]).includes("pay_1") && String(call[1]).includes("pay_2")
+      )
+    ).toBe(true);
+    consoleErrorSpy.mockRestore();
+  });
+
   it("diagnoses a paid-but-unconfirmed payment, and only after the reschedule path has also declined", async () => {
     mockConstructEvent.mockReturnValue(PAID_EVENT);
     // THE POINT: a price-increase reschedule ALWAYS no-ops in
