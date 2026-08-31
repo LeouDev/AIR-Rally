@@ -78,6 +78,16 @@ const CONFIRMED_PAYMONGO_BOOKING: Booking = {
   paymongo_payment_intent_id: "pi_pm_1",
 };
 
+// paymongo_venue_account_id set — the one property that actually makes
+// the split-refund kill switch apply, per requestRefund()'s own gate.
+const SPLIT_PAYMONGO_BOOKING: Booking = {
+  ...CONFIRMED_PAYMONGO_BOOKING,
+  id: "booking-3",
+  paymongo_venue_account_id: "acct_venue_1",
+  platform_fee_amount: 2500,
+  venue_amount: 47500,
+};
+
 beforeEach(() => {
   mockPaymongoRefundEnabled.mockReset();
   mockPaymongoRefundEnabled.mockReturnValue(false);
@@ -188,16 +198,37 @@ describe("requestRefund", () => {
     ).rejects.toMatchObject({ reason: "amount_exceeds_refundable" });
   });
 
-  it("refuses a PayMongo refund when the kill switch is off — the exact production-safety property this module exists for", async () => {
+  it("refuses a SPLIT PayMongo refund when the kill switch is off — the exact production-safety property this module exists for", async () => {
     mockPaymongoRefundEnabled.mockReturnValue(false);
     const supabase = fakeSupabase([], {}, {});
     await expect(
-      requestRefund(supabase, { booking: CONFIRMED_PAYMONGO_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" })
+      requestRefund(supabase, { booking: SPLIT_PAYMONGO_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" })
     ).rejects.toMatchObject({ reason: "paymongo_refund_not_enabled" });
     // No refund execution of any kind occurs while the flag is off — not
     // even the read-only QR Ph detection call, and no row is ever written.
     expect(mockRetrievePayMongoPayment).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("does NOT gate a non-split PayMongo refund on the kill switch — the gate is scoped to split accounting, not every PayMongo refund", async () => {
+    // CONFIRMED_PAYMONGO_BOOKING has paymongo_venue_account_id: null (a
+    // plain, non-split payment) — this is the exact case that used to be
+    // blocked by the same flag as a real split, which was the bug this
+    // narrowing fixes. The flag stays off (beforeEach's default) and the
+    // refund must still go all the way through to the provider.
+    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pi_pm_1", attributes: { status: "paid", source: { type: "card" } } });
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { id: "ref_1", attributes: {} } }) });
+    const supabase = fakeSupabase([], { id: "refund-1", status: "pending" }, { id: "refund-1", status: "succeeded" });
+
+    const result = await requestRefund(supabase, {
+      booking: CONFIRMED_PAYMONGO_BOOKING,
+      amount: 50000,
+      reason: null,
+      initiatedBy: "admin-1",
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("writes a pending audit row before ever calling the provider, then marks it failed (with a captured reason) rather than throwing silently when the provider call fails", async () => {
