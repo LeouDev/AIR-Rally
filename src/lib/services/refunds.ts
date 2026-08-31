@@ -156,8 +156,23 @@ export async function requestRefund(supabase: Client, params: RequestRefundParam
     throw new RefundError("booking_not_paid", "This booking was never paid, so there's nothing to refund.");
   }
 
-  const providerPaymentId = booking.paymongo_payment_intent_id;
+  // paymongo_payment_id (the Payment id), not paymongo_payment_intent_id
+  // (the PaymentIntent id) — see this function's own doc comment and
+  // migration 20260810000121. GET /v1/payments/{id} and PayMongo's
+  // refund endpoint both need the former; the latter 404s against them.
+  const providerPaymentId = booking.paymongo_payment_id;
   if (!providerPaymentId) {
+    if (booking.paymongo_payment_intent_id) {
+      // Confirmed before the webhook started persisting
+      // paymongo_payment_id (migration 20260810000121/122) — genuinely
+      // paid, just missing the id this function needs. Distinct from
+      // "never paid" so nobody reads this booking as unpaid and looks
+      // in the wrong place.
+      throw new RefundError(
+        "booking_not_paid",
+        "This booking's payment predates payment-id tracking and can't be refunded automatically — refund it manually through PayMongo's dashboard using the checkout session id."
+      );
+    }
     throw new RefundError("booking_not_paid", "This booking has no recorded payment to refund.");
   }
 

@@ -105,6 +105,12 @@ export async function POST(request: Request): Promise<Response> {
       bookingId,
       paymongoCheckoutSessionId: checkoutSession.id,
       paymongoPaymentIntentId: paymentIntent.id,
+      // The id requestRefund() actually needs — see migration
+      // 20260810000121's own comment and paymongo-refund-gate-narrower-
+      // than-needed. Already selected above as paidPayment; this is the
+      // only privileged path that can persist it (migration
+      // 20260810000122's guard).
+      paymongoPaymentId: paidPayment.id,
       expectedAmount: paidPayment.attributes.amount,
       expectedCurrency: paidPayment.attributes.currency.toUpperCase(),
     });

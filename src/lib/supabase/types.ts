@@ -1655,6 +1655,8 @@ export type Database = {
           p_paymongo_payment_intent_id: string;
           p_expected_amount: number;
           p_expected_currency: string;
+          /** Optional, default null — migration 20260810000122. The real Payment id (not PaymentIntent) requestRefund() actually needs; see bookings.paymongo_payment_id. */
+          p_paymongo_payment_id?: string;
         };
         Returns: boolean;
       };

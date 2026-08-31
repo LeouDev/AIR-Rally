@@ -140,6 +140,7 @@ describe("POST /api/paymongo/webhook", () => {
       bookingId: "booking-1",
       paymongoCheckoutSessionId: "cs_test_123",
       paymongoPaymentIntentId: "pi_test_456",
+      paymongoPaymentId: "pay_1",
       expectedAmount: 50000,
       expectedCurrency: "PHP",
     });
