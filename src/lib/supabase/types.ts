@@ -1006,6 +1006,14 @@ export type Booking = {
   /** Set only by confirm_paymongo_booking_payment() (SECURITY DEFINER) once PayMongo payment is verified — never client-writable. */
   paymongo_payment_intent_id: string | null;
   /**
+   * The PayMongo Payment id (not PaymentIntent) — what GET /v1/payments/{id}
+   * and refund calls actually need. Populated at webhook confirmation
+   * time from the intent's one Payment with status=paid.
+   * paymongo_payment_intent_id is a different, correctly-named column
+   * and is not this value — see migration 20260810000121.
+   */
+  paymongo_payment_id: string | null;
+  /**
    * PayMongo Platforms marketplace split (see ARCHITECTURE.md's PayMongo
    * Platforms section). Immutable snapshot computed once, server-side, at
    * checkout-session-creation time — never from a post-processing-fee
