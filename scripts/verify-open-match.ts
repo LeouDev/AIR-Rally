@@ -1,22 +1,14 @@
 /**
- * Proves the Open Match feature (20260810000115_cities.sql,
- * 20260810000116_open_matches.sql, extended by 20260810000119 with
- * scheduled_at/venue and scheduled_at-relative expiry) against a real
- * staging database, end to end through the actual RPCs — not by
- * inspecting table shape.
+ * Proves the Open Match feature end to end against a real staging
+ * database, through the actual RPCs — not by inspecting table shape.
+ * Covers 115/116 (schema), 117 (rank-gap cap), 119 (scheduled/venue),
+ * and 120 (auto-accept, the create_ranked_match auth-boundary split,
+ * kickoff-relative conversion/expiry).
  *
  * Reuses the rating-engine suite's own fixture accounts (LEOU/MOBILE/3
- * SPARES) rather than inventing new ones, for the same reason that suite
- * gives: these are real, already-known accounts with real player_ranks
- * bootstrapping behavior, and reusing them means one fewer set of
- * Supabase-auth users to seed and keep alive.
- *
- * ⚠️ PUSH TOKENS: LEOU and MOBILE resolve to the founder's real email
- * addresses (see verify-ranked-rating-engine.ts's own extensive note on
- * this — a prior run of THAT suite pushed ~90 real notifications to the
- * founder's phone). create_open_match() broadcasts a real notification
- * row to every same-city profile, so this suite clears push tokens for
- * all five accounts before doing anything, same as that suite does.
+ * SPARES) rather than inventing new ones — see that suite's own
+ * comments for why, and for the push-token-clearing requirement this
+ * suite also follows (create_open_match broadcasts real notifications).
  *
  * Run with:
  *   TS_NODE_COMPILER_OPTIONS='{"module":"CommonJS","moduleResolution":"node"}' \
@@ -52,8 +44,9 @@ async function asUser(client: Client, userId: string, fn: () => Promise<unknown>
   try {
     await client.query(`select set_config('request.jwt.claim.sub', $1, true)`, [userId]);
     await client.query(`select set_config('role', 'authenticated', true)`);
-    await fn();
+    const result = await fn();
     await client.query("commit");
+    return result;
   } catch (e) {
     await client.query("rollback");
     throw e;
@@ -70,6 +63,27 @@ const SPARES = [
 const [SPARE1, SPARE2, SPARE3] = SPARES;
 const SUITE_ACCOUNTS = [LEOU, MOBILE, ...SPARES];
 
+async function createMatch(client: Client, host: string, hoursOut = 24): Promise<string> {
+  let id = "";
+  await asUser(client, host, async () => {
+    const { rows } = await client.query(
+      `select public.create_open_match('taguig', now() + make_interval(hours => $1)) as id`,
+      [hoursOut]
+    );
+    id = rows[0].id;
+  });
+  return id;
+}
+
+async function join(client: Client, user: string, matchId: string): Promise<string> {
+  let id = "";
+  await asUser(client, user, async () => {
+    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [matchId]);
+    id = rows[0].id;
+  });
+  return id;
+}
+
 async function main() {
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
@@ -82,32 +96,20 @@ async function main() {
     console.log(`[setup] cleared ${clearedTokens.rowCount} device push token(s) — see the note in this file before "fixing" this.\n`);
   }
 
-  // Clean slate. open_matches cascades to open_match_join_requests and
-  // ranked_matches cascades to ranked_match_players via FK.
   await client.query(`delete from public.notifications where user_id = any($1)`, [SUITE_ACCOUNTS]);
-  // open_matches.converted_match_id references ranked_matches, so it has
-  // to go first or a converted fixture from a prior run leaves a
-  // dangling FK on the delete below.
   await client.query(`delete from public.open_matches where host_id = any($1)`, [SUITE_ACCOUNTS]);
   await client.query(`delete from public.ranked_matches where created_by = any($1)`, [SUITE_ACCOUNTS]);
   await client.query(`delete from public.player_ranks where user_id = any($1)`, [SUITE_ACCOUNTS]);
   await client.query(`update public.profiles set city_slug = null where id = any($1)`, [SUITE_ACCOUNTS]);
-
-  // Everyone except SPARE3 starts in the same city so the broadcast and
-  // join flow has real players to work with; SPARE3 starts elsewhere to
-  // prove the city guard, then gets moved in for the doubles case later.
+  // SPARE3 starts in a different city so the city-guard test has a real
+  // mismatch to prove; moved into 'taguig' later once that's covered.
   await client.query(`update public.profiles set city_slug = 'taguig' where id = any($1)`, [[MOBILE, SPARE1, SPARE2]]);
   await client.query(`update public.profiles set city_slug = 'cebu-city' where id = $1`, [SPARE3]);
 
   // -------------------------------------------------------------------
-  console.log("\n=== create_open_match: broadcast reaches only the same city ===\n");
+  console.log("\n=== create_open_match: broadcast, and the past-time guard ===\n");
 
-  let m1 = "";
-  await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
-    m1 = rows[0].id;
-  });
-
+  const m1 = await createMatch(client, LEOU);
   const leouCity = await client.query(`select city_slug from public.profiles where id = $1`, [LEOU]);
   assertEqual("host's own city_slug is set by creating the match", leouCity.rows[0].city_slug, "taguig");
 
@@ -116,7 +118,7 @@ async function main() {
     [[MOBILE, SPARE1, SPARE2, SPARE3]]
   );
   assertEqual(
-    "broadcast reached exactly the same-city players, not SPARE3",
+    "broadcast reached every same-city player, not SPARE3 (different city)",
     broadcast.rows.map((r) => r.user_id).sort(),
     [MOBILE, SPARE1, SPARE2].sort()
   );
@@ -128,50 +130,30 @@ async function main() {
   );
 
   // -------------------------------------------------------------------
-  console.log("\n=== request_to_join_open_match: authorization and city guard ===\n");
+  console.log("\n=== auto-accept: joining IS accepting, no separate host step ===\n");
 
   await assertRejects("a different-city player cannot request to join", "This match is for a different city.", () =>
     asUser(client, SPARE3, () => client.query(`select public.request_to_join_open_match($1)`, [m1]))
   );
+  await client.query(`update public.profiles set city_slug = 'cebu-city' where id = $1`, [SPARE3]);
 
   await assertRejects("the host cannot request to join their own match", "You are already hosting this match.", () =>
     asUser(client, LEOU, () => client.query(`select public.request_to_join_open_match($1)`, [m1]))
   );
 
-  let r1 = "";
-  await asUser(client, MOBILE, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m1]);
-    r1 = rows[0].id;
-  });
+  const r1 = await join(client, MOBILE, m1);
+  const r1Row = await client.query(`select status from public.open_match_join_requests where id = $1`, [r1]);
+  assertEqual("the request is accepted immediately, no pending state", r1Row.rows[0].status, "accepted");
 
-  await assertRejects("a duplicate request is rejected", "You already asked to join this match.", () =>
+  await assertRejects("a second request from the same accepted player is rejected", "You already asked to join this match.", () =>
     asUser(client, MOBILE, () => client.query(`select public.request_to_join_open_match($1)`, [m1]))
   );
 
-  // -------------------------------------------------------------------
-  console.log("\n=== decline, then a real retry is allowed (no permanent ban) ===\n");
-
-  await assertRejects("only the host can decline", "Only the host can decline a request.", () =>
-    asUser(client, MOBILE, () => client.query(`select public.decline_join_request($1)`, [r1]))
-  );
-
-  await asUser(client, LEOU, () => client.query(`select public.decline_join_request($1)`, [r1]));
-  const declined = await client.query(`select status from public.open_match_join_requests where id = $1`, [r1]);
-  assertEqual("declined request status", declined.rows[0].status, "declined");
-
-  let r1b = "";
-  await asUser(client, MOBILE, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m1]);
-    r1b = rows[0].id;
-  });
-  assertEqual("a fresh request row is created on retry, not blocked by the old one", r1b !== r1, true);
+  assertEqual("accept_join_request no longer exists", await functionExists(client, "accept_join_request"), false);
+  assertEqual("decline_join_request no longer exists", await functionExists(client, "decline_join_request"), false);
 
   // -------------------------------------------------------------------
-  console.log("\n=== accept, then start singles at exactly 2 ===\n");
-
-  await asUser(client, LEOU, () => client.query(`select public.accept_join_request($1)`, [r1b]));
-  const count2 = await client.query(`select public.open_match_accepted_count($1) as n`, [m1]);
-  assertEqual("accepted headcount after 1 accept (host + 1)", count2.rows[0].n, 2);
+  console.log("\n=== start singles manually at exactly 2 ===\n");
 
   await assertRejects("only the host can start the match", "Only the host can start this match.", () =>
     asUser(client, MOBILE, () => client.query(`select public.start_open_match_singles($1)`, [m1]))
@@ -188,7 +170,7 @@ async function main() {
   assertEqual("converted_match_id points at the real ranked match", m1After.rows[0].converted_match_id, singlesMatchId);
 
   const singlesPlayers = await client.query(
-    `select user_id, team from public.ranked_match_players where match_id = $1 order by user_id`,
+    `select user_id, is_host from public.ranked_match_players where match_id = $1 order by user_id`,
     [singlesMatchId]
   );
   assertEqual(
@@ -196,8 +178,14 @@ async function main() {
     singlesPlayers.rows.map((r) => r.user_id).sort(),
     [LEOU, MOBILE].sort()
   );
-  const singlesType = await client.query(`select match_type from public.ranked_matches where id = $1`, [singlesMatchId]);
-  assertEqual("converted match is singles", singlesType.rows[0].match_type, "singles");
+  assertEqual(
+    "the OPEN MATCH HOST is is_host on the resulting match, not whoever happened to call start",
+    singlesPlayers.rows.find((r) => r.user_id === LEOU)?.is_host,
+    true
+  );
+  const singlesRanked = await client.query(`select created_by, match_type from public.ranked_matches where id = $1`, [singlesMatchId]);
+  assertEqual("created_by is the open-match host", singlesRanked.rows[0].created_by, LEOU);
+  assertEqual("converted match is singles", singlesRanked.rows[0].match_type, "singles");
 
   await assertRejects("a converted match can no longer take requests", "This match is no longer open.", () =>
     asUser(client, SPARE1, () => client.query(`select public.request_to_join_open_match($1)`, [m1]))
@@ -206,33 +194,22 @@ async function main() {
   // -------------------------------------------------------------------
   console.log("\n=== kick reduces the count; 3 accepted cannot start ===\n");
 
-  let m2 = "";
-  await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
-    m2 = rows[0].id;
-  });
-
-  let r2 = "";
-  await asUser(client, SPARE1, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m2]);
-    r2 = rows[0].id;
-  });
-  await asUser(client, LEOU, () => client.query(`select public.accept_join_request($1)`, [r2]));
-
-  let r3 = "";
-  await asUser(client, SPARE2, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m2]);
-    r3 = rows[0].id;
-  });
-  await asUser(client, LEOU, () => client.query(`select public.accept_join_request($1)`, [r3]));
+  const m2 = await createMatch(client, LEOU);
+  const r2 = await join(client, SPARE1, m2);
+  const r3 = await join(client, SPARE2, m2);
 
   const count3 = await client.query(`select public.open_match_accepted_count($1) as n`, [m2]);
   assertEqual("accepted headcount at 3 (host + 2)", count3.rows[0].n, 3);
 
   await assertRejects(
-    "3 accepted cannot start — no finalizing action exists at 3",
+    "3 accepted cannot start singles",
     "Need exactly one other player accepted to start singles.",
     () => asUser(client, LEOU, () => client.query(`select public.start_open_match_singles($1)`, [m2]))
+  );
+  await assertRejects(
+    "3 accepted cannot start full either",
+    "Need exactly four players accepted to start now.",
+    () => asUser(client, LEOU, () => client.query(`select public.start_open_match_full($1)`, [m2]))
   );
 
   await assertRejects("only the host can kick", "Only the host can remove a player.", () =>
@@ -241,7 +218,7 @@ async function main() {
 
   await asUser(client, LEOU, () => client.query(`select public.kick_accepted_player($1)`, [r2]));
   const kicked = await client.query(`select status from public.open_match_join_requests where id = $1`, [r2]);
-  assertEqual("kicked request status (distinct from declined)", kicked.rows[0].status, "kicked");
+  assertEqual("kicked request status (distinct from withdrawn)", kicked.rows[0].status, "kicked");
 
   const count2b = await client.query(`select public.open_match_accepted_count($1) as n`, [m2]);
   assertEqual("accepted headcount after kick (host + 1)", count2b.rows[0].n, 2);
@@ -260,21 +237,13 @@ async function main() {
     singlesPlayers2.rows.map((r) => r.user_id).sort(),
     [LEOU, SPARE2].sort()
   );
+  void r3;
 
   // -------------------------------------------------------------------
-  console.log("\n=== withdraw is the requester's own action only; cancel cascades ===\n");
+  console.log("\n=== withdraw is the requester's own action only; cancel declines the rest ===\n");
 
-  let m3 = "";
-  await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
-    m3 = rows[0].id;
-  });
-
-  let r4 = "";
-  await asUser(client, SPARE1, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m3]);
-    r4 = rows[0].id;
-  });
+  const m3 = await createMatch(client, LEOU);
+  const r4 = await join(client, SPARE1, m3);
 
   await assertRejects("only the requester can withdraw their own request", "You can only withdraw your own request.", () =>
     asUser(client, SPARE2, () => client.query(`select public.withdraw_join_request($1)`, [r4]))
@@ -284,55 +253,23 @@ async function main() {
   const withdrawn = await client.query(`select status from public.open_match_join_requests where id = $1`, [r4]);
   assertEqual("withdrawn request status", withdrawn.rows[0].status, "withdrawn");
 
-  let r5 = "";
-  await asUser(client, SPARE2, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m3]);
-    r5 = rows[0].id;
-  });
+  const r5 = await join(client, SPARE2, m3);
   await asUser(client, LEOU, () => client.query(`select public.cancel_open_match($1)`, [m3]));
 
   const m3After = await client.query(`select status from public.open_matches where id = $1`, [m3]);
   assertEqual("cancelled match status", m3After.rows[0].status, "cancelled");
   const r5After = await client.query(`select status from public.open_match_join_requests where id = $1`, [r5]);
-  assertEqual("a still-pending request is declined when the host cancels", r5After.rows[0].status, "declined");
+  assertEqual("an accepted request is declined when the host cancels", r5After.rows[0].status, "declined");
 
   // -------------------------------------------------------------------
-  console.log("\n=== auto-convert at exactly 4: exact team pairing, pending request declined ===\n");
+  console.log("\n=== reaching 4 does NOT convert — it just closes the match ===\n");
 
   await client.query(`update public.profiles set city_slug = 'taguig' where id = $1`, [SPARE3]);
 
-  let m4 = "";
-  await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
-    m4 = rows[0].id;
-  });
+  const m4 = await createMatch(client, LEOU);
+  const r6 = await join(client, MOBILE, m4);
+  const r7 = await join(client, SPARE1, m4);
 
-  let r6 = "";
-  await asUser(client, MOBILE, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m4]);
-    r6 = rows[0].id;
-  });
-  let r7 = "";
-  await asUser(client, SPARE1, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m4]);
-    r7 = rows[0].id;
-  });
-  let r8 = "";
-  await asUser(client, SPARE2, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m4]);
-    r8 = rows[0].id;
-  });
-  // SPARE3 requests but will still be pending when the 4th slot fills
-  // from the other three — this is the case that must auto-decline.
-  let r9 = "";
-  await asUser(client, SPARE3, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m4]);
-    r9 = rows[0].id;
-  });
-
-  // Exact ratings from the design memory's own worked example: the
-  // {lowest,highest} vs {two middles} pairing gives a 100-point gap here
-  // (2400 vs 2300) against 500 and 300 for the alternatives.
   await client.query(
     `update public.player_ranks set rating = case user_id
        when $1 then 1000 when $2 then 1100 when $3 then 1200 when $4 then 1400 end
@@ -340,37 +277,99 @@ async function main() {
     [LEOU, MOBILE, SPARE1, SPARE2, [LEOU, MOBILE, SPARE1, SPARE2]]
   );
 
-  await asUser(client, LEOU, () => client.query(`select public.accept_join_request($1)`, [r6]));
-  await asUser(client, LEOU, () => client.query(`select public.accept_join_request($1)`, [r7]));
-  await asUser(client, LEOU, () => client.query(`select public.accept_join_request($1)`, [r8]));
+  const r8 = await join(client, SPARE2, m4);
 
   const m4After = await client.query(`select status, converted_match_id from public.open_matches where id = $1`, [m4]);
-  assertEqual("open match auto-converted at exactly 4", m4After.rows[0].status, "converted");
-  const doublesMatchId = m4After.rows[0].converted_match_id;
+  assertEqual(
+    "the 4th join does NOT convert — converting at fill would lock four people out of ranked play for days",
+    m4After.rows[0].status,
+    "open"
+  );
+  assertEqual("no ranked match exists yet", m4After.rows[0].converted_match_id, null);
+  assertEqual("accepted headcount is 4", (await client.query(`select public.open_match_accepted_count($1) as n`, [m4])).rows[0].n, 4);
 
-  const r9After = await client.query(`select status from public.open_match_join_requests where id = $1`, [r9]);
-  assertEqual("the still-pending 4th requester is declined by the fill, not left dangling", r9After.rows[0].status, "declined");
+  await assertRejects("a match already at 4 rejects a 5th request as full", "This match is full.", () =>
+    asUser(client, SPARE3, () => client.query(`select public.request_to_join_open_match($1)`, [m4]))
+  );
 
-  const doublesType = await client.query(`select match_type from public.ranked_matches where id = $1`, [doublesMatchId]);
-  assertEqual("converted match is doubles", doublesType.rows[0].match_type, "doubles");
+  // -------------------------------------------------------------------
+  console.log("\n=== manual start-at-4: four people already there, don't make them wait ===\n");
+
+  await assertRejects("only the host can start a full match early", "Only the host can start this match.", () =>
+    asUser(client, MOBILE, () => client.query(`select public.start_open_match_full($1)`, [m4]))
+  );
+
+  let doublesMatchId = "";
+  await asUser(client, LEOU, async () => {
+    const { rows } = await client.query(`select public.start_open_match_full($1) as id`, [m4]);
+    doublesMatchId = rows[0].id;
+  });
+
+  const m4AfterStart = await client.query(`select status, converted_match_id from public.open_matches where id = $1`, [m4]);
+  assertEqual("the full match converts once the host manually starts it", m4AfterStart.rows[0].status, "converted");
+  assertEqual("converted_match_id points at the real match", m4AfterStart.rows[0].converted_match_id, doublesMatchId);
+
+  const doublesRanked = await client.query(`select created_by, match_type from public.ranked_matches where id = $1`, [doublesMatchId]);
+  assertEqual("created_by is the open-match host, not whoever the 4th joiner happened to be", doublesRanked.rows[0].created_by, LEOU);
+  assertEqual("converted match is doubles", doublesRanked.rows[0].match_type, "doubles");
 
   const doublesTeams = await client.query(
-    `select user_id, team from public.ranked_match_players where match_id = $1 order by team, user_id`,
+    `select user_id, team, is_host from public.ranked_match_players where match_id = $1 order by team, user_id`,
     [doublesMatchId]
   );
   const teamA = doublesTeams.rows.filter((r) => r.team === "a").map((r) => r.user_id).sort();
   const teamB = doublesTeams.rows.filter((r) => r.team === "b").map((r) => r.user_id).sort();
   assertEqual("team A is {lowest, highest} rating — LEOU(1000) + SPARE2(1400)", teamA, [LEOU, SPARE2].sort());
   assertEqual("team B is the two middle ratings — MOBILE(1100) + SPARE1(1200)", teamB, [MOBILE, SPARE1].sort());
+  assertEqual(
+    "the open-match host is_host on the resulting match",
+    doublesTeams.rows.find((r) => r.user_id === LEOU)?.is_host,
+    true
+  );
+  void r6;
+  void r7;
+  void r8;
+
+  await assertRejects(
+    "start_open_match_full rejects a match that's already converted",
+    "This match is no longer open.",
+    () => asUser(client, LEOU, () => client.query(`select public.start_open_match_full($1)`, [m4]))
+  );
+
+  // -------------------------------------------------------------------
+  console.log("\n=== the row lock actually serializes concurrent joins on the same match ===\n");
+
+  const m10 = await createMatch(client, LEOU);
+  const lockHolder = new Client({ connectionString: process.env.DATABASE_URL });
+  await lockHolder.connect();
+  await lockHolder.query("begin");
+  await lockHolder.query(`select * from public.open_matches where id = $1 for update`, [m10]);
+
+  const blockedClient = new Client({ connectionString: process.env.DATABASE_URL });
+  await blockedClient.connect();
+  let blockedResolved = false;
+  const blockedPromise = (async () => {
+    await blockedClient.query("begin");
+    await blockedClient.query(`select set_config('request.jwt.claim.sub', $1, true)`, [MOBILE]);
+    await blockedClient.query(`select set_config('role', 'authenticated', true)`);
+    await blockedClient.query(`select public.request_to_join_open_match($1)`, [m10]);
+    await blockedClient.query("commit");
+    blockedResolved = true;
+  })();
+
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  assertEqual("a concurrent join on the SAME match is still blocked 800ms later, not racing ahead", blockedResolved, false);
+
+  await lockHolder.query("commit");
+  await blockedPromise;
+  assertEqual("the blocked join completes once the lock is released", blockedResolved, true);
+  await lockHolder.end();
+  await blockedClient.end();
 
   // -------------------------------------------------------------------
   console.log("\n=== rank-gap cap: named error, not a generic failure ===\n");
 
-  let m7 = "";
-  await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
-    m7 = rows[0].id;
-  });
+  const m7 = await createMatch(client, LEOU);
   await client.query(
     `update public.player_ranks set is_calibrated = true, rating = 800
      where user_id = $1 and season_id = public.current_ranked_season()`,
@@ -389,52 +388,72 @@ async function main() {
   );
 
   // -------------------------------------------------------------------
-  console.log("\n=== expiry sweep: relative to scheduled_at, not created_at ===\n");
+  console.log("\n=== kickoff sweep: convert if startable, expire if not, survive if not due ===\n");
 
-  // Scheduled 90 minutes ago (kickoff already passed) — must expire
-  // regardless of how recently it was CREATED.
-  let m5 = "";
-  await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
-    m5 = rows[0].id;
-  });
-  let r10 = "";
-  await asUser(client, SPARE1, async () => {
-    const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m5]);
-    r10 = rows[0].id;
-  });
-  await client.query(`update public.open_matches set scheduled_at = now() - interval '90 minutes' where id = $1`, [m5]);
+  // 1 accepted (host only), kickoff passed — unstartable, expires.
+  const m5 = await createMatch(client, LEOU);
+  await client.query(`update public.open_matches set scheduled_at = now() - interval '5 minutes' where id = $1`, [m5]);
 
-  // Scheduled 1 day out — the direct Tuesday-posted/Saturday-game case.
-  // Must survive even if it were created long ago, so back-date
-  // created_at here specifically to prove the sweep no longer looks at
-  // it at all.
-  let m6 = "";
-  await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
-    m6 = rows[0].id;
-  });
-  await client.query(`update public.open_matches set created_at = now() - interval '5 days' where id = $1`, [m6]);
+  // 2 accepted, never manually started, kickoff passed — auto-starts.
+  const m6 = await createMatch(client, LEOU);
+  const r10 = await join(client, SPARE1, m6);
+  void r10;
+  await client.query(`update public.open_matches set scheduled_at = now() - interval '5 minutes' where id = $1`, [m6]);
 
-  await client.query(`select public.expire_stale_open_matches()`);
+  // 3 accepted, kickoff passed — unstartable, expires.
+  const m11 = await createMatch(client, LEOU);
+  const r11a = await join(client, SPARE1, m11);
+  const r11b = await join(client, SPARE2, m11);
+  void r11a;
+  await client.query(`update public.open_matches set scheduled_at = now() - interval '5 minutes' where id = $1`, [m11]);
+
+  // 4 accepted, never manually started — the actual common case now
+  // that reaching 4 doesn't auto-convert. Kickoff passed — auto-starts.
+  const m13 = await createMatch(client, LEOU);
+  const r13a = await join(client, SPARE1, m13);
+  const r13b = await join(client, SPARE2, m13);
+  const r13c = await join(client, SPARE3, m13);
+  void r13a;
+  void r13b;
+  void r13c;
+  await client.query(`update public.player_ranks set rating = 1000 where user_id = $1 and season_id = public.current_ranked_season()`, [LEOU]);
+  await client.query(`update public.open_matches set scheduled_at = now() - interval '5 minutes' where id = $1`, [m13]);
+
+  // Fresh, not due yet — must survive untouched.
+  const m12 = await createMatch(client, LEOU);
+
+  await client.query(`select public.resolve_open_matches_at_kickoff()`);
 
   const m5After = await client.query(`select status from public.open_matches where id = $1`, [m5]);
-  assertEqual("a match whose scheduled_at has passed expires", m5After.rows[0].status, "expired");
-  const r10After = await client.query(`select status from public.open_match_join_requests where id = $1`, [r10]);
-  assertEqual("its pending request is declined by the sweep", r10After.rows[0].status, "declined");
-  const m6After = await client.query(`select status from public.open_matches where id = $1`, [m6]);
-  assertEqual(
-    "a match posted 5 days ago but scheduled for tomorrow survives — created_at is irrelevant now",
-    m6After.rows[0].status,
-    "open"
+  assertEqual("1 accepted at kickoff expires", m5After.rows[0].status, "expired");
+
+  const m6After = await client.query(`select status, converted_match_id from public.open_matches where id = $1`, [m6]);
+  assertEqual("2 accepted, never manually started, auto-converts AT kickoff", m6After.rows[0].status, "converted");
+  const m6Players = await client.query(
+    `select user_id from public.ranked_match_players where match_id = $1 order by user_id`,
+    [m6After.rows[0].converted_match_id]
   );
+  assertEqual("the kickoff-converted singles match has the right two players", m6Players.rows.map((r) => r.user_id).sort(), [LEOU, SPARE1].sort());
+
+  const m11After = await client.query(`select status from public.open_matches where id = $1`, [m11]);
+  assertEqual("3 accepted at kickoff expires (unstartable)", m11After.rows[0].status, "expired");
+  const r11bAfter = await client.query(`select status from public.open_match_join_requests where id = $1`, [r11b]);
+  assertEqual("its accepted requests are untouched by the sweep (not declined — they just didn't get to play)", r11bAfter.rows[0].status, "accepted");
+
+  const m12After = await client.query(`select status from public.open_matches where id = $1`, [m12]);
+  assertEqual("a match not yet due survives the sweep", m12After.rows[0].status, "open");
+
+  const m13After = await client.query(`select status, converted_match_id from public.open_matches where id = $1`, [m13]);
+  assertEqual("4 accepted, never manually started, auto-starts AT kickoff — the common real-world path now", m13After.rows[0].status, "converted");
+  const m13Players = await client.query(
+    `select count(*)::int as n from public.ranked_match_players where match_id = $1`,
+    [m13After.rows[0].converted_match_id]
+  );
+  assertEqual("the kickoff-converted doubles match has four players", m13Players.rows[0].n, 4);
 
   // -------------------------------------------------------------------
   console.log("\n=== teardown ===\n");
   await client.query(`delete from public.notifications where user_id = any($1)`, [SUITE_ACCOUNTS]);
-  // open_matches.converted_match_id references ranked_matches, so it has
-  // to go first or a converted fixture from a prior run leaves a
-  // dangling FK on the delete below.
   await client.query(`delete from public.open_matches where host_id = any($1)`, [SUITE_ACCOUNTS]);
   await client.query(`delete from public.ranked_matches where created_by = any($1)`, [SUITE_ACCOUNTS]);
   await client.query(`delete from public.player_ranks where user_id = any($1)`, [SUITE_ACCOUNTS]);
@@ -444,6 +463,11 @@ async function main() {
   console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}\n`);
   await client.end();
   process.exit(failures === 0 ? 0 : 1);
+}
+
+async function functionExists(client: Client, name: string): Promise<boolean> {
+  const r = await client.query(`select count(*)::int as n from pg_proc where proname = $1 and pronamespace = 'public'::regnamespace`, [name]);
+  return r.rows[0].n > 0;
 }
 
 main().catch((e) => {
