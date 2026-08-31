@@ -1,5 +1,6 @@
 /**
- * Proves get_open_match_public() (20260810000118) against staging,
+ * Proves get_open_match_public() (20260810000118, extended by 119 with
+ * scheduled_at/venue_display) against staging,
  * called as the real `anon` role — not the service connection — since
  * that's the actual caller a signed-out visitor's browser produces.
  * Same verification shape as public-ranked-match-pages.md: apply, call
@@ -41,6 +42,8 @@ const OPP = "3e1c4aa5-2122-4343-a3e2-321c11961a74"; // MOBILE
 // are tracked by id and deleted explicitly in teardown rather than by
 // a tag column, since open_matches has none.
 const CITY = "taguig";
+// A real row from staging's own venues table, for the venue_id-set case.
+const REAL_VENUE_ID = "459d7c39-1058-4871-a648-453e5df3595c"; // "QA Test Courts"
 
 async function main() {
   const client = new Client({ connectionString: process.env.DATABASE_URL });
@@ -48,8 +51,9 @@ async function main() {
   const fixtureIds: string[] = [];
 
   const openMatch = await client.query(
-    `insert into public.open_matches (host_id, target_city, status) values ($1, $2, 'open') returning id`,
-    [HOST, CITY]
+    `insert into public.open_matches (host_id, target_city, status, scheduled_at, venue_id)
+     values ($1, $2, 'open', now() + interval '1 day', $3) returning id`,
+    [HOST, CITY, REAL_VENUE_ID]
   );
   const openId = openMatch.rows[0].id;
   fixtureIds.push(openId);
@@ -59,14 +63,16 @@ async function main() {
   );
 
   const convertedMatch = await client.query(
-    `insert into public.open_matches (host_id, target_city, status) values ($1, $2, 'converted') returning id`,
-    [HOST, CITY]
+    `insert into public.open_matches (host_id, target_city, status, scheduled_at, venue_label)
+     values ($1, $2, 'converted', now() + interval '1 day', $3) returning id`,
+    [HOST, CITY, "Nomads Pickleball"]
   );
   const convertedId = convertedMatch.rows[0].id;
   fixtureIds.push(convertedId);
 
   const cancelledMatch = await client.query(
-    `insert into public.open_matches (host_id, target_city, status) values ($1, $2, 'cancelled') returning id`,
+    `insert into public.open_matches (host_id, target_city, status, scheduled_at)
+     values ($1, $2, 'cancelled', now() + interval '1 day') returning id`,
     [HOST, CITY]
   );
   const cancelledId = cancelledMatch.rows[0].id;
@@ -81,10 +87,12 @@ async function main() {
   assertEqual("status is returned verbatim", openRow.status, "open");
   assertEqual("target_city matches", openRow.target_city, CITY);
   assertEqual("accepted_count reflects the real headcount (host + 1 accepted)", openRow.accepted_count, 2);
+  assertEqual("venue_display resolves the real venue's name when venue_id is set", openRow.venue_display, "QA Test Courts");
+  assertEqual("scheduled_at comes back", openRow.scheduled_at instanceof Date, true);
   assertEqual(
-    "only the five documented columns come back, nothing extra",
+    "only the seven documented columns come back, nothing extra",
     Object.keys(openRow).sort(),
-    ["accepted_count", "host_avatar_url", "host_display_name", "status", "target_city"].sort()
+    ["accepted_count", "host_avatar_url", "host_display_name", "scheduled_at", "status", "target_city", "venue_display"].sort()
   );
 
   console.log("\n=== anon can read a converted/cancelled match too — not a 404 ===\n");
@@ -97,6 +105,11 @@ async function main() {
     (convertedResult as any).rows[0]?.status ?? null,
     "converted"
   );
+  assertEqual(
+    "venue_display falls back to the free-text label when no venue_id is set",
+    (convertedResult as any).rows[0]?.venue_display ?? null,
+    "Nomads Pickleball"
+  );
 
   const cancelledResult = await asAnon(client, () =>
     client.query(`select * from public.get_open_match_public($1)`, [cancelledId])
@@ -106,6 +119,11 @@ async function main() {
     "its status is returned verbatim as 'cancelled'",
     (cancelledResult as any).rows[0]?.status ?? null,
     "cancelled"
+  );
+  assertEqual(
+    "venue_display is null when neither venue_id nor venue_label is set",
+    (cancelledResult as any).rows[0]?.venue_display ?? null,
+    null
   );
 
   console.log("\n=== a nonexistent id is the only real 'not found' ===\n");
