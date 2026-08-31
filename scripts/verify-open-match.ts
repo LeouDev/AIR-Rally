@@ -1,7 +1,9 @@
 /**
  * Proves the Open Match feature (20260810000115_cities.sql,
- * 20260810000116_open_matches.sql) against a real staging database, end
- * to end through the actual RPCs — not by inspecting table shape.
+ * 20260810000116_open_matches.sql, extended by 20260810000119 with
+ * scheduled_at/venue and scheduled_at-relative expiry) against a real
+ * staging database, end to end through the actual RPCs — not by
+ * inspecting table shape.
  *
  * Reuses the rating-engine suite's own fixture accounts (LEOU/MOBILE/3
  * SPARES) rather than inventing new ones, for the same reason that suite
@@ -102,7 +104,7 @@ async function main() {
 
   let m1 = "";
   await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig') as id`);
+    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
     m1 = rows[0].id;
   });
 
@@ -117,6 +119,12 @@ async function main() {
     "broadcast reached exactly the same-city players, not SPARE3",
     broadcast.rows.map((r) => r.user_id).sort(),
     [MOBILE, SPARE1, SPARE2].sort()
+  );
+
+  await assertRejects(
+    "a match scheduled in the past is rejected outright",
+    "Pick a time in the future.",
+    () => asUser(client, LEOU, () => client.query(`select public.create_open_match('taguig', now() - interval '1 hour')`))
   );
 
   // -------------------------------------------------------------------
@@ -200,7 +208,7 @@ async function main() {
 
   let m2 = "";
   await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig') as id`);
+    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
     m2 = rows[0].id;
   });
 
@@ -258,7 +266,7 @@ async function main() {
 
   let m3 = "";
   await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig') as id`);
+    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
     m3 = rows[0].id;
   });
 
@@ -295,7 +303,7 @@ async function main() {
 
   let m4 = "";
   await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig') as id`);
+    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
     m4 = rows[0].id;
   });
 
@@ -360,7 +368,7 @@ async function main() {
 
   let m7 = "";
   await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig') as id`);
+    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
     m7 = rows[0].id;
   });
   await client.query(
@@ -381,11 +389,13 @@ async function main() {
   );
 
   // -------------------------------------------------------------------
-  console.log("\n=== expiry sweep: stale matches expire, fresh ones survive ===\n");
+  console.log("\n=== expiry sweep: relative to scheduled_at, not created_at ===\n");
 
+  // Scheduled 90 minutes ago (kickoff already passed) — must expire
+  // regardless of how recently it was CREATED.
   let m5 = "";
   await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig') as id`);
+    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
     m5 = rows[0].id;
   });
   let r10 = "";
@@ -393,22 +403,31 @@ async function main() {
     const { rows } = await client.query(`select public.request_to_join_open_match($1) as id`, [m5]);
     r10 = rows[0].id;
   });
-  await client.query(`update public.open_matches set created_at = now() - interval '90 minutes' where id = $1`, [m5]);
+  await client.query(`update public.open_matches set scheduled_at = now() - interval '90 minutes' where id = $1`, [m5]);
 
+  // Scheduled 1 day out — the direct Tuesday-posted/Saturday-game case.
+  // Must survive even if it were created long ago, so back-date
+  // created_at here specifically to prove the sweep no longer looks at
+  // it at all.
   let m6 = "";
   await asUser(client, LEOU, async () => {
-    const { rows } = await client.query(`select public.create_open_match('taguig') as id`);
+    const { rows } = await client.query(`select public.create_open_match('taguig', now() + interval '1 day') as id`);
     m6 = rows[0].id;
   });
+  await client.query(`update public.open_matches set created_at = now() - interval '5 days' where id = $1`, [m6]);
 
   await client.query(`select public.expire_stale_open_matches()`);
 
   const m5After = await client.query(`select status from public.open_matches where id = $1`, [m5]);
-  assertEqual("a 90-minute-old open match expires", m5After.rows[0].status, "expired");
+  assertEqual("a match whose scheduled_at has passed expires", m5After.rows[0].status, "expired");
   const r10After = await client.query(`select status from public.open_match_join_requests where id = $1`, [r10]);
   assertEqual("its pending request is declined by the sweep", r10After.rows[0].status, "declined");
   const m6After = await client.query(`select status from public.open_matches where id = $1`, [m6]);
-  assertEqual("a fresh open match survives the sweep", m6After.rows[0].status, "open");
+  assertEqual(
+    "a match posted 5 days ago but scheduled for tomorrow survives — created_at is irrelevant now",
+    m6After.rows[0].status,
+    "open"
+  );
 
   // -------------------------------------------------------------------
   console.log("\n=== teardown ===\n");
