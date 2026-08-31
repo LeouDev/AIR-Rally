@@ -112,6 +112,16 @@ begin
 end;
 $$;
 
+-- A new trailing parameter (even with a default) changes this
+-- function's argument TYPE LIST, which is what Postgres uses for
+-- identity — create or replace does NOT treat this as the same
+-- function to replace, it creates a SECOND overloaded version and
+-- leaves the old 5-argument one in place. Drop it explicitly first, or
+-- both versions coexist — and a 5-named-argument PostgREST call becomes
+-- genuinely ambiguous between them, since the 6th argument's default
+-- makes the new overload satisfiable by 5 arguments too.
+drop function if exists public.confirm_paymongo_booking_payment(uuid, text, text, integer, text);
+
 create or replace function public.confirm_paymongo_booking_payment(
   p_booking_id uuid,
   p_paymongo_checkout_session_id text,
