@@ -149,6 +149,15 @@ begin
 end;
 $$;
 
+-- A new trailing parameter changes this function's argument type list,
+-- which is what Postgres uses for identity — create or replace does NOT
+-- treat this as the same function to replace, it creates a SECOND
+-- overload and leaves the old 2-argument one in place, live, forkable
+-- by a 2-named-argument PostgREST call. Learned this exact lesson
+-- earlier tonight on confirm_paymongo_booking_payment and still missed
+-- it here on first pass — drop the old signature explicitly.
+drop function if exists public.complete_reschedule(uuid, uuid);
+
 create or replace function public.complete_reschedule(
   p_reschedule_id uuid,
   p_refund_id uuid default null,
@@ -224,6 +233,10 @@ begin
   return true;
 end;
 $$;
+
+-- Same fork risk as complete_reschedule above — drop the old 4-argument
+-- signature explicitly before recreating with the 5th parameter.
+drop function if exists public.mark_reschedule_failed(uuid, text, text, uuid);
 
 create or replace function public.mark_reschedule_failed(
   p_reschedule_id uuid,
