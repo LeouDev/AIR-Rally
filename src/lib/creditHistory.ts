@@ -37,6 +37,12 @@ const TYPE_LABELS: Record<CreditTransactionType, string> = {
   admin_adjustment: "Adjustment",
   promotion_bonus: "Bonus",
   booking_payment: "Paid for a booking",
+  account_deletion_forfeiture: "Forfeited on account deletion",
+  // Never "Refund" — QR Ph (the only payment method AIR/Rally accepts)
+  // cannot be refunded through PayMongo's API at all, so this credit is
+  // the actual compensation, not a receipt for one. See the
+  // qrph-is-the-only-payment-method memory.
+  reschedule_compensation: "Rescheduled to a cheaper court",
 };
 
 /**

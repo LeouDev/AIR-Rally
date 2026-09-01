@@ -125,12 +125,23 @@ type RequestRefundParams = {
  *
  * PayMongo execution is hard-gated behind
  * isPaymongoRefundExecutionEnabled() — see lib/paymongoLaunchGates.ts —
- * because the two-party split-refund accounting (does the venue's 95%
- * get reversed, does AIR/Rally's 5% get reversed, what happens to
- * PayMongo's own fee) is unproven. Stripe refunds are a plain, standard
- * Stripe API call with no marketplace-splitting complexity in this app
- * (Stripe Connect was never implemented — see ARCHITECTURE.md's paused
- * Phase 4B.5), so Stripe execution is real, not gated.
+ * but ONLY for a booking that was actually split
+ * (booking.paymongo_venue_account_id is set), because the two-party
+ * split-refund accounting (does the venue's 95% get reversed, does
+ * AIR/Rally's 5% get reversed, what happens to PayMongo's own fee) is
+ * unproven. A plain, non-split PayMongo refund carries none of that
+ * risk — executePaymongoRefund() already degrades correctly for it
+ * (posts only {amount, payment_id, reason}, reads an optional
+ * split_refund back) — so gating it too would block strictly more than
+ * the justification requires. Narrowing rather than lifting the flag
+ * outright keeps split protection intact for whenever splitting is
+ * actually enabled, instead of a switch someone has to remember to
+ * re-gate later. See paymongo-refund-gate-narrower-than-needed memory
+ * for the full investigation and the founder authorization this
+ * narrowing shipped under. Stripe refunds are a plain, standard Stripe
+ * API call with no marketplace-splitting complexity in this app (Stripe
+ * Connect was never implemented — see ARCHITECTURE.md's paused Phase
+ * 4B.5), so Stripe execution is real, not gated, same as before.
  */
 export async function requestRefund(supabase: Client, params: RequestRefundParams): Promise<BookingRefund> {
   const { booking, amount, reason, initiatedBy, refundBasis } = params;
@@ -145,8 +156,23 @@ export async function requestRefund(supabase: Client, params: RequestRefundParam
     throw new RefundError("booking_not_paid", "This booking was never paid, so there's nothing to refund.");
   }
 
-  const providerPaymentId = booking.paymongo_payment_intent_id;
+  // paymongo_payment_id (the Payment id), not paymongo_payment_intent_id
+  // (the PaymentIntent id) — see this function's own doc comment and
+  // migration 20260810000121. GET /v1/payments/{id} and PayMongo's
+  // refund endpoint both need the former; the latter 404s against them.
+  const providerPaymentId = booking.paymongo_payment_id;
   if (!providerPaymentId) {
+    if (booking.paymongo_payment_intent_id) {
+      // Confirmed before the webhook started persisting
+      // paymongo_payment_id (migration 20260810000121/122) — genuinely
+      // paid, just missing the id this function needs. Distinct from
+      // "never paid" so nobody reads this booking as unpaid and looks
+      // in the wrong place.
+      throw new RefundError(
+        "booking_not_paid",
+        "This booking's payment predates payment-id tracking and can't be refunded automatically — refund it manually through PayMongo's dashboard using the checkout session id."
+      );
+    }
     throw new RefundError("booking_not_paid", "This booking has no recorded payment to refund.");
   }
 
@@ -158,10 +184,14 @@ export async function requestRefund(supabase: Client, params: RequestRefundParam
     );
   }
 
-  if (!isPaymongoRefundExecutionEnabled()) {
+  // Scoped to split bookings only — see this function's own doc comment.
+  // A booking with no paymongo_venue_account_id was never split, so it
+  // carries none of the unverified two-party accounting risk this gate
+  // exists for.
+  if (booking.paymongo_venue_account_id != null && !isPaymongoRefundExecutionEnabled()) {
     throw new RefundError(
       "paymongo_refund_not_enabled",
-      "PayMongo refund execution is disabled — the two-party split-refund accounting is unverified. See ARCHITECTURE.md / the PayMongo Final Verification Report."
+      "PayMongo refund execution is disabled for split bookings — the two-party split-refund accounting is unverified. See ARCHITECTURE.md / the PayMongo Final Verification Report."
     );
   }
 
