@@ -50,7 +50,6 @@ const BOOKING: Booking = {
   processing_fee_amount: 0,
   paymongo_checkout_session_id: null,
   paymongo_payment_intent_id: null,
-  paymongo_payment_id: null,
   platform_fee_amount: null,
   venue_amount: null,
   paymongo_venue_account_id: null,

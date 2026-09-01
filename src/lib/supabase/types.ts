@@ -568,15 +568,7 @@ export type CreditTransactionType =
   | "cancellation_compensation"
   | "admin_adjustment"
   | "promotion_bonus"
-  | "booking_payment"
-  // Predates this file catching up to it — confirmed live on the deployed
-  // CHECK constraint, not added by this session.
-  | "account_deletion_forfeiture"
-  // Migration 20260810000123. A cheaper-slot reschedule that can't be
-  // refunded (QR Ph — see qrph-is-the-only-payment-method memory) credits
-  // the price difference instead. General, unrestricted AIR/Rally credit —
-  // founder decision — not a use-restricted instrument.
-  | "reschedule_compensation";
+  | "booking_payment";
 
 /**
  * AIR/Rally Credits ledger row — immutable. Positive amounts add credit,
@@ -1014,14 +1006,6 @@ export type Booking = {
   /** Set only by confirm_paymongo_booking_payment() (SECURITY DEFINER) once PayMongo payment is verified — never client-writable. */
   paymongo_payment_intent_id: string | null;
   /**
-   * The PayMongo Payment id (not PaymentIntent) — what GET /v1/payments/{id}
-   * and refund calls actually need. Populated at webhook confirmation
-   * time from the intent's one Payment with status=paid.
-   * paymongo_payment_intent_id is a different, correctly-named column
-   * and is not this value — see migration 20260810000121.
-   */
-  paymongo_payment_id: string | null;
-  /**
    * PayMongo Platforms marketplace split (see ARCHITECTURE.md's PayMongo
    * Platforms section). Immutable snapshot computed once, server-side, at
    * checkout-session-creation time — never from a post-processing-fee
@@ -1109,8 +1093,7 @@ export type BookingRefund = {
 
 export type RescheduleStatus =
   | "pending_payment"
-  /** The financial step (refund OR credit) already succeeded; completion hasn't run yet. Named after the STATE, not the mechanism — renamed from pending_refund in migration 20260810000123 so a future compensation mechanism never needs its own status value. */
-  | "pending_completion"
+  | "pending_refund"
   | "completed"
   | "failed"
   | "provider_unavailable";
@@ -1130,10 +1113,8 @@ export type BookingReschedule = {
   /** Signed: new_booking.price_amount - original_booking.price_amount. */
   price_difference: number;
   status: RescheduleStatus;
-  /** Set only once a gross-only refund has actually been attempted for a price-decrease reschedule — never guessed. Mutually exclusive with credit_transaction_id (migration 20260810000123's own CHECK). */
+  /** Set only once a gross-only refund has actually been attempted for a price-decrease reschedule — never guessed. */
   refund_id: string | null;
-  /** Set only once AIR/Rally credit has actually been issued for a price-decrease reschedule that can't be refunded (QR Ph) — never guessed. Mutually exclusive with refund_id. */
-  credit_transaction_id: string | null;
   initiated_by: string;
   reason: string | null;
   failure_reason: string | null;
@@ -1666,8 +1647,6 @@ export type Database = {
           p_paymongo_payment_intent_id: string;
           p_expected_amount: number;
           p_expected_currency: string;
-          /** Optional, default null — migration 20260810000122. The real Payment id (not PaymentIntent) requestRefund() actually needs; see bookings.paymongo_payment_id. */
-          p_paymongo_payment_id?: string;
         };
         Returns: boolean;
       };
@@ -1956,12 +1935,11 @@ export type Database = {
         };
         Returns: boolean;
       };
-      /** Atomically confirms the replacement booking (if not already) + cancels the original + marks the reschedule completed. See lib/services/reschedules.ts. Exactly one of p_refund_id/p_credit_transaction_id, mirroring booking_reschedules' own mutual-exclusivity CHECK (migration 20260810000123). */
+      /** Atomically confirms the replacement booking (if not already) + cancels the original + marks the reschedule completed. See lib/services/reschedules.ts. */
       complete_reschedule: {
         Args: {
           p_reschedule_id: string;
           p_refund_id?: string | null;
-          p_credit_transaction_id?: string | null;
         };
         Returns: boolean;
       };
@@ -1971,7 +1949,6 @@ export type Database = {
           p_status: "failed" | "provider_unavailable";
           p_failure_reason: string;
           p_refund_id?: string | null;
-          p_credit_transaction_id?: string | null;
         };
         Returns: boolean;
       };
@@ -1980,14 +1957,6 @@ export type Database = {
         Args: {
           p_reschedule_id: string;
           p_refund_id: string;
-        };
-        Returns: boolean;
-      };
-      /** Sibling to record_reschedule_refund_success for the credit-compensation mechanism (migration 20260810000123, QR Ph can't be refunded — see qrph-is-the-only-payment-method memory). Validates the credit transaction is a real reschedule_compensation for this reschedule's original booking before checkpointing. service_role-only. */
-      record_reschedule_credit_success: {
-        Args: {
-          p_reschedule_id: string;
-          p_credit_transaction_id: string;
         };
         Returns: boolean;
       };

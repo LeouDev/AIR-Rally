@@ -25,12 +25,6 @@ const TYPE_LABELS: Record<CreditTransactionType, string> = {
   admin_adjustment: "Manual adjustment",
   promotion_bonus: "Promotion",
   booking_payment: "Spent on a booking",
-  account_deletion_forfeiture: "Forfeited on account deletion",
-  // Not "refund" — no cash moved. QR Ph (the only payment method AIR/Rally
-  // accepts) can't be refunded through PayMongo at all; this credit is the
-  // actual compensation for a cheaper-slot reschedule, not a receipt for a
-  // real refund. See the qrph-is-the-only-payment-method memory.
-  reschedule_compensation: "Reschedule compensation",
 };
 
 export default async function AdminUserCreditsPage({ params }: PageProps) {

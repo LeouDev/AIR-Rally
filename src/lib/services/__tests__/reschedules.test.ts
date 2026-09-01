@@ -9,7 +9,7 @@ import {
   maybeCompleteReschedule,
   maybeCompleteRescheduleFromProvider,
 } from "../reschedules";
-import { createTableMockSupabase, createQueryBuilder, postgrestError } from "../../test-helpers/mockSupabase";
+import { createTableMockSupabase, postgrestError } from "../../test-helpers/mockSupabase";
 import type { Booking, BookingReschedule } from "../../supabase/types";
 
 // Relative paths — see MEMORY.md (air-rally-jest-mock-colon-path-bug).
@@ -38,14 +38,19 @@ const mockGetBookingById = getBookingById as jest.MockedFunction<typeof getBooki
 const mockAttachPaymongoCheckoutSession = attachPaymongoCheckoutSession as jest.MockedFunction<typeof attachPaymongoCheckoutSession>;
 const mockSetBookingMarketplaceSplit = setBookingMarketplaceSplit as jest.MockedFunction<typeof setBookingMarketplaceSplit>;
 
-// Price decrease no longer refunds at all (see reschedules.ts's own
-// comment above the decrease branch — QR Ph, AIR/Rally's only payment
-// method, can't be refunded through PayMongo's API) — it issues AIR/Rally
-// credit instead, via credits.ts, mocked here the same way every other
-// sibling service in this file is.
-jest.mock("../credits", () => ({ addCredit: jest.fn() }));
-import { addCredit } from "../credits";
-const mockAddCredit = addCredit as jest.MockedFunction<typeof addCredit>;
+jest.mock("../refunds", () => ({
+  requestRefund: jest.fn(),
+  RefundError: class RefundError extends Error {
+    reason: string;
+    constructor(reason: string, message: string) {
+      super(message);
+      this.reason = reason;
+      this.name = "RefundError";
+    }
+  },
+}));
+import { requestRefund, RefundError } from "../refunds";
+const mockRequestRefund = requestRefund as jest.MockedFunction<typeof requestRefund>;
 
 jest.mock("../paymongo", () => ({
   createPayMongoCheckoutSession: jest.fn(),
@@ -65,7 +70,7 @@ import { isPaymongoMarketplaceSplitEnabled } from "../../paymongoLaunchGates";
 const mockMarketplaceSplitEnabled = isPaymongoMarketplaceSplitEnabled as jest.MockedFunction<typeof isPaymongoMarketplaceSplitEnabled>;
 
 // The security-critical mock: complete_reschedule()/mark_reschedule_
-// failed()/record_reschedule_credit_success() are now called through a
+// failed()/record_reschedule_refund_success() are now called through a
 // SEPARATE, service-role-authenticated client (see finding B1), never
 // the caller's own RLS-scoped `supabase`. This mock stands in for that
 // separate client. Its `.rpc` is asserted against directly in the
@@ -76,14 +81,8 @@ const mockMarketplaceSplitEnabled = isPaymongoMarketplaceSplitEnabled as jest.Mo
 // caller's own client again, every single test here would fail loudly
 // with "no mock rpc result configured", not silently pass.
 const mockServiceRoleRpc = jest.fn();
-// The credit path's follow-up lookup (createReschedule's decrease branch
-// reads back the credit_transactions row addCredit() just wrote, since
-// issue_credit() only returns the resulting wallet balance — see
-// reschedules.ts's own comment on this) — a second entry point into the
-// same service-role client alongside .rpc().
-const mockServiceRoleFrom = jest.fn();
 jest.mock("../../supabase/serviceRole", () => ({
-  createServiceRoleClient: jest.fn(() => ({ rpc: mockServiceRoleRpc, from: mockServiceRoleFrom })),
+  createServiceRoleClient: jest.fn(() => ({ rpc: mockServiceRoleRpc })),
 }));
 
 // A real, minimal fake of the Stripe SDK shape reschedules.ts actually
@@ -113,7 +112,6 @@ const ORIGINAL_BOOKING: Booking = {
   processing_fee_amount: 0,
   paymongo_checkout_session_id: null,
   paymongo_payment_intent_id: null,
-  paymongo_payment_id: null,
   platform_fee_amount: null,
   venue_amount: null,
   paymongo_venue_account_id: null,
@@ -133,6 +131,26 @@ const REPLACEMENT_BOOKING: Booking = {
   paid_at: null,
 };
 
+const REFUND_ROW = {
+  id: "refund-1",
+  booking_id: ORIGINAL_BOOKING.id,
+  payment_provider: "stripe" as const,
+  provider_payment_id: "pi_test_orig",
+  provider_refund_id: "re_test_1",
+  amount: 10000,
+  currency: "PHP",
+  status: "succeeded" as const,
+  reason: "Booking reschedule — price decrease",
+  failure_reason: null,
+  initiated_by: "user-1",
+  refund_basis: "gross_only" as const,
+  platform_refund_amount: 500,
+  venue_refund_amount: 9500,
+  provider_available_at: null,
+  created_at: "2026-08-10T00:00:00Z",
+  updated_at: "2026-08-10T00:00:00Z",
+};
+
 const RESCHEDULE_ROW: BookingReschedule = {
   id: "reschedule-1",
   original_booking_id: ORIGINAL_BOOKING.id,
@@ -140,7 +158,6 @@ const RESCHEDULE_ROW: BookingReschedule = {
   price_difference: 0,
   status: "pending_payment",
   refund_id: null,
-  credit_transaction_id: null,
   initiated_by: "user-1",
   reason: null,
   failure_reason: null,
@@ -151,33 +168,13 @@ const RESCHEDULE_ROW: BookingReschedule = {
 const NOT_FOUND = { data: null, error: null };
 const COURT_ROW = (venueId: string) => ({ data: { venue_id: venueId }, error: null });
 
-/** Resolve every service-role RPC by name, matching real complete_reschedule/mark_reschedule_failed/record_reschedule_credit_success return shapes. */
+/** Resolve every service-role RPC by name, matching real complete_reschedule/mark_reschedule_failed/record_reschedule_refund_success return shapes. */
 function mockServiceRoleRpcResults(results: Record<string, { data: unknown; error: unknown } | undefined>) {
   mockServiceRoleRpc.mockImplementation((fn: string) => {
     const entry = results[fn];
     if (!entry) throw new Error(`mockServiceRoleRpc: no result configured for "${fn}"`);
     return Promise.resolve(entry);
   });
-}
-
-/**
- * Stands in for the service-role client's `.from("credit_transactions")`
- * lookup that follows a successful addCredit() call (see reschedules.ts —
- * issue_credit() returns only the resulting wallet balance, never the new
- * row's own id). Returns the query builder so a test can additionally
- * assert on the exact filters used (`.eq("reference_id", ...)`,
- * `.eq("transaction_type", "reschedule_compensation")`) — the same
- * "never a fabricated id" proof the old refund-id SECURITY test made.
- */
-function mockCreditTransactionLookup(result: { data: unknown; error: null }) {
-  const builder = createQueryBuilder(result);
-  mockServiceRoleFrom.mockImplementation((table: string) => {
-    if (table !== "credit_transactions") {
-      throw new Error(`mockServiceRoleFrom: no result configured for table "${table}"`);
-    }
-    return builder;
-  });
-  return builder;
 }
 
 beforeEach(() => {
@@ -189,14 +186,13 @@ beforeEach(() => {
   mockAttachPaymongoCheckoutSession.mockReset();
   mockSetBookingMarketplaceSplit.mockReset();
   mockSetBookingMarketplaceSplit.mockResolvedValue(true);
-  mockAddCredit.mockReset();
+  mockRequestRefund.mockReset();
   mockCreatePayMongoCheckoutSession.mockReset();
   mockRetrievePayMongoCheckoutSession.mockReset();
   mockGetCourtDisplayInfo.mockReset();
   mockMarketplaceSplitEnabled.mockReset();
   mockMarketplaceSplitEnabled.mockReturnValue(false);
   mockServiceRoleRpc.mockReset();
-  mockServiceRoleFrom.mockReset();
 });
 
 afterEach(() => {
@@ -299,11 +295,7 @@ describe("SECURITY — completion RPCs only ever go through the service-role cli
     });
 
     expect(result.kind).toBe("completed");
-    expect(mockServiceRoleRpc).toHaveBeenCalledWith("complete_reschedule", {
-      p_reschedule_id: RESCHEDULE_ROW.id,
-      p_refund_id: null,
-      p_credit_transaction_id: null,
-    });
+    expect(mockServiceRoleRpc).toHaveBeenCalledWith("complete_reschedule", { p_reschedule_id: RESCHEDULE_ROW.id, p_refund_id: null });
   });
 
   it("a direct, unauthorized call shape (RPC invoked with only a reschedule id, no independent verification) is exactly what service_role-only grants prevent — proven by there being NO code path in this file that calls complete_reschedule via the ordinary session client", async () => {
@@ -336,14 +328,13 @@ describe("SECURITY — completion RPCs only ever go through the service-role cli
     expect(mockServiceRoleRpc).not.toHaveBeenCalled();
   });
 
-  it("arbitrary credit_transaction_id values are never fabricated by the application layer — only ever the id looked up immediately after addCredit() succeeds", async () => {
+  it("arbitrary refund_id values are never fabricated by the application layer — only ever the exact id returned by requestRefund()", async () => {
     const lowerPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 40000 };
     mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
     mockCreateBooking.mockResolvedValue(lowerPriceReplacement);
-    mockAddCredit.mockResolvedValue(10000);
-    const creditLookupBuilder = mockCreditTransactionLookup({ data: { id: "credit-real-999" }, error: null });
+    mockRequestRefund.mockResolvedValue({ ...REFUND_ROW, id: "refund-real-999", amount: 10000, status: "succeeded" });
     mockServiceRoleRpcResults({
-      record_reschedule_credit_success: { data: true, error: null },
+      record_reschedule_refund_success: { data: true, error: null },
       complete_reschedule: { data: true, error: null },
     });
     const supabase = createTableMockSupabase({
@@ -360,24 +351,13 @@ describe("SECURITY — completion RPCs only ever go through the service-role cli
       siteUrl: "https://air-rally.app",
     });
 
+    expect(mockServiceRoleRpc).toHaveBeenCalledWith("record_reschedule_refund_success", { p_reschedule_id: RESCHEDULE_ROW.id, p_refund_id: "refund-real-999" });
+    expect(mockServiceRoleRpc).toHaveBeenCalledWith("complete_reschedule", { p_reschedule_id: RESCHEDULE_ROW.id, p_refund_id: "refund-real-999" });
     // Never called with a fabricated or client-suppliable value — every
-    // call traces back to the credit_transactions row looked up right
-    // after addCredit() succeeded, filtered by the ORIGINAL booking's id
-    // and this exact transaction type — not a client-suppliable value.
-    expect(creditLookupBuilder.eq).toHaveBeenCalledWith("reference_id", ORIGINAL_BOOKING.id);
-    expect(creditLookupBuilder.eq).toHaveBeenCalledWith("transaction_type", "reschedule_compensation");
-    expect(mockServiceRoleRpc).toHaveBeenCalledWith("record_reschedule_credit_success", {
-      p_reschedule_id: RESCHEDULE_ROW.id,
-      p_credit_transaction_id: "credit-real-999",
-    });
-    expect(mockServiceRoleRpc).toHaveBeenCalledWith("complete_reschedule", {
-      p_reschedule_id: RESCHEDULE_ROW.id,
-      p_refund_id: null,
-      p_credit_transaction_id: "credit-real-999",
-    });
-    // The database itself independently re-validates this id belongs to a
-    // real reschedule_compensation transaction for the correct reference
-    // (see record_reschedule_credit_success()'s own validation, which
+    // call traces back to requestRefund()'s own mocked return, and the
+    // database itself independently re-validates this id belongs to a
+    // real succeeded refund for the correct booking (see
+    // complete_reschedule()'s own `exists (select ...)` check, which
     // this JS-level test cannot exercise without live Postgres).
   });
 
@@ -391,20 +371,46 @@ describe("SECURITY — completion RPCs only ever go through the service-role cli
     expect(mockServiceRoleRpc).not.toHaveBeenCalled();
   });
 
-  it("Blocker A's client-substitution bug class is structurally impossible for the credit path — addCredit() takes no client parameter at all", async () => {
-    // Blocker A (see the test above and the SECURITY block's own
-    // comments) was possible for requestRefund() specifically because it
-    // took the caller's own client as a parameter, and booking_refunds'
-    // RLS only permits an admin session to write to it — passing the
-    // wrong client was a live, reachable bug shape. addCredit()'s
-    // signature (credits.ts) is `(input: IssueCreditInput)` — no client
-    // parameter exists to substitute the wrong one for. It reaches its
-    // own internal service-role client (getCreditsServiceRoleClient())
-    // unconditionally, the same way every RPC call in this file already
-    // does. There is no code path in reschedules.ts that could pass an
-    // RLS-scoped client to it even by mistake — verified by addCredit()'s
-    // own type signature, not a runtime assertion here.
-    expect(true).toBe(true);
+  it("Blocker A regression: a price-decrease reschedule invoked from an ordinary customer/RLS-scoped session routes requestRefund() through the service-role client, never the caller's own supabase — booking_refunds' admin-only INSERT policy would otherwise reject it with a real 42501", async () => {
+    // `supabase` here stands in for exactly what production passes:
+    // createRescheduleAction's getServerClient() result, an ordinary
+    // authenticated (non-admin) customer session. Nothing about this
+    // mock grants it any elevated privilege — it is deliberately just
+    // as unprivileged as every other test's `supabase` in this file.
+    const lowerPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 40000 };
+    mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
+    mockCreateBooking.mockResolvedValue(lowerPriceReplacement);
+    mockRequestRefund.mockResolvedValue({ ...REFUND_ROW, amount: 10000, status: "succeeded" });
+    mockServiceRoleRpcResults({
+      record_reschedule_refund_success: { data: true, error: null },
+      complete_reschedule: { data: true, error: null },
+    });
+    const supabase = createTableMockSupabase({
+      booking_refunds: NOT_FOUND,
+      booking_reschedules: [NOT_FOUND, NOT_FOUND, NOT_FOUND, { data: { ...RESCHEDULE_ROW, price_difference: -10000 }, error: null }],
+      courts: [COURT_ROW("venue-1"), COURT_ROW("venue-1")],
+    });
+
+    await createReschedule(supabase, "user-1", {
+      bookingId: ORIGINAL_BOOKING.id,
+      newCourtId: "court-2",
+      newStartTime: FAR_FUTURE_START,
+      newEndTime: FAR_FUTURE_END,
+      siteUrl: "https://air-rally.app",
+    });
+
+    expect(mockRequestRefund).toHaveBeenCalledTimes(1);
+    const clientPassedToRequestRefund = mockRequestRefund.mock.calls[0][0];
+    // Positive proof: it IS the service-role client (same object identity
+    // every complete_reschedule()/mark_reschedule_failed()/
+    // record_reschedule_refund_success() call in this file already goes
+    // through).
+    expect((clientPassedToRequestRefund as unknown as { rpc: unknown }).rpc).toBe(mockServiceRoleRpc);
+    // Negative proof: it is NOT the caller's own RLS-scoped client — the
+    // exact object a real customer session's booking_refunds insert would
+    // be evaluated against, and the exact object this test would need to
+    // pass for the pre-fix bug to reproduce.
+    expect(clientPassedToRequestRefund).not.toBe(supabase);
   });
 });
 
@@ -524,7 +530,7 @@ describe("createReschedule — same price", () => {
     });
 
     expect(result.kind).toBe("completed");
-    expect(mockAddCredit).not.toHaveBeenCalled();
+    expect(mockRequestRefund).not.toHaveBeenCalled();
     expect(mockCreatePayMongoCheckoutSession).not.toHaveBeenCalled();
   });
 });
@@ -661,15 +667,13 @@ describe("createReschedule — price increase", () => {
 });
 
 describe("createReschedule — price decrease (happy path)", () => {
-  it("issues AIR/Rally credit for the exact difference, checkpoints it, then completes — in that order", async () => {
+  it("requests a gross-only refund, checkpoints it, then completes — in that order", async () => {
     const lowerPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 40000 };
     mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
     mockCreateBooking.mockResolvedValue(lowerPriceReplacement);
-    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court A", venueName: "Rally Court", venueId: "venue-1", venueTimezone: "Asia/Manila", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
-    mockAddCredit.mockResolvedValue(10000);
-    mockCreditTransactionLookup({ data: { id: "credit-1" }, error: null });
+    mockRequestRefund.mockResolvedValue({ ...REFUND_ROW, amount: 10000, status: "succeeded" });
     mockServiceRoleRpcResults({
-      record_reschedule_credit_success: { data: true, error: null },
+      record_reschedule_refund_success: { data: true, error: null },
       complete_reschedule: { data: true, error: null },
     });
     const supabase = createTableMockSupabase({
@@ -686,26 +690,57 @@ describe("createReschedule — price decrease (happy path)", () => {
       siteUrl: "https://air-rally.app",
     });
 
-    // Never cash, never a "refund" — AIR/Rally credit for the exact
-    // difference, general and unrestricted (founder decision 2026-08-31).
-    expect(mockAddCredit).toHaveBeenCalledWith({
-      userId: ORIGINAL_BOOKING.user_id,
-      amount: 10000,
-      transactionType: "reschedule_compensation",
-      referenceId: ORIGINAL_BOOKING.id,
-      description: expect.stringContaining("₱100.00"),
-    });
+    // Production-readiness audit "Blocker A": requestRefund() must be
+    // called with the service-role client, never the caller's own
+    // RLS-scoped `supabase` — see the dedicated regression test in the
+    // SECURITY describe block below for why this matters.
+    expect(mockRequestRefund).toHaveBeenCalledWith(
+      expect.objectContaining({ rpc: mockServiceRoleRpc }),
+      expect.objectContaining({ booking: ORIGINAL_BOOKING, amount: 10000, refundBasis: "gross_only" })
+    );
+    expect(mockRequestRefund.mock.calls[0][0]).not.toBe(supabase);
     const rpcCallOrder = mockServiceRoleRpc.mock.calls.map((c) => c[0]);
-    expect(rpcCallOrder).toEqual(["record_reschedule_credit_success", "complete_reschedule"]);
+    expect(rpcCallOrder).toEqual(["record_reschedule_refund_success", "complete_reschedule"]);
     expect(result.kind).toBe("completed");
   });
 
-  it("addCredit() throwing marks the reschedule failed, releases the replacement, surfaces refund_failed — never a second attempt", async () => {
+  it("QR Ph (provider_unavailable): never completes, releases the replacement, never checkpoints a refund", async () => {
     const lowerPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 40000 };
     mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
     mockCreateBooking.mockResolvedValue(lowerPriceReplacement);
-    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court A", venueName: "Rally Court", venueId: "venue-1", venueTimezone: "Asia/Manila", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
-    mockAddCredit.mockRejectedValue(new Error("issue_credit RPC unreachable"));
+    mockRequestRefund.mockResolvedValue({ ...REFUND_ROW, amount: 10000, status: "provider_unavailable", failure_reason: 'PayMongo does not support refunds for "qrph" payments.' });
+    mockServiceRoleRpcResults({ mark_reschedule_failed: { data: true, error: null } });
+    const supabase = createTableMockSupabase({
+      booking_refunds: NOT_FOUND,
+      booking_reschedules: [NOT_FOUND, NOT_FOUND, NOT_FOUND, { data: { ...RESCHEDULE_ROW, price_difference: -10000 }, error: null }],
+      courts: [COURT_ROW("venue-1"), COURT_ROW("venue-1")],
+    });
+
+    const result = await createReschedule(supabase, "user-1", {
+      bookingId: ORIGINAL_BOOKING.id,
+      newCourtId: "court-2",
+      newStartTime: FAR_FUTURE_START,
+      newEndTime: FAR_FUTURE_END,
+      siteUrl: "https://air-rally.app",
+    });
+
+    expect(result.kind).toBe("provider_unavailable");
+    expect(mockServiceRoleRpc).toHaveBeenCalledWith("mark_reschedule_failed", {
+      p_reschedule_id: RESCHEDULE_ROW.id,
+      p_status: "provider_unavailable",
+      p_failure_reason: expect.stringContaining("qrph"),
+      p_refund_id: REFUND_ROW.id,
+    });
+    expect(mockCancelBooking).toHaveBeenCalledWith(supabase, "user-1", lowerPriceReplacement.id);
+    expect(mockServiceRoleRpc).not.toHaveBeenCalledWith("record_reschedule_refund_success", expect.anything());
+    expect(mockServiceRoleRpc).not.toHaveBeenCalledWith("complete_reschedule", expect.anything());
+  });
+
+  it("a refund that resolves to 'failed' marks the reschedule failed, releases the replacement, surfaces refund_failed", async () => {
+    const lowerPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 40000 };
+    mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
+    mockCreateBooking.mockResolvedValue(lowerPriceReplacement);
+    mockRequestRefund.mockResolvedValue({ ...REFUND_ROW, amount: 10000, status: "failed", failure_reason: "Card declined" });
     mockServiceRoleRpcResults({ mark_reschedule_failed: { data: true, error: null } });
     const supabase = createTableMockSupabase({
       booking_refunds: NOT_FOUND,
@@ -722,34 +757,15 @@ describe("createReschedule — price decrease (happy path)", () => {
         siteUrl: "https://air-rally.app",
       })
     ).rejects.toMatchObject({ reason: "refund_failed" });
-
     expect(mockCancelBooking).toHaveBeenCalledWith(supabase, "user-1", lowerPriceReplacement.id);
-    expect(mockServiceRoleRpc).toHaveBeenCalledWith("mark_reschedule_failed", {
-      p_reschedule_id: RESCHEDULE_ROW.id,
-      p_status: "failed",
-      p_failure_reason: "issue_credit RPC unreachable",
-      p_refund_id: null,
-      p_credit_transaction_id: null,
-    });
-    expect(mockAddCredit).toHaveBeenCalledTimes(1); // never retried within this call
   });
-});
 
-// ---------------------------------------------------------------------
-// CREDIT COMPLETION FAILURE (finding B3, extended to the credit
-// mechanism) — the credit succeeds but a later step fails: either the
-// follow-up id lookup, or completion itself.
-// ---------------------------------------------------------------------
-describe("createReschedule — price decrease, credit succeeds but completion fails (finding B3)", () => {
-  it("credit succeeds but the credit_transactions lookup fails: surfaces completion_pending_retry, never checkpoints, never re-issues credit, never marks failed", async () => {
+  it("a RefundError thrown by requestRefund (kill switch disabled) marks the reschedule failed and releases the replacement", async () => {
     const lowerPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 40000 };
     mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
     mockCreateBooking.mockResolvedValue(lowerPriceReplacement);
-    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court A", venueName: "Rally Court", venueId: "venue-1", venueTimezone: "Asia/Manila", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
-    mockAddCredit.mockResolvedValue(10000);
-    // The row addCredit() just wrote isn't found by the immediate
-    // follow-up lookup — e.g. replica lag, or a genuine bug in the query.
-    mockCreditTransactionLookup({ data: null, error: null });
+    mockRequestRefund.mockRejectedValue(new RefundError("paymongo_refund_not_enabled", "PayMongo refund execution is disabled."));
+    mockServiceRoleRpcResults({ mark_reschedule_failed: { data: true, error: null } });
     const supabase = createTableMockSupabase({
       booking_refunds: NOT_FOUND,
       booking_reschedules: [NOT_FOUND, NOT_FOUND, NOT_FOUND, { data: { ...RESCHEDULE_ROW, price_difference: -10000 }, error: null }],
@@ -764,23 +780,23 @@ describe("createReschedule — price decrease, credit succeeds but completion fa
         newEndTime: FAR_FUTURE_END,
         siteUrl: "https://air-rally.app",
       })
-    ).rejects.toMatchObject({ reason: "completion_pending_retry" });
-
-    expect(mockAddCredit).toHaveBeenCalledTimes(1); // never re-issued for a lookup failure
-    expect(mockCancelBooking).not.toHaveBeenCalled(); // replacement stays reserved for retry
-    expect(mockServiceRoleRpc).not.toHaveBeenCalledWith("record_reschedule_credit_success", expect.anything());
-    expect(mockServiceRoleRpc).not.toHaveBeenCalledWith("mark_reschedule_failed", expect.anything());
+    ).rejects.toMatchObject({ reason: "refund_failed", message: "PayMongo refund execution is disabled." });
+    expect(mockCancelBooking).toHaveBeenCalledWith(supabase, "user-1", lowerPriceReplacement.id);
   });
+});
 
-  it("credit succeeds + complete_reschedule() returns false: checkpoint still happened, no error thrown, logged only", async () => {
+// ---------------------------------------------------------------------
+// REFUND FAILURE (finding B3) — refund succeeds but completion RPC
+// returns false, or throws.
+// ---------------------------------------------------------------------
+describe("createReschedule — price decrease, refund succeeds but completion fails (finding B3)", () => {
+  it("refund succeeds + complete_reschedule() returns false: checkpoint still happened, no error thrown, logged only", async () => {
     const lowerPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 40000 };
     mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
     mockCreateBooking.mockResolvedValue(lowerPriceReplacement);
-    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court A", venueName: "Rally Court", venueId: "venue-1", venueTimezone: "Asia/Manila", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
-    mockAddCredit.mockResolvedValue(10000);
-    mockCreditTransactionLookup({ data: { id: "credit-1" }, error: null });
+    mockRequestRefund.mockResolvedValue({ ...REFUND_ROW, amount: 10000, status: "succeeded" });
     mockServiceRoleRpcResults({
-      record_reschedule_credit_success: { data: true, error: null },
+      record_reschedule_refund_success: { data: true, error: null },
       complete_reschedule: { data: false, error: null },
     });
     const supabase = createTableMockSupabase({
@@ -790,7 +806,7 @@ describe("createReschedule — price decrease, credit succeeds but completion fa
     });
 
     // Does not throw — a false return is logged, not treated as fatal;
-    // the row is still checkpointed at pending_completion for later retry.
+    // the row is still checkpointed at pending_refund for later retry.
     const result = await createReschedule(supabase, "user-1", {
       bookingId: ORIGINAL_BOOKING.id,
       newCourtId: "court-2",
@@ -799,19 +815,17 @@ describe("createReschedule — price decrease, credit succeeds but completion fa
       siteUrl: "https://air-rally.app",
     });
     expect(result.kind).toBe("completed");
-    // Never a second credit issuance.
-    expect(mockAddCredit).toHaveBeenCalledTimes(1);
+    // Never a second refund attempt.
+    expect(mockRequestRefund).toHaveBeenCalledTimes(1);
   });
 
-  it("credit succeeds + complete_reschedule() THROWS: surfaces completion_pending_retry, never re-issues credit, never cancels the replacement, never marks the reschedule failed", async () => {
+  it("refund succeeds + complete_reschedule() THROWS: surfaces completion_pending_retry, never a second refund, never cancels the replacement, never marks the reschedule failed", async () => {
     const lowerPriceReplacement = { ...REPLACEMENT_BOOKING, price_amount: 40000 };
     mockGetBookingById.mockResolvedValue(ORIGINAL_BOOKING);
     mockCreateBooking.mockResolvedValue(lowerPriceReplacement);
-    mockGetCourtDisplayInfo.mockResolvedValue({ courtName: "Court A", venueName: "Rally Court", venueId: "venue-1", venueTimezone: "Asia/Manila", venuePaymongoAccountId: null, venuePaymongoActivationStatus: "unlinked" });
-    mockAddCredit.mockResolvedValue(10000);
-    mockCreditTransactionLookup({ data: { id: "credit-1" }, error: null });
+    mockRequestRefund.mockResolvedValue({ ...REFUND_ROW, amount: 10000, status: "succeeded" });
     mockServiceRoleRpc.mockImplementation((fn: string) => {
-      if (fn === "record_reschedule_credit_success") return Promise.resolve({ data: true, error: null });
+      if (fn === "record_reschedule_refund_success") return Promise.resolve({ data: true, error: null });
       if (fn === "complete_reschedule") return Promise.reject(new Error("connection reset"));
       throw new Error(`unexpected rpc ${fn}`);
     });
@@ -831,62 +845,41 @@ describe("createReschedule — price decrease, credit succeeds but completion fa
       })
     ).rejects.toMatchObject({ reason: "completion_pending_retry" });
 
-    expect(mockAddCredit).toHaveBeenCalledTimes(1); // never a second credit issuance
+    expect(mockRequestRefund).toHaveBeenCalledTimes(1); // never a second refund
     expect(mockCancelBooking).not.toHaveBeenCalled(); // replacement stays reserved for retry
-    expect(mockServiceRoleRpc).not.toHaveBeenCalledWith("mark_reschedule_failed", expect.anything()); // never abandons a succeeded credit
-    expect(mockServiceRoleRpc).toHaveBeenCalledWith("record_reschedule_credit_success", { p_reschedule_id: RESCHEDULE_ROW.id, p_credit_transaction_id: "credit-1" });
+    expect(mockServiceRoleRpc).not.toHaveBeenCalledWith("mark_reschedule_failed", expect.anything()); // never abandons a succeeded refund
+    expect(mockServiceRoleRpc).toHaveBeenCalledWith("record_reschedule_refund_success", { p_reschedule_id: RESCHEDULE_ROW.id, p_refund_id: REFUND_ROW.id });
   });
 });
 
 describe("retryRescheduleCompletion", () => {
-  it("does nothing for a reschedule that isn't pending_completion", async () => {
+  it("does nothing for a reschedule that isn't pending_refund", async () => {
     const supabase = createTableMockSupabase({ booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_payment" }, error: null } });
     await expect(retryRescheduleCompletion(supabase, "reschedule-1")).resolves.toBe(false);
     expect(mockServiceRoleRpc).not.toHaveBeenCalled();
   });
 
-  it("does nothing for a pending_completion row with neither refund_id nor credit_transaction_id somehow attached", async () => {
-    const supabase = createTableMockSupabase({
-      booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_completion", refund_id: null, credit_transaction_id: null }, error: null },
-    });
+  it("does nothing for a pending_refund row with no refund_id somehow attached", async () => {
+    const supabase = createTableMockSupabase({ booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_refund", refund_id: null }, error: null } });
     await expect(retryRescheduleCompletion(supabase, "reschedule-1")).resolves.toBe(false);
     expect(mockServiceRoleRpc).not.toHaveBeenCalled();
   });
 
   it("retries completion using the ALREADY-CHECKPOINTED refund_id, never re-deriving or re-refunding", async () => {
     const supabase = createTableMockSupabase({
-      booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_completion", refund_id: "refund-checkpointed" }, error: null },
+      booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_refund", refund_id: "refund-checkpointed" }, error: null },
     });
     mockServiceRoleRpcResults({ complete_reschedule: { data: true, error: null } });
 
     await expect(retryRescheduleCompletion(supabase, "reschedule-1")).resolves.toBe(true);
 
-    expect(mockServiceRoleRpc).toHaveBeenCalledWith("complete_reschedule", {
-      p_reschedule_id: RESCHEDULE_ROW.id,
-      p_refund_id: "refund-checkpointed",
-      p_credit_transaction_id: null,
-    });
-  });
-
-  it("retries completion using the ALREADY-CHECKPOINTED credit_transaction_id, never re-deriving or re-issuing credit", async () => {
-    const supabase = createTableMockSupabase({
-      booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_completion", credit_transaction_id: "credit-checkpointed" }, error: null },
-    });
-    mockServiceRoleRpcResults({ complete_reschedule: { data: true, error: null } });
-
-    await expect(retryRescheduleCompletion(supabase, "reschedule-1")).resolves.toBe(true);
-
-    expect(mockServiceRoleRpc).toHaveBeenCalledWith("complete_reschedule", {
-      p_reschedule_id: RESCHEDULE_ROW.id,
-      p_refund_id: null,
-      p_credit_transaction_id: "credit-checkpointed",
-    });
-    expect(mockAddCredit).not.toHaveBeenCalled();
+    expect(mockServiceRoleRpc).toHaveBeenCalledWith("complete_reschedule", { p_reschedule_id: RESCHEDULE_ROW.id, p_refund_id: "refund-checkpointed" });
+    expect(mockRequestRefund).not.toHaveBeenCalled();
   });
 
   it("is idempotent — a second retry call after the first already completed it is a safe no-op via complete_reschedule()'s own guard", async () => {
     const supabase = createTableMockSupabase({
-      booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_completion", refund_id: "refund-checkpointed" }, error: null },
+      booking_reschedules: { data: { ...RESCHEDULE_ROW, status: "pending_refund", refund_id: "refund-checkpointed" }, error: null },
     });
     mockServiceRoleRpcResults({ complete_reschedule: { data: false, error: null } }); // already completed, WHERE clause matches nothing
     await expect(retryRescheduleCompletion(supabase, "reschedule-1")).resolves.toBe(false);

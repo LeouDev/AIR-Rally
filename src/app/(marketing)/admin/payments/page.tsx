@@ -53,7 +53,7 @@ const REFUND_BASIS_LABELS: Record<NonNullable<RefundDetail["refundBasis"]>, stri
 
 const RESCHEDULE_STATUS_STYLES: Record<RescheduleStatus, string> = {
   pending_payment: "bg-warning/15 text-warning",
-  pending_completion: "bg-warning/15 text-warning",
+  pending_refund: "bg-warning/15 text-warning",
   completed: "bg-success/15 text-success",
   failed: "bg-destructive/10 text-destructive",
   provider_unavailable: "bg-warning/15 text-warning",
@@ -61,11 +61,7 @@ const RESCHEDULE_STATUS_STYLES: Record<RescheduleStatus, string> = {
 
 const RESCHEDULE_STATUS_LABELS: Record<RescheduleStatus, string> = {
   pending_payment: "Awaiting difference payment",
-  // Mechanism-neutral, not "Awaiting refund" — the financial step here
-  // is either a real refund OR AIR/Rally credit (QR Ph can't be
-  // refunded at all), and this status covers both. See
-  // qrph-is-the-only-payment-method memory.
-  pending_completion: "Awaiting completion",
+  pending_refund: "Awaiting refund",
   completed: "Completed",
   failed: "Failed",
   provider_unavailable: "Provider unavailable — manual handling required",

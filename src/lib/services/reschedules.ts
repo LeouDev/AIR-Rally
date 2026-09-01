@@ -13,7 +13,7 @@ import { createPayMongoCheckoutSession, retrievePayMongoCheckoutSession } from "
 import { getCourtDisplayInfo } from "@/lib/services/courts";
 import { getVenueDetail } from "@/lib/services/venues";
 import { calculateMarketplaceSplit } from "@/lib/services/commission";
-import { addCredit } from "@/lib/services/credits";
+import { requestRefund, RefundError } from "@/lib/services/refunds";
 import { isPaymongoMarketplaceSplitEnabled } from "@/lib/paymongoLaunchGates";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { logServerError } from "@/lib/errors";
@@ -140,7 +140,7 @@ export async function getRescheduleEligibility(supabase: Client, userId: string,
     .from("booking_reschedules")
     .select("id")
     .eq("original_booking_id", bookingId)
-    .in("status", ["pending_payment", "pending_completion"])
+    .in("status", ["pending_payment", "pending_refund"])
     .limit(1)
     .maybeSingle();
   if (inFlightError) throw inFlightError;
@@ -226,15 +226,10 @@ function getRescheduleServiceRoleClient(): SupabaseClient<Database> {
   return serviceRoleClient;
 }
 
-async function completeReschedule(
-  rescheduleId: string,
-  refundId?: string | null,
-  creditTransactionId?: string | null
-): Promise<boolean> {
+async function completeReschedule(rescheduleId: string, refundId?: string | null): Promise<boolean> {
   const { data, error } = await getRescheduleServiceRoleClient().rpc("complete_reschedule", {
     p_reschedule_id: rescheduleId,
     p_refund_id: refundId ?? null,
-    p_credit_transaction_id: creditTransactionId ?? null,
   });
   if (error) throw error;
   return data ?? false;
@@ -244,43 +239,31 @@ async function markRescheduleFailed(
   rescheduleId: string,
   status: "failed" | "provider_unavailable",
   failureReason: string,
-  refundId?: string | null,
-  creditTransactionId?: string | null
+  refundId?: string | null
 ): Promise<boolean> {
   const { data, error } = await getRescheduleServiceRoleClient().rpc("mark_reschedule_failed", {
     p_reschedule_id: rescheduleId,
     p_status: status,
     p_failure_reason: failureReason,
     p_refund_id: refundId ?? null,
-    p_credit_transaction_id: creditTransactionId ?? null,
   });
   if (error) throw error;
   return data ?? false;
 }
 
 /**
- * The durable checkpoint for a decrease reschedule's compensation (see
- * the audit's finding B3) — called immediately after addCredit()
- * succeeds, BEFORE attempting completeReschedule(). If completeReschedule()
- * then throws, this checkpoint is what makes the failure safely
- * retryable: the reschedule row durably records that the credit was
- * already issued, so nothing ever re-calls addCredit() for it again —
- * the same double-payout shape the sequential-refund bug had, reproduced
- * on the credit ledger instead of PayMongo.
- *
- * There is no refund-based sibling any more: QR Ph, AIR/Rally's only
- * payment method, can't be refunded through PayMongo's API at all (see
- * the qrph-is-the-only-payment-method memory), so this decrease branch
- * never calls requestRefund(). The DB-level record_reschedule_refund_
- * success RPC (migration 20260810000015) and its checkpoint column
- * (refund_id) still exist for a future non-QR-Ph payment method, but
- * nothing in this file calls it — do not resurrect a JS-side caller for
- * it speculatively.
+ * The durable checkpoint for a decrease reschedule's refund (see the
+ * audit's finding B3) — called immediately after requestRefund() reports
+ * `succeeded`, BEFORE attempting completeReschedule(). If
+ * completeReschedule() then throws, this checkpoint is what makes the
+ * failure safely retryable: the reschedule row durably records that the
+ * refund already happened, so nothing ever re-calls requestRefund() for
+ * it again.
  */
-async function recordRescheduleCreditSuccess(rescheduleId: string, creditTransactionId: string): Promise<boolean> {
-  const { data, error } = await getRescheduleServiceRoleClient().rpc("record_reschedule_credit_success", {
+async function recordRescheduleRefundSuccess(rescheduleId: string, refundId: string): Promise<boolean> {
+  const { data, error } = await getRescheduleServiceRoleClient().rpc("record_reschedule_refund_success", {
     p_reschedule_id: rescheduleId,
-    p_credit_transaction_id: creditTransactionId,
+    p_refund_id: refundId,
   });
   if (error) throw error;
   return data ?? false;
@@ -491,133 +474,90 @@ export async function createReschedule(supabase: Client, userId: string, input: 
     return { kind: "checkout_required", reschedule, checkoutUrl, newBooking: replacement };
   }
 
-  // priceDifference < 0: AIR/Rally credit for the exact difference, not
-  // cash. Founder decision 2026-08-31 — QR Ph, the only payment method
-  // AIR/Rally accepts (see PAYMENT_METHOD_TYPES in lib/services/
-  // paymongo.ts), cannot be refunded through PayMongo's API at all (see
-  // REFUND_UNSUPPORTED_SOURCE_TYPES in refunds.ts, and the
-  // qrph-is-the-only-payment-method memory for the full investigation) —
-  // requestRefund() would always resolve to provider_unavailable here,
-  // so credit is the only mechanism that can actually return value.
-  // General, unrestricted AIR/Rally credit — spendable on anything,
-  // including a future MORE expensive booking, not a use-restricted
-  // instrument (founder decision, same reasoning: the mechanism already
-  // exists and is understood, restricting it is more engineering for a
-  // worse product).
-  //
-  // NOT compensateCancelledBooking() — checked its shape first rather
-  // than assumed it fit. Three reasons it doesn't: it computes credit
-  // from the booking's own FULL refundable base with no way to pass a
-  // partial difference; it applies the late-cancellation-window
-  // reduction policy, wrong for a platform-initiated reschedule that
-  // isn't the customer's fault; and — the one that matters most — it is
-  // deliberately built to NEVER THROW, which would make a failure
-  // invisible to this saga and silently break the same
-  // prove-success-before-the-irreversible-swap ordering requestRefund()
-  // provided. addCredit() throws on failure, which is exactly the
-  // signal this saga needs.
-  const creditAmount = -priceDifference;
-  const originalCourtDisplay = await getCourtDisplayInfo(supabase, original.court_id);
-  const originalDate = new Date(original.start_time).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+  // priceDifference < 0: a gross-only refund of the difference (V1 rule —
+  // refund_basis is always "gross_only", never gross_plus_fee).
+  const refundAmount = -priceDifference;
+  let refund: Awaited<ReturnType<typeof requestRefund>>;
   try {
-    // Service-role client — addCredit() is itself service_role-only (see
-    // credits.ts); `original` was already fetched and ownership-checked
-    // under the customer's own session earlier in this function.
-    await addCredit({
-      userId: original.user_id,
-      amount: creditAmount,
-      transactionType: "reschedule_compensation",
-      // The ORIGINAL BOOKING's id, not the reschedule row's — matching
-      // complete_reschedule()/mark_reschedule_failed()/
-      // record_reschedule_credit_success()'s own validation (migration
-      // 20260810000123), which checks reference_id = original_booking_id.
-      referenceId: original.id,
-      // Specific enough to recognise later — the court and the date,
-      // not just "reschedule credit" (founder's own copy requirement).
-      description: `₱${(creditAmount / 100).toFixed(2)} credit for rescheduling ${originalCourtDisplay?.courtName ?? "your court"} on ${originalDate} to a cheaper slot`,
+    // Service-role client, deliberately NOT the caller's own `supabase` —
+    // see the production-readiness audit's "Blocker A" and the comment
+    // above getRescheduleServiceRoleClient()'s definition. `original` was
+    // already fetched and ownership-checked earlier in this same function
+    // under the customer's own session; this call only ever runs after
+    // that verification has already passed.
+    refund = await requestRefund(getRescheduleServiceRoleClient(), {
+      booking: original,
+      amount: refundAmount,
+      reason: input.reason ?? "Booking reschedule — price decrease",
+      initiatedBy: userId,
+      refundBasis: "gross_only",
     });
   } catch (error) {
-    await markRescheduleFailed(reschedule.id, "failed", error instanceof Error ? error.message : "Credit issuance failed.");
+    if (error instanceof RefundError) {
+      await markRescheduleFailed(reschedule.id, "failed", error.message);
+      await safeCancelReplacement(supabase, userId, replacement.id);
+      throw new RescheduleError("refund_failed", error.message);
+    }
+    throw error;
+  }
+
+  if (refund.status === "provider_unavailable") {
+    // QR Ph (or any other provider-confirmed-unrefundable method):
+    // never pretend the reschedule completed. The original stays
+    // active/untouched; the replacement is released so it never
+    // becomes an active double booking.
+    await markRescheduleFailed(reschedule.id, "provider_unavailable", refund.failure_reason ?? "Refund unavailable through the payment provider.", refund.id);
     await safeCancelReplacement(supabase, userId, replacement.id);
-    throw new RescheduleError("refund_failed", "We couldn't credit the price difference for this reschedule — please try again.");
+    return { kind: "provider_unavailable", reschedule: { ...reschedule, status: "provider_unavailable" }, newBooking: replacement };
   }
 
-  // addCredit() (issue_credit() under it) returns only the resulting
-  // wallet balance, never the transaction's own id — so the row just
-  // written is looked up rather than threaded through. Safe and
-  // correctly scoped, not a race: a booking can only ever be
-  // rescheduled once (the eligibility check above refuses a second
-  // attempt on an already-rescheduled booking), and this transaction_type
-  // is written by no other code path for this booking — so exactly one
-  // row can ever match.
-  const { data: creditTransaction, error: creditLookupError } = await getRescheduleServiceRoleClient()
-    .from("credit_transactions")
-    .select("id")
-    .eq("reference_id", original.id)
-    .eq("transaction_type", "reschedule_compensation")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-  if (creditLookupError || !creditTransaction) {
-    // The credit itself was issued (addCredit() above didn't throw) —
-    // only the lookup of its own id failed, which is a bug in this
-    // function, not a failed compensation. Logged critical for manual
-    // follow-up rather than silently losing the checkpoint; never
-    // retries the credit issuance itself.
-    logServerError(
-      `reschedules.creditTransactionLookup.failed reschedule=${reschedule.id} booking=${original.id}`,
-      creditLookupError ?? new Error("credit_transactions row not found immediately after addCredit() succeeded"),
-      { critical: true }
-    );
-    throw new RescheduleError(
-      "completion_pending_retry",
-      "Your credit was issued, but we couldn't finish updating your booking. This will be resolved automatically — contact support if it isn't within a few minutes."
-    );
+  if (refund.status !== "succeeded") {
+    await markRescheduleFailed(reschedule.id, "failed", refund.failure_reason ?? "Refund failed.", refund.id);
+    await safeCancelReplacement(supabase, userId, replacement.id);
+    throw new RescheduleError("refund_failed", "We couldn't process the refund for this reschedule — please try again.");
   }
-  const creditTransactionId = creditTransaction.id;
 
-  // The credit genuinely succeeded — durably checkpoint this BEFORE
+  // The refund genuinely succeeded — durably checkpoint this BEFORE
   // attempting completion (see the production-readiness audit's finding
-  // B3, and record_reschedule_credit_success's own doc comment), so a
-  // failure in the next step is safely retryable without ever
-  // re-issuing credit for it again. From this point on, "the credit was
-  // issued" is a fact recorded in the database, not just a JS variable
-  // that could be lost to a crash.
-  const checkpointed = await recordRescheduleCreditSuccess(reschedule.id, creditTransactionId);
+  // B3), so a failure in the next step is safely retryable without ever
+  // re-calling requestRefund() again. From this point on, "the refund
+  // succeeded" is a fact recorded in the database, not just a JS
+  // variable that could be lost to a crash.
+  const checkpointed = await recordRescheduleRefundSuccess(reschedule.id, refund.id);
   if (!checkpointed) {
     // Extremely rare: the row was no longer pending_payment by the time
-    // we tried to checkpoint. The credit already succeeded and is
-    // permanently recorded in credit_transactions regardless of this —
+    // we tried to checkpoint. The refund already succeeded and is
+    // permanently recorded in booking_refunds regardless of this —
     // logged for manual follow-up rather than guessed at.
     logServerError(
-      `reschedules.recordRescheduleCreditSuccess.noOp reschedule=${reschedule.id} credit=${creditTransactionId}`,
+      `reschedules.recordRescheduleRefundSuccess.noOp reschedule=${reschedule.id} refund=${refund.id}`,
       new Error("checkpoint did not apply — row was not pending_payment")
     );
   }
 
   try {
-    const completed = await completeReschedule(reschedule.id, null, creditTransactionId);
+    const completed = await completeReschedule(reschedule.id, refund.id);
     if (!completed) {
       logServerError(
-        `reschedules.completeReschedule.noOpAfterCredit reschedule=${reschedule.id} credit=${creditTransactionId}`,
+        `reschedules.completeReschedule.noOpAfterRefund reschedule=${reschedule.id} refund=${refund.id}`,
         new Error("completion did not transition — reschedule was not pending")
       );
     }
   } catch (error) {
-    // The credit already succeeded and is durably checkpointed
-    // (status='pending_completion', credit_transaction_id set) — never
-    // re-issue credit, never mark this reschedule failed
-    // (mark_reschedule_failed() refuses a pending_completion row at the
-    // database level for exactly this reason), and never touch the
-    // replacement booking. The only safe recovery from here is retrying
-    // completion — see retryRescheduleCompletion() — which is itself
-    // idempotent via complete_reschedule()'s own WHERE clause.
-    logServerError(`reschedules.completeReschedule.threwAfterCredit reschedule=${reschedule.id} credit=${creditTransactionId}`, error, {
+    // The refund already succeeded and is durably checkpointed
+    // (status='pending_refund', refund_id set) — never retry the refund
+    // itself, never mark this reschedule failed (mark_reschedule_failed()
+    // refuses a pending_refund row at the database level for exactly this
+    // reason), and never touch the replacement booking. The only safe
+    // recovery from here is retrying completion — see
+    // retryRescheduleCompletion() — which is itself idempotent via
+    // complete_reschedule()'s own WHERE clause.
+    logServerError(`reschedules.completeReschedule.threwAfterRefund reschedule=${reschedule.id} refund=${refund.id}`, error, {
       critical: true,
     });
     throw new RescheduleError(
       "completion_pending_retry",
-      "Your credit was issued, but we couldn't finish updating your booking. This will be resolved automatically — contact support if it isn't within a few minutes."
+      "Your refund succeeded, but we couldn't finish updating your booking. This will be resolved automatically — contact support if it isn't within a few minutes."
     );
   }
 
@@ -627,7 +567,7 @@ export async function createReschedule(supabase: Client, userId: string, input: 
   ]);
   return {
     kind: "completed",
-    reschedule: { ...reschedule, status: "completed", credit_transaction_id: creditTransactionId },
+    reschedule: { ...reschedule, status: "completed", refund_id: refund.id },
     originalBooking: refreshedOriginal ?? original,
     newBooking: refreshedReplacement ?? replacement,
   };
@@ -683,24 +623,20 @@ export async function resumeRescheduleCheckout(
 }
 
 /**
- * Given a reschedule stuck at 'pending_completion' (its financial step —
- * a refund OR AIR/Rally credit, mutually exclusive, migration
- * 20260810000123 — already succeeded and is durably checkpointed, but a
- * prior completeReschedule() call threw before finishing — see
- * createReschedule()'s decrease branch and the production-readiness
- * audit's finding B3), safely retries just the completion step. Never
- * re-requests a refund or re-issues credit — whichever reference is
- * already set is the one passed through. Idempotent via
+ * Given a reschedule stuck at 'pending_refund' (its refund already
+ * succeeded and is durably checkpointed, but a prior completeReschedule()
+ * call threw before finishing — see createReschedule()'s decrease branch
+ * and the production-readiness audit's finding B3), safely retries just
+ * the completion step. Never re-requests a refund. Idempotent via
  * complete_reschedule()'s own WHERE clause — safe to call any number of
  * times, including concurrently.
  */
 export async function retryRescheduleCompletion(supabase: Client, rescheduleId: string): Promise<boolean> {
   const { data: reschedule, error } = await supabase.from("booking_reschedules").select("*").eq("id", rescheduleId).maybeSingle();
   if (error) throw error;
-  if (!reschedule || reschedule.status !== "pending_completion") return false;
-  if (!reschedule.refund_id && !reschedule.credit_transaction_id) return false;
+  if (!reschedule || reschedule.status !== "pending_refund" || !reschedule.refund_id) return false;
 
-  return completeReschedule(reschedule.id, reschedule.refund_id, reschedule.credit_transaction_id);
+  return completeReschedule(reschedule.id, reschedule.refund_id);
 }
 
 /**
