@@ -797,6 +797,15 @@ export async function confirmPaymongoBookingPayment(
     paymongoPaymentIntentId: string;
     expectedAmount: number;
     expectedCurrency: string;
+    /**
+     * The real Payment id (not the PaymentIntent id above) — what
+     * requestRefund() actually needs to call PayMongo's refund/retrieve
+     * endpoints. Optional because this is the only privileged path that
+     * can set bookings.paymongo_payment_id (see migration
+     * 20260810000122's guard); omit only for a caller that genuinely
+     * doesn't have it, never to skip populating it for a real payment.
+     */
+    paymongoPaymentId?: string;
   }
 ): Promise<boolean> {
   const { data, error } = await supabase.rpc("confirm_paymongo_booking_payment", {
@@ -805,6 +814,7 @@ export async function confirmPaymongoBookingPayment(
     p_paymongo_payment_intent_id: params.paymongoPaymentIntentId,
     p_expected_amount: params.expectedAmount,
     p_expected_currency: params.expectedCurrency,
+    p_paymongo_payment_id: params.paymongoPaymentId,
   });
   if (error) throw error;
   return data ?? false;

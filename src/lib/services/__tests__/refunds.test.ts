@@ -59,6 +59,7 @@ const CONFIRMED_STRIPE_BOOKING: Booking = {
   processing_fee_amount: 0,
   paymongo_checkout_session_id: null,
   paymongo_payment_intent_id: null,
+  paymongo_payment_id: null,
   platform_fee_amount: null,
   venue_amount: null,
   paymongo_venue_account_id: null,
@@ -76,6 +77,20 @@ const CONFIRMED_PAYMONGO_BOOKING: Booking = {
   payment_provider: "paymongo",
   paymongo_checkout_session_id: "cs_test_1",
   paymongo_payment_intent_id: "pi_pm_1",
+  // The Payment id, distinct from the PaymentIntent id above —
+  // requestRefund() reads this one. See refunds.ts's own comment and
+  // migration 20260810000121.
+  paymongo_payment_id: "pay_pm_1",
+};
+
+// paymongo_venue_account_id set — the one property that actually makes
+// the split-refund kill switch apply, per requestRefund()'s own gate.
+const SPLIT_PAYMONGO_BOOKING: Booking = {
+  ...CONFIRMED_PAYMONGO_BOOKING,
+  id: "booking-3",
+  paymongo_venue_account_id: "acct_venue_1",
+  platform_fee_amount: 2500,
+  venue_amount: 47500,
 };
 
 beforeEach(() => {
@@ -180,6 +195,23 @@ describe("requestRefund", () => {
     ).rejects.toMatchObject({ reason: "booking_not_paid" });
   });
 
+  it("rejects a booking confirmed before payment-id tracking existed, with a message distinct from 'never paid'", async () => {
+    // Has paymongo_payment_intent_id (genuinely paid) but no
+    // paymongo_payment_id (confirmed before migration 20260810000121/122
+    // started persisting it) — the point of this test is the MESSAGE,
+    // not just the reason code: a booking that was actually paid must
+    // never be told it wasn't, or an admin looks in the wrong place.
+    const supabase = fakeSupabase([], {}, {});
+    const predatesTracking = { ...CONFIRMED_PAYMONGO_BOOKING, paymongo_payment_id: null };
+    await expect(
+      requestRefund(supabase, { booking: predatesTracking, amount: 100, reason: null, initiatedBy: "admin-1" })
+    ).rejects.toMatchObject({
+      reason: "booking_not_paid",
+      message: expect.stringContaining("predates payment-id tracking"),
+    });
+    expect(mockRetrievePayMongoPayment).not.toHaveBeenCalled();
+  });
+
   it("rejects an amount exceeding the refundable amount, without ever calling the provider", async () => {
     mockPaymongoRefundEnabled.mockReturnValue(true);
     const supabase = fakeSupabase([{ amount: 45000 }], {}, {}); // only 5000 left refundable
@@ -188,16 +220,37 @@ describe("requestRefund", () => {
     ).rejects.toMatchObject({ reason: "amount_exceeds_refundable" });
   });
 
-  it("refuses a PayMongo refund when the kill switch is off — the exact production-safety property this module exists for", async () => {
+  it("refuses a SPLIT PayMongo refund when the kill switch is off — the exact production-safety property this module exists for", async () => {
     mockPaymongoRefundEnabled.mockReturnValue(false);
     const supabase = fakeSupabase([], {}, {});
     await expect(
-      requestRefund(supabase, { booking: CONFIRMED_PAYMONGO_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" })
+      requestRefund(supabase, { booking: SPLIT_PAYMONGO_BOOKING, amount: 100, reason: null, initiatedBy: "admin-1" })
     ).rejects.toMatchObject({ reason: "paymongo_refund_not_enabled" });
     // No refund execution of any kind occurs while the flag is off — not
     // even the read-only QR Ph detection call, and no row is ever written.
     expect(mockRetrievePayMongoPayment).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("does NOT gate a non-split PayMongo refund on the kill switch — the gate is scoped to split accounting, not every PayMongo refund", async () => {
+    // CONFIRMED_PAYMONGO_BOOKING has paymongo_venue_account_id: null (a
+    // plain, non-split payment) — this is the exact case that used to be
+    // blocked by the same flag as a real split, which was the bug this
+    // narrowing fixes. The flag stays off (beforeEach's default) and the
+    // refund must still go all the way through to the provider.
+    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pay_pm_1", attributes: { status: "paid", source: { type: "card" } } });
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { id: "ref_1", attributes: {} } }) });
+    const supabase = fakeSupabase([], { id: "refund-1", status: "pending" }, { id: "refund-1", status: "succeeded" });
+
+    const result = await requestRefund(supabase, {
+      booking: CONFIRMED_PAYMONGO_BOOKING,
+      amount: 50000,
+      reason: null,
+      initiatedBy: "admin-1",
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it("writes a pending audit row before ever calling the provider, then marks it failed (with a captured reason) rather than throwing silently when the provider call fails", async () => {
@@ -219,7 +272,7 @@ describe("requestRefund", () => {
     expect((supabase as unknown as { _insertedRow: () => unknown })._insertedRow()).toMatchObject({
       booking_id: "booking-2",
       payment_provider: "paymongo",
-      provider_payment_id: "pi_pm_1",
+      provider_payment_id: "pay_pm_1",
       amount: 20000,
       status: "pending",
     });
@@ -228,7 +281,7 @@ describe("requestRefund", () => {
 
   it("QR Ph — records provider_unavailable and never calls the PayMongo refund endpoint at all", async () => {
     mockPaymongoRefundEnabled.mockReturnValue(true);
-    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pi_pm_1", attributes: { status: "paid", source: { type: "qrph" } } });
+    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pay_pm_1", attributes: { status: "paid", source: { type: "qrph" } } });
     const supabase = fakeSupabase(
       [],
       { id: "refund-1", status: "pending" },
@@ -243,14 +296,14 @@ describe("requestRefund", () => {
     });
 
     expect(result.status).toBe("provider_unavailable");
-    expect(mockRetrievePayMongoPayment).toHaveBeenCalledWith("pi_pm_1");
+    expect(mockRetrievePayMongoPayment).toHaveBeenCalledWith("pay_pm_1");
     // The refund endpoint itself must never be reached for a QR Ph payment.
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("a non-QR Ph PayMongo method proceeds past the source-type check normally", async () => {
     mockPaymongoRefundEnabled.mockReturnValue(true);
-    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pi_pm_1", attributes: { status: "paid", source: { type: "card" } } });
+    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pay_pm_1", attributes: { status: "paid", source: { type: "card" } } });
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ data: { id: "ref_1", attributes: {} } }),
@@ -271,7 +324,7 @@ describe("requestRefund", () => {
   it("records platform_refund_amount/venue_refund_amount/provider_available_at verbatim from a real PayMongo split_refund response — never computed locally from the 5%/95% formula", async () => {
     mockPaymongoRefundEnabled.mockReturnValue(true);
     process.env.PAYMONGO_PLATFORM_ACCOUNT_ID = "org_parent_test";
-    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pi_pm_1", attributes: { status: "paid", source: { type: "card" } } });
+    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pay_pm_1", attributes: { status: "paid", source: { type: "card" } } });
     // Deliberately NOT a clean 5%/95% split of the requested amount
     // (50000 * 0.05 = 2500) — using an arbitrary, unrelated pair of
     // numbers proves the values come from the response, not from any
@@ -309,7 +362,7 @@ describe("requestRefund", () => {
   it("leaves platform_refund_amount/venue_refund_amount null when PAYMONGO_PLATFORM_ACCOUNT_ID isn't configured, rather than guessing which leg is which", async () => {
     mockPaymongoRefundEnabled.mockReturnValue(true);
     delete process.env.PAYMONGO_PLATFORM_ACCOUNT_ID;
-    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pi_pm_1", attributes: { status: "paid", source: { type: "card" } } });
+    mockRetrievePayMongoPayment.mockResolvedValue({ id: "pay_pm_1", attributes: { status: "paid", source: { type: "card" } } });
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({

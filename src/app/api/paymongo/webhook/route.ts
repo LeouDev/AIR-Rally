@@ -54,7 +54,34 @@ export async function POST(request: Request): Promise<Response> {
   const checkoutSession = event.data.attributes.data;
   const bookingId = checkoutSession.attributes.metadata?.booking_id;
   const paymentIntent = checkoutSession.attributes.payment_intent;
-  const paidPayment = paymentIntent?.attributes.payments.find((p) => p.attributes.status === "paid");
+  // PayMongo's docs confirm a PaymentIntent can carry more than one
+  // Payment (one per attempt — a declined card followed by a successful
+  // retry produces two). That "at most one ever reaches status 'paid'"
+  // is NOT a documented guarantee, though — it's inferred from the
+  // PaymentIntent status machine (four states, no separate "failed";
+  // succeeded reads as terminal, a failed attempt bounces back to
+  // awaiting_payment_method rather than the intent double-succeeding).
+  // `.find()` below silently trusts that inference: if it's ever wrong,
+  // this picks one paid Payment and nobody would know. Detect it rather
+  // than trust it — logged critical (real alert, not just console.error)
+  // if it ever fires, but never blocks confirmation over it: a customer
+  // who actually paid should not see their booking fail because our
+  // selection logic became uncertain.
+  const paidPayments = paymentIntent?.attributes.payments.filter((p) => p.attributes.status === "paid") ?? [];
+  if (paidPayments.length > 1) {
+    logServerError(
+      "paymongo.webhook.multiplePaidPayments",
+      new Error(
+        `PaymentIntent ${paymentIntent?.id} has ${paidPayments.length} Payments with status "paid" — ` +
+          `expected at most one. Picking payments[0] (${paidPayments[0].id}); the others are ` +
+          `${paidPayments.slice(1).map((p) => p.id).join(", ")}. This means the "at most one paid Payment" ` +
+          `assumption in requestRefund()'s payment-id selection may be wrong — investigate before trusting ` +
+          `a refund against this checkout session.`
+      ),
+      { critical: true }
+    );
+  }
+  const paidPayment = paidPayments[0];
 
   if (!bookingId || !paymentIntent || !paidPayment) {
     logServerError(
@@ -78,6 +105,12 @@ export async function POST(request: Request): Promise<Response> {
       bookingId,
       paymongoCheckoutSessionId: checkoutSession.id,
       paymongoPaymentIntentId: paymentIntent.id,
+      // The id requestRefund() actually needs — see migration
+      // 20260810000121's own comment and paymongo-refund-gate-narrower-
+      // than-needed. Already selected above as paidPayment; this is the
+      // only privileged path that can persist it (migration
+      // 20260810000122's guard).
+      paymongoPaymentId: paidPayment.id,
       expectedAmount: paidPayment.attributes.amount,
       expectedCurrency: paidPayment.attributes.currency.toUpperCase(),
     });
