@@ -168,7 +168,7 @@ describe("createBooking — availability pre-check and insert", () => {
     ).rejects.toMatchObject({ reason: "slot_unavailable" });
   });
 
-  it("creates the booking with a server-computed price snapshot and status 'confirmed'", async () => {
+  it("creates the booking with a server-computed price snapshot, sending no status override when the caller doesn't pass one", async () => {
     let insertedPayload: unknown;
     const supabase = createTableMockSupabase(
       {
@@ -195,10 +195,13 @@ describe("createBooking — availability pre-check and insert", () => {
     const result = await createBooking(supabase, "user-1", { courtId: "court-1", startTime: VALID_START, endTime: VALID_END });
 
     expect(result).toEqual(BOOKING_ROW);
+    // bookings_force_pending_on_insert (20260810000081) forces the actual
+    // row's status regardless of what's sent — this only asserts the app
+    // layer doesn't second-guess that by defaulting to "confirmed" itself.
+    expect((insertedPayload as { status?: string }).status).toBeUndefined();
     expect(insertedPayload).toMatchObject({
       court_id: "court-1",
       user_id: "user-1",
-      status: "confirmed",
       currency: "PHP",
       // hourly_price 500 * 100 (minor units) * (60/60 hours) = 50000
       price_amount: 50000,

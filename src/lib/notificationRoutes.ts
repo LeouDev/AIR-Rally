@@ -37,6 +37,10 @@ const TYPE_ROUTES: Record<string, string> = {
   venue_suspended: "/list-your-court",
   event_invite: "/events",
   event_cancelled: "/events",
+  // Both event_cancelled and event_moved are stamped with a precise
+  // link_url by their triggers (20260810000078), so this fallback should
+  // never actually be reached — it exists for a future writer that forgets.
+  event_moved: "/events",
   // Ranked notifications set link_url themselves (usually straight to the
   // match), so these are only reached for a row some future writer forgets
   // to stamp — see 20260810000067_air_rally_ranked.sql.

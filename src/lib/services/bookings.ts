@@ -99,11 +99,13 @@ export type CreateBookingInput = {
   startTime: string;
   endTime: string;
   /**
-   * Defaults to "confirmed" — preserves Phase 4A's exact behavior for any
-   * caller that doesn't pass this (nothing gated confirmation before
-   * Phase 4B). The checkout flow (lib/actions/checkout.ts) is the one
-   * caller that passes "pending": Stripe payment is now the thing that
-   * gates confirmation, via confirm_booking_payment() once webhook-verified.
+   * bookings_force_pending_on_insert (20260810000081) forces every new
+   * booking's status to 'pending' at the database level regardless of what's
+   * sent here — no caller has ever legitimately needed anything else at
+   * insert time, and confirmation only ever happens afterward via
+   * confirm_booking_payment() once payment is webhook-verified. Kept as a
+   * field so a caller can still see what it accepts, but nothing this app
+   * sends changes the row's actual status anymore.
    */
   status?: Extract<BookingStatus, "pending" | "confirmed">;
 };
@@ -234,7 +236,7 @@ export async function createBooking(supabase: Client, userId: string, input: Cre
       user_id: userId,
       start_time: start.toISOString(),
       end_time: end.toISOString(),
-      status: input.status ?? "confirmed",
+      status: input.status,
       price_amount: priceAmount,
       currency: DEFAULT_CURRENCY,
     })
