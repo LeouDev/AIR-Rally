@@ -4,6 +4,12 @@ const nextConfig: NextConfig = {
   // Framework fingerprinting is free reconnaissance for an attacker —
   // no functional value to leaving it on, one line to turn off.
   poweredByHeader: false,
+  // Open Match notifications link to /ranked/open/<id>, which the app opens
+  // on its Play tab but the website has no page for — so the same link in an
+  // email or the web bell was a 404. Temporary, in case the web gets one.
+  async redirects() {
+    return [{ source: "/ranked/open/:id", destination: "/ranked/new", permanent: false }];
+  },
   images: {
     remotePatterns: [
       {
