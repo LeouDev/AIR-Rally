@@ -388,7 +388,7 @@ export const PRIVACY: LegalDocument = {
       body: [
         "Under the Data Privacy Act of 2012 you have rights to be informed about how your information is used, to access it, to correct it, to object to its processing, to have it erased or blocked in certain circumstances, to obtain a copy in a portable form, and to be indemnified for damage caused by misuse.",
         "You can change your name, display name, photograph and phone number yourself in your account settings.",
-        "For any other request, contact us through the support page. Self-service data export and account deletion are not yet available; requests are handled manually.",
+        "For any other request, contact us through the support page. You can delete your account yourself in the AIR/Rally app, under Account settings. Self-service data export is not yet available; export requests are handled manually.",
         "If you believe your rights have been infringed, you may complain to the National Privacy Commission.",
       ],
       reviewNote:
