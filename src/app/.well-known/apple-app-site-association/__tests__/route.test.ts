@@ -37,16 +37,47 @@ describe("apple-app-site-association", () => {
   });
 
   /**
-   * Scope is a product decision, not a detail. /courts/* is the only public,
-   * non-auth-gated route the app shares; ranked results and COURT/Side posts
-   * are sign-in gated, so a Universal Link to one drops a first-time visitor
-   * onto a login wall inside the app — worse than the web page they tapped.
+   * Scope: exactly the pages the app can open, checked against real URLs
+   * rather than the literal list, so a too-broad pattern (say "/ranked/*",
+   * which would swallow the public results page) fails here. Widened from
+   * /courts/* once the app could replay a link after sign-in — the old
+   * objection was a signed-out player stranded on a login wall.
    */
-  it("claims only /courts/*, not the whole domain", async () => {
-    const body = await GET().json();
-    const paths: string[] = body.applinks.details[0].paths;
-    expect(paths).toEqual(["/courts/*"]);
-    expect(paths).not.toContain("*");
-    expect(paths).not.toContain("/*");
+  const matches = (pattern: string, path: string) =>
+    new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.?+^$()[\]{}|\\]/g, "\\$&")).join(".*")}$`).test(path);
+
+  it.each([
+    "/courts/abc",
+    "/bookings",
+    "/bookings/abc/confirmation",
+    "/events",
+    "/events/e1",
+    "/clubs/c1",
+    "/court-side/u1",
+    "/court-side/club/c1",
+    "/ranked/match/m1",
+    "/ranked/leaderboard",
+    "/notifications",
+    "/profile/credits",
+    "/profile/rank/history",
+  ])("hands %s to the app", async (path) => {
+    const paths: string[] = (await GET().json()).applinks.details[0].paths;
+    expect(paths.some((pattern) => matches(pattern, path))).toBe(true);
+  });
+
+  it.each([
+    "/",
+    "/ranked/results/m1",
+    "/venues/requests/r1",
+    "/payment-return",
+    "/admin/payouts",
+    "/list-your-court/bookings",
+    "/owner/onboarding",
+    "/auth/callback",
+    "/login",
+    "/bookings/abc",
+  ])("leaves %s to the web", async (path) => {
+    const paths: string[] = (await GET().json()).applinks.details[0].paths;
+    expect(paths.some((pattern) => matches(pattern, path))).toBe(false);
   });
 });

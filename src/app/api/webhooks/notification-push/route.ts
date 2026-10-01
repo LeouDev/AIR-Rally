@@ -64,11 +64,15 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ received: true, pushed: 0 });
     }
 
-    const messages = tokens.map(({ token }) => ({
+    const badge = await unreadCount(supabase, notification.user_id);
+    const messages: ExpoPushMessage[] = tokens.map(({ token }) => ({
       to: token,
       title: notification.title,
       body: displayMessage(notification.message),
       sound: "default" as const,
+      // The app-icon badge while the app is closed. The app sets the same
+      // count itself whenever it opens; this keeps it right in between.
+      ...(badge !== null ? { badge } : {}),
       // The same in-app path the web bell and the email link resolve —
       // the mobile app maps it onto its own routes when the user taps.
       data: { url: notificationHref(notification), notificationId: notification.id },
@@ -125,8 +129,35 @@ type ExpoPushMessage = {
   title: string;
   body: string;
   sound: "default";
+  badge?: number;
   data: Record<string, string>;
 };
+
+/**
+ * The user's unread notifications, including the one just inserted — the
+ * number iOS shows on the app icon. Null leaves the badge as it is: like
+ * everything after auth here, a failed count must never stop the push.
+ */
+async function unreadCount(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  userId: string
+): Promise<number | null> {
+  try {
+    const { count, error } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .is("read_at", null);
+    if (error) {
+      logServerError("notificationPushWebhook.unreadCount", error);
+      return null;
+    }
+    return count;
+  } catch (error) {
+    logServerError("notificationPushWebhook.unreadCount", error);
+    return null;
+  }
+}
 
 type ExpoPushTicket = {
   status: "ok" | "error";

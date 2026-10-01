@@ -40,20 +40,49 @@
 export const dynamic = "force-static";
 
 /**
- * Scoped to /courts/* deliberately.
+ * The pages the app can open, and only those. Each one must already resolve
+ * to a real screen in the app — its +native-intent rewrites
+ * (lib/deep-link-target.ts) cover the web paths it names differently — or the
+ * link opens the app to "Page not found", worse than staying in Safari.
  *
- * That is the only public, non-auth-gated route the app shares. Ranked match
- * results and COURT/Side posts are sign-in gated, so a Universal Link to one
- * would hand a first-time visitor straight to a login wall inside the app —
- * strictly worse than the web page they tapped. Widening this is a product
- * decision, not a configuration tidy-up.
+ * Left to the web on purpose: /ranked/results/* (the public, sign-in-free
+ * result page; the app's match room is not the same page),
+ * /venues/requests/*, /payment-return, the owner and admin tools, auth.
+ *
+ * Signed-out app users: the app remembers the tapped link and replays it once
+ * they sign in, so a claimed path no longer strands them on Explore.
+ *
+ * SHIP ORDER: the app release carrying those rewrites and the replay must be
+ * live BEFORE this deploys. Apple caches this file for hours to days, so a
+ * claim that lands first sends links into an app that can't open them yet.
  */
+const APP_PATHS = [
+  "/courts/*",
+  "/bookings",
+  "/bookings/*/confirmation",
+  "/events",
+  "/events/*",
+  "/clubs",
+  "/clubs/*",
+  "/court-side",
+  "/court-side/*",
+  "/ranked/match/*",
+  "/ranked/new",
+  "/ranked/leaderboard",
+  "/notifications",
+  "/favorites",
+  "/support",
+  "/profile",
+  "/profile/*",
+  "/explore",
+];
+
 const ASSOCIATION = {
   applinks: {
     details: [
       {
         appID: "Z5643XKUTZ.com.airrally.app",
-        paths: ["/courts/*"],
+        paths: APP_PATHS,
       },
     ],
   },
