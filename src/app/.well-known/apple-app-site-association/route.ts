@@ -86,6 +86,13 @@ const ASSOCIATION = {
       },
     ],
   },
+  // Lets iOS offer passwords saved for air-rally.com inside the app, and
+  // save new ones against the site. The app's half is the
+  // `webcredentials:air-rally.com` entitlement, which needs a new native
+  // build; until one ships, this claim is simply unused, so it can go first.
+  webcredentials: {
+    apps: ["Z5643XKUTZ.com.airrally.app"],
+  },
 } as const;
 
 export function GET() {

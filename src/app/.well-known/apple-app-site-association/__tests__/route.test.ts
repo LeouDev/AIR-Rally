@@ -24,6 +24,11 @@ describe("apple-app-site-association", () => {
     expect(body.applinks.details[0].appID).toBe("Z5643XKUTZ.com.airrally.app");
   });
 
+  it("lets the app use passwords saved for the website", async () => {
+    const body = await GET().json();
+    expect(body.webcredentials).toEqual({ apps: ["Z5643XKUTZ.com.airrally.app"] });
+  });
+
   /**
    * The appID is TEAMID.BUNDLEID and both halves are verified against the
    * mobile repo (eas.json appleTeamId, app.json bundleIdentifier). A mismatch
