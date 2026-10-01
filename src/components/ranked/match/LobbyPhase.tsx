@@ -94,7 +94,7 @@ export function LobbyPhase({ match, currentUserId }: { match: RankedMatchDetail;
           onClick={toggleReady}
           disabled={isPending || !me}
           className={`w-full border-2 border-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] uppercase transition-colors disabled:opacity-60 ${
-            me?.ready ? "bg-rally text-white" : "bg-transparent text-navy-foreground"
+            me?.ready ? "bg-rally text-rally-foreground" : "bg-transparent text-navy-foreground"
           }`}
         >
           {me?.ready ? "You're ready" : "Ready"}

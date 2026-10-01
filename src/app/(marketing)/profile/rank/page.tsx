@@ -47,7 +47,7 @@ export default async function RankedHomePage({ searchParams }: { searchParams: P
       {activeMatch && (
         <Link
           href={`/ranked/match/${activeMatch.id}`}
-          className="flex items-center justify-between gap-3 border-2 border-rally bg-rally px-4 py-3.5 text-navy-foreground"
+          className="flex items-center justify-between gap-3 border-2 border-rally bg-rally px-4 py-3.5 text-rally-foreground"
         >
           <span className="text-[0.8125rem] font-bold">{matchStatusLabel(activeMatch)} — tap to continue</span>
           <span aria-hidden="true">→</span>
@@ -109,7 +109,7 @@ export default async function RankedHomePage({ searchParams }: { searchParams: P
       <div className="flex flex-col gap-2.5">
         <Link
           href={activeMatch ? `/ranked/match/${activeMatch.id}` : `/events/new?mode=ranked`}
-          className="bg-rally px-5 py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-white uppercase"
+          className="bg-rally px-5 py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-rally-foreground uppercase"
         >
           {activeMatch ? "Continue match" : "Play ranked"}
         </Link>

@@ -31,7 +31,7 @@ export function PlayerRow({
   const placed = player.rank?.is_calibrated ?? false;
   return (
     <div className="flex items-center gap-3.5 border-b-2 border-navy-foreground/15 py-3 last:border-b-0">
-      <span className="grid size-10 shrink-0 place-items-center bg-rally text-[0.8125rem] font-bold text-white">
+      <span className="grid size-10 shrink-0 place-items-center bg-rally text-[0.8125rem] font-bold text-rally-foreground">
         {initials(name)}
       </span>
       {placed && <RankBadge tier={player.rank!.tier} on="navy" size={40} />}

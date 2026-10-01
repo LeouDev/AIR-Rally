@@ -287,13 +287,13 @@ export function RankedPartyBuilder({
       )}
 
       {allFilled && !eligibility.eligible && (
-        <div className="flex flex-col gap-2 border-2 border-rally bg-rally px-4 py-4 text-navy-foreground">
+        <div className="flex flex-col gap-2 border-2 border-rally bg-rally px-4 py-4 text-rally-foreground">
           <p className="text-base font-extrabold">PARTY RATING DIFFERENCE TOO LARGE</p>
           <p className="text-[0.8125rem] leading-relaxed">
             Players with significantly different ratings can&apos;t currently join the same Ranked party.
           </p>
           {eligibility.allowedLowestTierName && eligibility.allowedHighestTierName && (
-            <p className="border-t border-white/35 pt-2 text-[0.6875rem] font-semibold tracking-[0.05em]">
+            <p className="border-t border-rally-foreground/35 pt-2 text-[0.6875rem] font-semibold tracking-[0.05em]">
               A party this wide needs every player within {eligibility.maxSpread} ARR of each other — roughly{" "}
               {eligibility.allowedLowestTierName} to {eligibility.allowedHighestTierName}.
             </p>
@@ -312,7 +312,7 @@ export function RankedPartyBuilder({
         type="button"
         onClick={submit}
         disabled={!allFilled || !eligibility.eligible || isSubmitting}
-        className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-white uppercase transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+        className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-rally-foreground uppercase transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
       >
         {isSubmitting ? "Starting match…" : (submitLabel ?? "Find ranked match")}
       </button>

@@ -153,7 +153,7 @@ export function OfficiatingPhase({ match, currentUserId }: { match: RankedMatchD
               type="button"
               onClick={() => vote(true)}
               disabled={isPending || myVote === true}
-              className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-white uppercase disabled:opacity-60"
+              className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-rally-foreground uppercase disabled:opacity-60"
             >
               {myVote === true ? "You agreed" : "Agree"}
             </button>
