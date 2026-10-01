@@ -38,7 +38,7 @@ export function ShareResultButton({ text, url }: { text: string; url?: string })
     <button
       type="button"
       onClick={share}
-      className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-white uppercase"
+      className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-rally-foreground uppercase"
     >
       Share result
     </button>

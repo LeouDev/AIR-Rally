@@ -114,7 +114,7 @@
 
   /* Primary action color: Rally Orange — the energetic, "go" color */
   --primary: #f3700f;
-  --primary-foreground: #ffffff;
+  --primary-foreground: #0f2747;
   --primary-pressed: #d85f06;
 
   /* Secondary: Deep Navy — trust, structure, nav/header surfaces */
@@ -159,7 +159,7 @@
   --navy-foreground: #f6f1e8;
   --navy-raised: #183658;
   --rally: #f3700f;
-  --rally-foreground: #ffffff;
+  --rally-foreground: #0f2747;
 
   --elevation-card: 0 4px 14px rgba(15, 39, 71, 0.1);
   --elevation-sheet: 0 -10px 30px rgba(15, 39, 71, 0.2);
@@ -175,7 +175,7 @@
   --sidebar: #ffffff;
   --sidebar-foreground: #0f2747;
   --sidebar-primary: #f3700f;
-  --sidebar-primary-foreground: #ffffff;
+  --sidebar-primary-foreground: #0f2747;
   --sidebar-accent: #f0e9dc;
   --sidebar-accent-foreground: #0f2747;
   --sidebar-border: #e6dac6;
@@ -195,7 +195,7 @@
   --popover-foreground: #f6f1e8;
 
   --primary: #f3700f;
-  --primary-foreground: #ffffff;
+  --primary-foreground: #0f2747;
   --primary-pressed: #d85f06;
 
   /* Navy is the ground here, so the "navy surface" role lifts a step instead */
@@ -238,7 +238,7 @@
   --navy-foreground: #f6f1e8;
   --navy-raised: #1e3b5f;
   --rally: #f3700f;
-  --rally-foreground: #ffffff;
+  --rally-foreground: #0f2747;
 
   --elevation-card: none;
   --elevation-sheet: none;
@@ -252,7 +252,7 @@
   --sidebar: #132a49;
   --sidebar-foreground: #f6f1e8;
   --sidebar-primary: #f3700f;
-  --sidebar-primary-foreground: #ffffff;
+  --sidebar-primary-foreground: #0f2747;
   --sidebar-accent: #1e3b5f;
   --sidebar-accent-foreground: #f6f1e8;
   --sidebar-border: #1e3b5f;

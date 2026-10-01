@@ -133,7 +133,7 @@ function AwaitingConfirmationView({ match, currentUserId }: { match: RankedMatch
             type="button"
             onClick={submitDispute}
             disabled={!reason || isPending}
-            className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-white uppercase disabled:opacity-40"
+            className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-rally-foreground uppercase disabled:opacity-40"
           >
             Submit dispute
           </button>
@@ -144,7 +144,7 @@ function AwaitingConfirmationView({ match, currentUserId }: { match: RankedMatch
             type="button"
             onClick={() => respond(true)}
             disabled={isPending}
-            className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-white uppercase disabled:opacity-60"
+            className="w-full bg-rally py-5 text-left text-[0.9375rem] font-extrabold tracking-[0.08em] text-rally-foreground uppercase disabled:opacity-60"
           >
             Accept
           </button>
@@ -273,15 +273,15 @@ function ConfirmedView({ match, currentUserId }: { match: RankedMatchDetail; cur
 
 function DisputedView({ match }: { match: RankedMatchDetail }) {
   return (
-    <div className="flex flex-col gap-4 border-2 border-rally bg-rally px-5 py-6 text-white">
+    <div className="flex flex-col gap-4 border-2 border-rally bg-rally px-5 py-6 text-rally-foreground">
       <p className="text-2xl font-extrabold">RESULT DISPUTED</p>
       <p className="text-[0.8125rem] leading-relaxed">
         Reason: {match.dispute_reason ?? "Not specified"}. No pips, ARR or win/loss changes are applied until this is resolved.
       </p>
-      <p className="border-t border-white/35 pt-3 text-[0.625rem] font-semibold tracking-[0.12em] uppercase">
+      <p className="border-t border-rally-foreground/35 pt-3 text-[0.625rem] font-semibold tracking-[0.12em] uppercase">
         All four players have been notified. AIR/Rally support will review this match.
       </p>
-      <Link href="/profile/rank" className="mt-1 self-start border-2 border-white px-4 py-2.5 text-[0.625rem] font-bold tracking-[0.1em] uppercase">
+      <Link href="/profile/rank" className="mt-1 self-start border-2 border-rally-foreground px-4 py-2.5 text-[0.625rem] font-bold tracking-[0.1em] uppercase">
         Back to ranked
       </Link>
     </div>

@@ -86,7 +86,7 @@ export function LiveScoreboard({ match, currentUserId }: { match: RankedMatchDet
             type="button"
             disabled={isPending}
             onClick={() => run(() => recordPoint(createClient(), match.id, "a"))}
-            className="w-full bg-rally py-6 text-left text-[1.0625rem] font-extrabold tracking-[0.06em] text-white uppercase active:bg-primary-pressed disabled:opacity-60"
+            className="w-full bg-rally py-6 text-left text-[1.0625rem] font-extrabold tracking-[0.06em] text-rally-foreground uppercase active:bg-primary-pressed disabled:opacity-60"
           >
             Team A won the rally
           </button>
