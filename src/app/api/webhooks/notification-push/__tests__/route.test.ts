@@ -24,25 +24,41 @@ function fakeRequest(body: unknown, secret: string | null = SECRET) {
   });
 }
 
-/** Service-role client stub: select().eq() resolves tokens, delete().in() records prunes. */
-function mockSupabase(tokens: { token: string }[] | null, options: { selectError?: Error } = {}) {
+/**
+ * Service-role client stub. device_push_tokens: select().eq() resolves
+ * tokens, delete().in() records prunes. notifications: the unread count,
+ * select().eq().is() resolving `unread` (or failing).
+ */
+function mockSupabase(
+  tokens: { token: string }[] | null,
+  options: { selectError?: Error; unread?: number; unreadError?: Error } = {}
+) {
   const deletedTokens: string[][] = [];
+  const countQuery = { eq: jest.fn(), is: jest.fn() };
+  countQuery.eq.mockReturnValue(countQuery);
+  countQuery.is.mockResolvedValue(
+    options.unreadError ? { count: null, error: options.unreadError } : { count: options.unread ?? 0, error: null }
+  );
   mockCreateServiceRoleClient.mockReturnValue({
-    from: jest.fn().mockReturnValue({
-      select: jest.fn().mockReturnValue({
-        eq: jest.fn().mockResolvedValue(
-          options.selectError ? { data: null, error: options.selectError } : { data: tokens, error: null }
-        ),
-      }),
-      delete: jest.fn().mockReturnValue({
-        in: jest.fn().mockImplementation((_column: string, values: string[]) => {
-          deletedTokens.push(values);
-          return Promise.resolve({ error: null });
-        }),
-      }),
-    }),
+    from: jest.fn().mockImplementation((table: string) =>
+      table === "notifications"
+        ? { select: jest.fn().mockReturnValue(countQuery) }
+        : {
+            select: jest.fn().mockReturnValue({
+              eq: jest.fn().mockResolvedValue(
+                options.selectError ? { data: null, error: options.selectError } : { data: tokens, error: null }
+              ),
+            }),
+            delete: jest.fn().mockReturnValue({
+              in: jest.fn().mockImplementation((_column: string, values: string[]) => {
+                deletedTokens.push(values);
+                return Promise.resolve({ error: null });
+              }),
+            }),
+          }
+    ),
   } as never);
-  return { deletedTokens };
+  return { deletedTokens, countQuery };
 }
 
 function mockExpoResponse(tickets: Array<{ status: string; details?: { error?: string } }>) {
@@ -173,5 +189,29 @@ describe("POST /api/webhooks/notification-push", () => {
     // The chunk's tickets are unknown, so nothing is pruned and the count
     // still reflects the attempt — what matters is the 200.
     expect(await response.json()).toEqual({ received: true, pushed: 1, pruned: 0 });
+  });
+
+  it("carries the user's unread count as the iOS app-icon badge", async () => {
+    const { countQuery } = mockSupabase([{ token: "ExponentPushToken[aaa]" }], { unread: 4 });
+    global.fetch = mockExpoResponse([{ status: "ok" }]);
+
+    await POST(fakeRequest(INSERT_PAYLOAD));
+
+    const sent = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(sent[0].badge).toBe(4);
+    // Counted for the notified user only, unread only.
+    expect(countQuery.eq).toHaveBeenCalledWith("user_id", "user-1");
+    expect(countQuery.is).toHaveBeenCalledWith("read_at", null);
+  });
+
+  it("still sends the push, just without a badge, when the count fails", async () => {
+    mockSupabase([{ token: "ExponentPushToken[aaa]" }], { unreadError: new Error("count failed") });
+    global.fetch = mockExpoResponse([{ status: "ok" }]);
+
+    const response = await POST(fakeRequest(INSERT_PAYLOAD));
+
+    expect(await response.json()).toEqual({ received: true, pushed: 1, pruned: 0 });
+    const sent = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(sent[0]).not.toHaveProperty("badge");
   });
 });
